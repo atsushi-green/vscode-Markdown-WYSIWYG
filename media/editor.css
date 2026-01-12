@@ -1,0 +1,727 @@
+/* エディタのグローバルスタイル */
+body {
+    padding: 0;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--vscode-editor-foreground);
+    background-color: var(--vscode-editor-background);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ツールバー */
+.toolbar {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    border-bottom: 1px solid var(--vscode-editorGroup-border);
+    flex-shrink: 0;
+}
+
+.toolbar-btn {
+    background-color: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: none;
+    padding: 6px 12px;
+    margin-right: 4px;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 13px;
+    transition: background-color 0.2s;
+}
+
+.toolbar-btn:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
+.toolbar-btn:active {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.toolbar-separator {
+    width: 1px;
+    height: 20px;
+    background-color: var(--vscode-editorGroup-border);
+    margin: 0 8px;
+}
+
+.toolbar-spacer {
+    flex: 1;
+}
+
+.toggle-btn {
+    margin-left: auto;
+    margin-right: 0;
+}
+
+.toggle-btn.active {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+/* RAWエディタ */
+#rawEditor {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    outline: none;
+    min-height: 100%;
+    box-sizing: border-box;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--vscode-editor-foreground);
+    background-color: var(--vscode-editor-background);
+    border: none;
+    resize: none;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+#rawEditor:focus {
+    outline: none;
+}
+
+/* エディタ本体 */
+#editor {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    outline: none;
+    min-height: 100%;
+    box-sizing: border-box;
+}
+
+#editor:focus {
+    outline: none;
+}
+
+/* Markdownスタイル */
+#editor h1 {
+    font-size: 2em;
+    font-weight: 600;
+    margin: 0.67em 0;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--vscode-editorGroup-border);
+}
+
+#editor h2 {
+    font-size: 1.5em;
+    font-weight: 600;
+    margin: 0.75em 0;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--vscode-editorGroup-border);
+}
+
+#editor h3 {
+    font-size: 1.25em;
+    font-weight: 600;
+    margin: 0.83em 0;
+}
+
+#editor h4 {
+    font-size: 1em;
+    font-weight: 600;
+    margin: 1em 0;
+}
+
+#editor h5 {
+    font-size: 0.875em;
+    font-weight: 600;
+    margin: 1.33em 0;
+}
+
+#editor h6 {
+    font-size: 0.85em;
+    font-weight: 600;
+    margin: 1.67em 0;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* 見出しの#マーク */
+#editor .heading-hash {
+    color: var(--vscode-descriptionForeground);
+    font-weight: 400;
+    opacity: 0.6;
+}
+
+#editor p {
+    margin: 1em 0;
+}
+
+#editor strong {
+    font-weight: 600;
+}
+
+#editor em {
+    font-style: italic;
+}
+
+#editor a {
+    color: var(--vscode-textLink-foreground);
+    text-decoration: none;
+}
+
+#editor a:hover {
+    text-decoration: underline;
+}
+
+#editor code {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    background-color: var(--vscode-textCodeBlock-background);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+#editor pre {
+    background-color: var(--vscode-textCodeBlock-background);
+    padding: 16px;
+    border-radius: 3px;
+    overflow-x: auto;
+    margin: 1em 0;
+}
+
+#editor pre code {
+    background-color: transparent;
+    padding: 0;
+    display: block;
+    white-space: pre;
+    line-height: 1.5;
+}
+
+/* highlight.jsのカスタムスタイル調整 */
+#editor pre code.hljs {
+    background-color: transparent;
+    padding: 0;
+}
+
+/* highlight.js vs2015 theme - シンタックスハイライトの色定義 */
+/* キーワード（if, for, def, function, etc.） */
+#editor .hljs-keyword,
+#editor .hljs-selector-tag,
+#editor .hljs-literal,
+#editor .hljs-section,
+#editor .hljs-link {
+    color: #569cd6 !important;
+}
+
+#editor .hljs-function .hljs-keyword {
+    color: #569cd6 !important;
+}
+
+#editor .hljs-subst {
+    color: #dcdcdc !important;
+}
+
+/* 文字列 */
+#editor .hljs-string,
+#editor .hljs-title,
+#editor .hljs-name,
+#editor .hljs-type,
+#editor .hljs-attribute,
+#editor .hljs-symbol,
+#editor .hljs-bullet,
+#editor .hljs-addition,
+#editor .hljs-variable,
+#editor .hljs-template-tag,
+#editor .hljs-template-variable {
+    color: #ce9178 !important;
+}
+
+/* コメント */
+#editor .hljs-comment,
+#editor .hljs-quote,
+#editor .hljs-deletion,
+#editor .hljs-meta {
+    color: #6a9955 !important;
+    font-style: italic;
+}
+
+#editor .hljs-keyword,
+#editor .hljs-selector-tag,
+#editor .hljs-literal,
+#editor .hljs-title,
+#editor .hljs-section,
+#editor .hljs-doctag,
+#editor .hljs-type,
+#editor .hljs-name,
+#editor .hljs-strong {
+    font-weight: bold;
+}
+
+#editor .hljs-emphasis {
+    font-style: italic;
+}
+
+/* ビルトイン関数（print, len, etc.） */
+#editor .hljs-built_in {
+    color: #4ec9b0 !important;
+}
+
+/* 数値 */
+#editor .hljs-number {
+    color: #b5cea8 !important;
+}
+
+/* 関数パラメータ */
+#editor .hljs-params {
+    color: #9cdcfe !important;
+}
+
+/* 演算子 */
+#editor .hljs-operator {
+    color: #d4d4d4 !important;
+}
+
+/* 関数名 */
+#editor .hljs-title.function_,
+#editor .hljs-function .hljs-title {
+    color: #dcdcaa !important;
+}
+
+/* クラス名 */
+#editor .hljs-title.class_,
+#editor .hljs-class .hljs-title {
+    color: #4ec9b0 !important;
+}
+
+/* 変数 */
+#editor .hljs-variable.language_,
+#editor .hljs-variable {
+    color: #9cdcfe !important;
+}
+
+/* 正規表現 */
+#editor .hljs-regexp {
+    color: #d16969 !important;
+}
+
+/* プロパティ */
+#editor .hljs-property {
+    color: #9cdcfe !important;
+}
+
+/* 句読点 */
+#editor .hljs-punctuation {
+    color: #d4d4d4 !important;
+}
+
+/* タグ（HTML/XML） */
+#editor .hljs-tag {
+    color: #569cd6 !important;
+}
+
+/* アトリビュート */
+#editor .hljs-attr {
+    color: #9cdcfe !important;
+}
+
+/* コードブロックの言語ラベル表示（オプション）*/
+#editor pre code[data-lang]::before {
+    content: attr(data-lang);
+    display: block;
+    text-align: right;
+    font-size: 0.75em;
+    color: var(--vscode-descriptionForeground);
+    margin-bottom: 0.5em;
+    opacity: 0.7;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+#editor blockquote {
+    margin: 1em 0;
+    padding-left: 1em;
+    border-left: 4px solid var(--vscode-editorGroup-border);
+    color: var(--vscode-descriptionForeground);
+}
+
+#editor ul,
+#editor ol {
+    margin: 1em 0;
+    padding-left: 2em;
+}
+
+#editor li {
+    margin: 0.5em 0;
+}
+
+#editor ul {
+    list-style-type: disc;
+}
+
+#editor ol {
+    list-style-type: decimal;
+}
+
+#editor hr {
+    border: none;
+    border-top: 1px solid var(--vscode-editorGroup-border);
+    margin: 2em 0;
+}
+
+#editor img {
+    max-width: 100%;
+    height: auto;
+}
+
+#editor table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+}
+
+#editor th,
+#editor td {
+    border: 1px solid var(--vscode-editorGroup-border);
+    padding: 8px 12px;
+    text-align: left;
+}
+
+#editor th {
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    font-weight: 600;
+}
+
+/* スクロールバー */
+#editor::-webkit-scrollbar {
+    width: 10px;
+}
+
+#editor::-webkit-scrollbar-track {
+    background: var(--vscode-editor-background);
+}
+
+#editor::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background);
+    border-radius: 5px;
+}
+
+#editor::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+/* 選択範囲のスタイル */
+#editor ::selection {
+    background-color: var(--vscode-editor-selectionBackground);
+}
+
+/* 検索ウィジェット */
+.find-widget {
+    position: absolute;
+    top: 48px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px;
+    background-color: var(--vscode-editorWidget-background, #252526);
+    border: 1px solid var(--vscode-editorWidget-border, #454545);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.find-input-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.find-input {
+    width: 200px;
+    padding: 4px 8px;
+    padding-right: 60px;
+    background-color: var(--vscode-input-background, #3c3c3c);
+    color: var(--vscode-input-foreground, #cccccc);
+    border: 1px solid var(--vscode-input-border, #3c3c3c);
+    border-radius: 2px;
+    font-size: 13px;
+    outline: none;
+}
+
+.find-input:focus {
+    border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.find-count {
+    position: absolute;
+    right: 8px;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground, #808080);
+    pointer-events: none;
+}
+
+.find-options {
+    display: flex;
+    gap: 2px;
+}
+
+.find-option-btn {
+    width: 28px;
+    height: 24px;
+    padding: 0;
+    background-color: transparent;
+    color: var(--vscode-foreground, #cccccc);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: monospace;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.find-option-btn:hover {
+    background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+    opacity: 1;
+}
+
+.find-option-btn.active {
+    background-color: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #ffffff);
+    opacity: 1;
+}
+
+.find-actions {
+    display: flex;
+    gap: 2px;
+    margin-left: 4px;
+}
+
+.find-action-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background-color: transparent;
+    color: var(--vscode-foreground, #cccccc);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.find-action-btn:hover {
+    background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+    opacity: 1;
+}
+
+/* 検索ハイライト */
+.find-highlight {
+    background-color: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, 0.33));
+    border-radius: 2px;
+}
+
+.find-highlight.current {
+    background-color: var(--vscode-editor-findMatchBackground, rgba(255, 215, 0, 0.5));
+    outline: 1px solid var(--vscode-editor-findMatchBorder, #f0a400);
+}
+
+/* ========== Mermaidスタイル ========== */
+
+/* Mermaidコンテナ */
+.mermaid-container {
+    margin: 1em 0;
+    border: 1px solid var(--vscode-editorGroup-border);
+    border-radius: 6px;
+    overflow: hidden;
+    background-color: var(--vscode-editor-background);
+}
+
+/* Mermaidツールバー */
+.mermaid-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    border-bottom: 1px solid var(--vscode-editorGroup-border);
+}
+
+.mermaid-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--vscode-foreground);
+    opacity: 0.8;
+}
+
+.mermaid-toolbar-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+.mermaid-view-btn {
+    width: 28px;
+    height: 24px;
+    padding: 0;
+    background-color: transparent;
+    color: var(--vscode-foreground);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 14px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: all 0.2s;
+}
+
+.mermaid-view-btn:hover {
+    background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+    opacity: 1;
+}
+
+.mermaid-view-btn.active {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    opacity: 1;
+}
+
+/* 分割ビュー */
+.mermaid-split-view {
+    display: flex;
+    flex-direction: row;
+    min-height: 150px;
+}
+
+.mermaid-split-view.split-mode {
+    flex-direction: row;
+}
+
+.mermaid-split-view.split-mode .mermaid-source-panel,
+.mermaid-split-view.split-mode .mermaid-preview-panel {
+    flex: 1;
+}
+
+/* ソースパネル */
+.mermaid-source-panel {
+    flex: 0 0 40%;
+    min-width: 200px;
+    max-width: 50%;
+    border-right: 1px solid var(--vscode-editorGroup-border);
+    background-color: var(--vscode-textCodeBlock-background);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.mermaid-source-code {
+    margin: 0;
+    padding: 12px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--vscode-editor-foreground);
+    white-space: pre;
+    word-wrap: break-word;
+    width: 100%;
+    height: 100%;
+    min-height: 150px;
+    box-sizing: border-box;
+    border: none;
+    background-color: var(--vscode-textCodeBlock-background);
+    resize: none;
+    outline: none;
+}
+
+.mermaid-source-code:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+/* プレビューパネル */
+.mermaid-preview-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background-color: var(--vscode-editor-background);
+    overflow: auto;
+    min-height: 150px;
+    position: relative;
+}
+
+/* Mermaid SVG */
+.mermaid-svg {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Mermaidエラー */
+.mermaid-error {
+    color: var(--vscode-errorForeground, #f44747);
+    background-color: var(--vscode-inputValidation-errorBackground, rgba(244, 71, 71, 0.1));
+    border: 1px solid var(--vscode-inputValidation-errorBorder, #f44747);
+    padding: 12px 16px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+/* 編集中のインラインエラー表示 */
+.mermaid-error-inline {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    z-index: 10;
+    padding: 6px 12px;
+    font-size: 12px;
+    opacity: 0.95;
+}
+
+/* Mermaidコンテキストメニュー */
+.mermaid-context-menu {
+    position: fixed;
+    z-index: 10000;
+    background-color: var(--vscode-menu-background, #252526);
+    border: 1px solid var(--vscode-menu-border, #454545);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    padding: 4px 0;
+    min-width: 180px;
+}
+
+.mermaid-menu-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--vscode-menu-foreground, #cccccc);
+    transition: background-color 0.1s;
+}
+
+.mermaid-menu-item:hover {
+    background-color: var(--vscode-menu-selectionBackground, #04395e);
+    color: var(--vscode-menu-selectionForeground, #ffffff);
+}
+
+/* トースト通知 */
+.mermaid-toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background-color: var(--vscode-notifications-background, #252526);
+    color: var(--vscode-notifications-foreground, #cccccc);
+    padding: 12px 24px;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    font-size: 13px;
+    opacity: 0;
+    transition: all 0.3s ease;
+    z-index: 10001;
+}
+
+.mermaid-toast.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+}
+
+/* 隠されたMermaidソースブロック */
+pre.mermaid-source {
+    display: none !important;
+}
