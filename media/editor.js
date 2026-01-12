@@ -351,7 +351,7 @@ function hideMermaidContextMenu() {
 }
 
 // SVGをPNG Blobに変換
-async function svgToPngBlob(svgElement, scale = 2) {
+async function svgToPngBlob(svgElement, scale = 4) {
     return new Promise(async (resolve, reject) => {
         try {
             // html2canvasが利用可能か確認
@@ -361,7 +361,7 @@ async function svgToPngBlob(svgElement, scale = 2) {
                 return;
             }
 
-            console.log('[Mermaid] Starting PNG conversion...');
+            console.log('[Mermaid] Starting PNG conversion with scale:', scale);
             console.log('[Mermaid] SVGElement:', svgElement);
 
             // SVGの親要素（プレビューパネル）
@@ -392,93 +392,143 @@ async function svgToPngBlob(svgElement, scale = 2) {
                 left: containerRect.left
             });
 
+            // デバイスピクセル比も考慮してさらに高画質化
+            const devicePixelRatio = window.devicePixelRatio || 1;
+            const effectiveScale = scale * Math.max(1, devicePixelRatio);
+
+            console.log(`[Mermaid] Device pixel ratio: ${devicePixelRatio}, Effective scale: ${effectiveScale}`);
+
             // プレビューパネルのみをキャプチャ
-            console.log('[Mermaid] Capturing container with html2canvas...');
-            const fullCanvas = await html2canvas(container, {
-                scale: scale,
-                backgroundColor: '#ffffff',
-                logging: true,
-                useCORS: true,
-                allowTaint: false
-            });
+            // 実際のコンテンツの境界を取得（すべての子要素のbboxを統合）
+            let contentBBox = { x: Infinity, y: Infinity, width: 0, height: 0 };
+            let hasContent = false;
 
-            console.log(`[Mermaid] Full canvas created: ${fullCanvas.width}x${fullCanvas.height}`);
-
-            // コンテナ内でのSVGの相対位置を計算
-            // ツールバーの高さを考慮する必要があるかもしれない
-            const toolbar = container.previousElementSibling;
-            let toolbarHeight = 0;
-            if (toolbar && toolbar.classList.contains('mermaid-toolbar')) {
-                toolbarHeight = toolbar.getBoundingClientRect().height;
-                console.log(`[Mermaid] Toolbar height: ${toolbarHeight}`);
-            }
-
-            // SVGの正確なサイズ（viewBoxまたはbbox）
-            let svgWidth, svgHeight;
             try {
-                const bbox = svgElement.getBBox();
-                svgWidth = bbox.width;
-                svgHeight = bbox.height;
-                console.log(`[Mermaid] SVG bbox: ${svgWidth}x${svgHeight}`);
+                // SVG内のすべての描画要素のbboxを取得
+                const children = svgElement.querySelectorAll('g, rect, circle, ellipse, line, polyline, polygon, path, text');
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+                children.forEach(child => {
+                    try {
+                        const bbox = child.getBBox();
+                        if (bbox.width > 0 && bbox.height > 0) {
+                            minX = Math.min(minX, bbox.x);
+                            minY = Math.min(minY, bbox.y);
+                            maxX = Math.max(maxX, bbox.x + bbox.width);
+                            maxY = Math.max(maxY, bbox.y + bbox.height);
+                            hasContent = true;
+                        }
+                    } catch (e) {
+                        // 個別要素のbbox取得失敗は無視
+                    }
+                });
+
+                if (hasContent) {
+                    contentBBox = {
+                        x: minX,
+                        y: minY,
+                        width: maxX - minX,
+                        height: maxY - minY
+                    };
+                    console.log(`[Mermaid] Content bbox from children: x=${contentBBox.x}, y=${contentBBox.y}, width=${contentBBox.width}, height=${contentBBox.height}`);
+                } else {
+                    // フォールバック: SVG全体のbboxを使用
+                    contentBBox = svgElement.getBBox();
+                    console.log(`[Mermaid] Using SVG bbox as fallback: ${contentBBox.width}x${contentBBox.height}`);
+                }
             } catch (e) {
-                // getBBoxが失敗した場合、clientWidthを使用
-                svgWidth = svgElement.clientWidth;
-                svgHeight = svgElement.clientHeight;
-                console.log(`[Mermaid] Using clientWidth/Height: ${svgWidth}x${svgHeight}`);
+                console.error('[Mermaid] Error getting bbox:', e);
+                // 最終フォールバック: clientサイズを使用
+                contentBBox = {
+                    x: 0,
+                    y: 0,
+                    width: svgElement.clientWidth,
+                    height: svgElement.clientHeight
+                };
+                console.log(`[Mermaid] Using client size as fallback: ${contentBBox.width}x${contentBBox.height}`);
             }
 
-            // SVGのコンテナ内での位置（実際のpaddingとmarginを考慮）
-            const containerStyle = window.getComputedStyle(container);
-            const containerPaddingLeft = parseFloat(containerStyle.paddingLeft) || 0;
-            const containerPaddingTop = parseFloat(containerStyle.paddingTop) || 0;
+            // SVG要素だけをhtml2canvasでキャプチャ（コンテナではなく）
+            console.log('[Mermaid] Capturing SVG element directly with html2canvas...');
 
-            // SVGのマージン
-            const svgMarginLeft = parseFloat(svgStyle.marginLeft) || 0;
-            const svgMarginTop = parseFloat(svgStyle.marginTop) || 0;
+            // 一時的なコンテナを作成してSVGのクローンを配置
+            const tempContainer = document.createElement('div');
+            tempContainer.style.position = 'absolute';
+            tempContainer.style.left = '-9999px';
+            tempContainer.style.top = '-9999px';
+            tempContainer.style.width = `${contentBBox.width}px`;
+            tempContainer.style.height = `${contentBBox.height}px`;
+            tempContainer.style.overflow = 'hidden';
+            document.body.appendChild(tempContainer);
 
-            const offsetX = (containerPaddingLeft + svgMarginLeft) * scale;
-            const offsetY = (containerPaddingTop + svgMarginTop) * scale;
-            const scaledWidth = svgWidth * scale;
-            const scaledHeight = svgHeight * scale;
+            // SVGのクローンを作成
+            const svgClone = svgElement.cloneNode(true);
+            svgClone.setAttribute('width', contentBBox.width);
+            svgClone.setAttribute('height', contentBBox.height);
+            svgClone.setAttribute('viewBox', `${contentBBox.x} ${contentBBox.y} ${contentBBox.width} ${contentBBox.height}`);
+            tempContainer.appendChild(svgClone);
 
-            console.log(`[Mermaid] Calculated offsets:`, {
-                containerPaddingLeft,
-                containerPaddingTop,
-                svgMarginLeft,
-                svgMarginTop,
-                offsetX,
-                offsetY,
-                scaledWidth,
-                scaledHeight
+            const fullCanvas = await html2canvas(tempContainer, {
+                scale: effectiveScale,
+                backgroundColor: '#ffffff',
+                logging: false,
+                useCORS: true,
+                allowTaint: false,
+                width: contentBBox.width,
+                height: contentBBox.height,
+                windowWidth: contentBBox.width,
+                windowHeight: contentBBox.height
             });
 
-            // トリミング
-            const trimmedCanvas = document.createElement('canvas');
-            trimmedCanvas.width = scaledWidth;
-            trimmedCanvas.height = scaledHeight;
+            // 一時コンテナを削除
+            document.body.removeChild(tempContainer);
 
-            const ctx = trimmedCanvas.getContext('2d');
+            console.log(`[Mermaid] Canvas created: ${fullCanvas.width}x${fullCanvas.height}`);
+            console.log(`[Mermaid] Content dimensions: ${contentBBox.width}x${contentBBox.height}`);
+
+            // 均等な余白を追加（全ての図に適用）
+            const padding = 20 * effectiveScale; // 20pxの余白
+            const finalWidth = fullCanvas.width + padding * 2;
+            const finalHeight = fullCanvas.height + padding * 2;
+
+            console.log(`[Mermaid] Final dimensions with padding: ${finalWidth}x${finalHeight}`);
+
+            // 最終キャンバス（余白付き）
+            const trimmedCanvas = document.createElement('canvas');
+            trimmedCanvas.width = finalWidth;
+            trimmedCanvas.height = finalHeight;
+
+            const ctx = trimmedCanvas.getContext('2d', {
+                alpha: false,
+                desynchronized: false,
+                colorSpace: 'srgb',
+                willReadFrequently: false
+            });
             if (!ctx) {
                 throw new Error('Canvas context not available');
             }
 
+            // 高画質レンダリング設定
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+
             // 背景を白で塗りつぶす
             ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, scaledWidth, scaledHeight);
+            ctx.fillRect(0, 0, finalWidth, finalHeight);
 
-            // 元のCanvasから図の部分をコピー
-            console.log(`[Mermaid] Drawing image from full canvas at offset (${offsetX}, ${offsetY})`);
+            // キャプチャしたCanvasを中央に配置してコピー
+            console.log(`[Mermaid] Drawing canvas at position (${padding}, ${padding})`);
             ctx.drawImage(
                 fullCanvas,
-                offsetX, offsetY,
-                scaledWidth, scaledHeight,
-                0, 0,
-                scaledWidth, scaledHeight
+                0, 0, fullCanvas.width, fullCanvas.height,
+                padding, padding, fullCanvas.width, fullCanvas.height
             );
 
+            // PNG形式で最高品質で出力（PNGは無損失なので品質パラメータは不要）
             trimmedCanvas.toBlob((blob) => {
                 if (blob) {
                     console.log(`[Mermaid] ✅ PNG successfully created: ${blob.size} bytes, ${trimmedCanvas.width}x${trimmedCanvas.height}`);
+                    console.log(`[Mermaid] Final resolution: ${trimmedCanvas.width}x${trimmedCanvas.height}px (scale: ${scale}, effective: ${effectiveScale}x)`);
                     resolve(blob);
                 } else {
                     console.error('[Mermaid] ❌ Failed to create blob');
