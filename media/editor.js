@@ -316,7 +316,8 @@ async function renderMermaidDiagrams() {
                 }
 
                 // 直接マークダウンをVSCodeに送信（updateDocument()を呼ばない）
-                const markdown = htmlToMarkdown(editor.innerHTML);
+                const cleanHtml = getCleanHtmlFromEditor();
+                const markdown = htmlToMarkdown(cleanHtml);
                 const normalized = normalizeEol(markdown);
                 lastSentMarkdown = normalized;
                 vscode.postMessage({
@@ -1244,7 +1245,8 @@ function tableToMarkdown(table) {
 function updateDocumentFromTable() {
     if (isUpdating || isEditingTable) return;
 
-    const markdown = htmlToMarkdown(editor.innerHTML);
+    const cleanHtml = getCleanHtmlFromEditor();
+    const markdown = htmlToMarkdown(cleanHtml);
     if (markdown !== lastSentMarkdown) {
         lastSentMarkdown = markdown;
         vscode.postMessage({
@@ -1365,7 +1367,9 @@ editor.addEventListener('input', () => {
     // Mermaid図を更新
     updateMermaidDiagrams();
 
-    const markdown = htmlToMarkdown(editor.innerHTML);
+    // クリーンなHTMLを取得してMarkdownに変換
+    const cleanHtml = getCleanHtmlFromEditor();
+    const markdown = htmlToMarkdown(cleanHtml);
     const normalized = normalizeEol(markdown);
     // 正規化前のmarkdownを保存して、Raw切り替え時の改行損失を防ぐ
     lastSentMarkdown = normalized;
@@ -1401,7 +1405,8 @@ window.addEventListener('message', event => {
             }
 
             // 現在のエディタ内容をMarkdown化し、同一なら何もしない
-            const current = normalizeEol(htmlToMarkdown(editor.innerHTML));
+            const currentCleanHtml = getCleanHtmlFromEditor();
+            const current = normalizeEol(htmlToMarkdown(currentCleanHtml));
             if (incoming === current) {
                 return;
             }
@@ -1454,7 +1459,8 @@ function toggleRawMode() {
         cleanupTables();
 
         // lastSentMarkdownを使用して、元の改行を保持
-        const markdown = lastSentMarkdown || htmlToMarkdown(editor.innerHTML);
+        const cleanHtml = getCleanHtmlFromEditor();
+        const markdown = lastSentMarkdown || htmlToMarkdown(cleanHtml);
         rawEditor.value = markdown;
         editor.style.display = 'none';
         rawEditor.style.display = 'block';
@@ -2037,8 +2043,10 @@ function markdownToHtml(markdown) {
     // インラインコード
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 
-    // 引用
+    // 引用（連続する引用行を1つのblockquoteにまとめる）
     html = html.replace(/^&gt; (.*$)/gim, '<blockquote>$1</blockquote>');
+    // 連続するblockquoteをマージ
+    html = html.replace(/<\/blockquote>\s*<blockquote>/g, '<br>');
 
     // リスト（番号なし）
     html = html.replace(/^\* (.*$)/gim, '<ul><li>$1</li></ul>');
@@ -2134,9 +2142,95 @@ function convertTableToMarkdown(tableContent) {
     return markdown;
 }
 
+// エディタDOMからクリーンなHTMLを取得（UI要素を除去し、隠されたソースを復元）
+function getCleanHtmlFromEditor() {
+    // エディタのDOMをクローン（元のDOMを変更しない）
+    const clone = editor.cloneNode(true);
+
+    // Mermaid: 隠されているソースブロックを復元し、UIコンテナを削除
+    clone.querySelectorAll('pre.mermaid-source').forEach(pre => {
+        const diagramId = pre.getAttribute('data-mermaid-id');
+
+        // 元のエディタから編集中のtextareaの値を取得
+        const originalContainer = editor.querySelector(`.mermaid-container[data-mermaid-id="${diagramId}"]`);
+        if (originalContainer) {
+            const textarea = originalContainer.querySelector('.mermaid-source-code');
+            if (textarea && textarea.value) {
+                const codeElement = pre.querySelector('code');
+                if (codeElement) {
+                    codeElement.textContent = textarea.value;
+                }
+            }
+        }
+
+        // クローン内のコンテナを削除
+        const cloneContainer = pre.nextElementSibling;
+        if (cloneContainer && cloneContainer.classList.contains('mermaid-container')) {
+            cloneContainer.remove();
+        }
+
+        // ソースブロックを表示状態に戻す
+        pre.style.display = '';
+        pre.classList.remove('mermaid-source');
+        pre.removeAttribute('data-mermaid-id');
+    });
+
+    // Mermaidコンテナが残っていれば削除
+    clone.querySelectorAll('.mermaid-container').forEach(el => el.remove());
+
+    // テーブル: ツールバーとボタンを削除、テーブルセルの内容を正規化
+    clone.querySelectorAll('.table-toolbar').forEach(el => el.remove());
+    clone.querySelectorAll('.table-container button').forEach(el => el.remove());
+
+    // すべてのボタン要素を削除
+    clone.querySelectorAll('button').forEach(el => el.remove());
+
+    // テーブルセルのcontenteditable属性を削除
+    clone.querySelectorAll('[contenteditable]').forEach(el => {
+        el.removeAttribute('contenteditable');
+    });
+
+    // テーブルコンテナをアンラップ（テーブル自体は残す）
+    clone.querySelectorAll('.table-container').forEach(container => {
+        const table = container.querySelector('table');
+        if (table) {
+            container.replaceWith(table);
+        }
+    });
+
+    return clone.innerHTML;
+}
+
 // HTMLからMarkdownへの変換
 function htmlToMarkdown(html) {
     let markdown = html.replace(new RegExp(ZERO_WIDTH, 'g'), '');
+
+    // ========== コードブロックを最初に保護（他の処理で破壊されないように） ==========
+    const codeBlockPlaceholders = [];
+    markdown = markdown.replace(/<pre[^>]*><code([^>]*)>([\s\S]*?)<\/code><\/pre>/gi, (match, attrs, content) => {
+        const languageFromData = /data-lang="([^"]+)"/i.exec(attrs);
+        const languageFromClass = /class="[^"]*language-([^\s"]+)/i.exec(attrs);
+        const language = (languageFromData?.[1] || languageFromClass?.[1] || '').trim();
+
+        // highlight.jsによって追加されたHTMLタグを除去してプレーンテキストに戻す
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = content;
+        const plainText = tempDiv.textContent || tempDiv.innerText || '';
+
+        // コードブロック内の改行はそのまま保持
+        let codeBody = plainText.replace(/<br\s*\/?>\n?/gi, '\n');
+        // 末尾の改行を確保（閉じフェンスが前の行にくっつかないように）
+        if (!codeBody.endsWith('\n')) {
+            codeBody += '\n';
+        }
+        const fence = language
+            ? `\`\`\`${language}\n${codeBody}\`\`\`\n\n`
+            : `\`\`\`\n${codeBody}\`\`\`\n\n`;
+
+        const placeholder = `\u0000CODEBLOCK${codeBlockPlaceholders.length}\u0000`;
+        codeBlockPlaceholders.push(fence);
+        return placeholder;
+    });
 
     // heading-hashスパンを削除（#マークはMarkdownに含めるが、spanは削除）
     markdown = markdown.replace(/<span class="heading-hash">[^<]*<\/span>/gi, '');
@@ -2160,29 +2254,23 @@ function htmlToMarkdown(html) {
     // リンク
     markdown = markdown.replace(/<a href="([^"]+)">(.*?)<\/a>/gi, '[$2]($1)');
 
-    // コードブロック（言語指定を保持）
-    markdown = markdown.replace(/<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/gi, (match, attrs, content) => {
-        const languageFromData = /data-lang="([^"]+)"/i.exec(attrs);
-        const languageFromClass = /class="[^"]*language-([^\s"]+)/i.exec(attrs);
-        const language = (languageFromData?.[1] || languageFromClass?.[1] || '').trim();
-
-        // highlight.jsによって追加されたHTMLタグを除去してプレーンテキストに戻す
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = content;
-        const plainText = tempDiv.textContent || tempDiv.innerText || '';
-
-        // コードブロック内の改行はそのまま保持（末尾の改行も削除しない）
-        const codeBody = plainText.replace(/<br\s*\/?>\n?/gi, '\n');
-        // 末尾の改行を削除しない
-        const fence = language
-            ? `\`\`\`${language}\n${codeBody}\`\`\`\n\n`
-            : `\`\`\`\n${codeBody}\`\`\`\n\n`;
-        return fence;
-    });
+    // インラインコード（コードブロックは既に保護済み）
     markdown = markdown.replace(/<code>(.*?)<\/code>/gi, '`$1`');
 
-    // 引用
-    markdown = markdown.replace(/<blockquote>(.*?)<\/blockquote>/gi, '> $1\n\n');
+    // 引用（複数行対応）
+    markdown = markdown.replace(/<blockquote>([\s\S]*?)<\/blockquote>/gi, (match, content) => {
+        // HTMLタグを一時的に改行に変換
+        let text = content
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/p>\s*<p>/gi, '\n')
+            .replace(/<p>(.*?)<\/p>/gi, '$1')
+            .replace(/<[^>]+>/g, ''); // 残りのHTMLタグを除去
+
+        // 各行に「> 」を付ける
+        const lines = text.split('\n');
+        const quotedLines = lines.map(line => '> ' + line.trim()).join('\n');
+        return quotedLines + '\n\n';
+    });
 
     // リスト
     markdown = markdown.replace(/<ul>(.*?)<\/ul>/gis, (match, content) => {
@@ -2190,7 +2278,7 @@ function htmlToMarkdown(html) {
     });
     markdown = markdown.replace(/<ol>(.*?)<\/ol>/gis, (match, content) => {
         let index = 1;
-        return content.replace(/<li>(.*?)<\/li>/gi, () => `${index++}. ${RegExp.$1}\n`);
+        return content.replace(/<li>(.*?)<\/li>/gi, (liMatch, liContent) => `${index++}. ${liContent}\n`);
     });
 
     // テーブルコンテナ内のテーブルを変換
@@ -2223,12 +2311,18 @@ function htmlToMarkdown(html) {
         .replace(/&amp;/g, '&')
         .replace(/&nbsp;/g, ' ');
 
-    // 余分な空行を削除（ただし、末尾の改行は保持）
+    // ========== コードブロックを復元 ==========
+    codeBlockPlaceholders.forEach((block, index) => {
+        const placeholder = `\u0000CODEBLOCK${index}\u0000`;
+        markdown = markdown.replace(placeholder, block);
+    });
+
+    // 余分な空行を削除（コードブロック復元後に実行）
     markdown = markdown.replace(/\n{3,}/g, '\n\n');
 
     // 末尾の余分な空行を削除しつつ、最後の改行1つは保持
-    markdown = markdown.replace(/\n+$/g, (match) => {
-        return match.length > 0 ? '\n' : '';
+    markdown = markdown.replace(/\n+$/g, (m) => {
+        return m.length > 0 ? '\n' : '';
     });
 
     return markdown;
