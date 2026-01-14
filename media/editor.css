@@ -725,3 +725,112 @@ body {
 pre.mermaid-source {
     display: none !important;
 }
+
+/* ========== テーブルスタイル ========== */
+
+/* テーブルコンテナ */
+.table-container {
+    margin: 1em 0;
+    border: 1px solid var(--vscode-editorGroup-border);
+    border-radius: 6px;
+    overflow: hidden;
+    background-color: var(--vscode-editor-background);
+}
+
+/* テーブルツールバー */
+.table-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    border-bottom: 1px solid var(--vscode-editorGroup-border);
+}
+
+.table-btn {
+    padding: 4px 8px;
+    background-color: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: none;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    white-space: nowrap;
+}
+
+.table-btn:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
+.table-btn-danger {
+    background-color: var(--vscode-inputValidation-errorBackground);
+    color: var(--vscode-errorForeground);
+}
+
+.table-btn-danger:hover {
+    background-color: var(--vscode-inputValidation-errorBorder);
+}
+
+.table-separator {
+    width: 1px;
+    height: 20px;
+    background-color: var(--vscode-editorGroup-border);
+    margin: 0 4px;
+}
+
+/* テーブルラッパー */
+.table-wrapper {
+    overflow: auto;
+    max-width: 100%;
+}
+
+/* テーブル本体 */
+.table-container table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0;
+    background-color: var(--vscode-editor-background);
+}
+
+.table-container th,
+.table-container td {
+    border: 1px solid var(--vscode-editorGroup-border);
+    padding: 8px 12px;
+    min-width: 100px;
+    text-align: left;
+    position: relative;
+    vertical-align: top;
+}
+
+.table-container th {
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    font-weight: 600;
+}
+
+/* 編集可能なセル */
+.table-cell {
+    outline: none;
+    cursor: text;
+    transition: background-color 0.1s;
+}
+
+.table-cell:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.table-cell:focus {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: -2px;
+}
+
+/* 選択されたセル */
+.table-cell-selected {
+    background-color: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+}
+
+/* 通常のテーブル（レンダリングされていないもの）を隠す */
+table:not(.table-rendered) {
+    display: none;
+}
