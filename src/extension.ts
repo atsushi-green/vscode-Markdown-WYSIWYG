@@ -48,6 +48,64 @@ export function activate(context: vscode.ExtensionContext) {
 			await vscode.commands.executeCommand('vscode.openWith', newFile.uri, MarkdownEditorProvider.viewType);
 		})
 	);
+
+	// コマンド: テキストエディタで開く
+	context.subscriptions.push(
+		vscode.commands.registerCommand('markdown-wysiwyg-editor.openAsText', async () => {
+			const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+			if (!activeTab || !(activeTab.input instanceof vscode.TabInputCustom || activeTab.input instanceof vscode.TabInputText)) {
+				vscode.window.showInformationMessage('Markdownファイルを開いてからこのコマンドを実行してください。');
+				return;
+			}
+
+			const uri = activeTab.input instanceof vscode.TabInputCustom
+				? activeTab.input.uri
+				: activeTab.input.uri;
+
+			if (!uri.fsPath.endsWith('.md')) {
+				vscode.window.showWarningMessage('このファイルはMarkdownファイルではありません。');
+				return;
+			}
+
+			// 標準テキストエディタで開く
+			await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
+		})
+	);
+
+	// コマンド: エディタ切り替え (WYSIWYG/テキスト)
+	context.subscriptions.push(
+		vscode.commands.registerCommand('markdown-wysiwyg-editor.toggleEditor', async () => {
+			const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+			if (!activeTab) {
+				vscode.window.showInformationMessage('Markdownファイルを開いてからこのコマンドを実行してください。');
+				return;
+			}
+
+			let uri: vscode.Uri | undefined;
+			let isCustomEditor = false;
+
+			if (activeTab.input instanceof vscode.TabInputCustom) {
+				uri = activeTab.input.uri;
+				isCustomEditor = true;
+			} else if (activeTab.input instanceof vscode.TabInputText) {
+				uri = activeTab.input.uri;
+				isCustomEditor = false;
+			}
+
+			if (!uri || !uri.fsPath.endsWith('.md')) {
+				vscode.window.showWarningMessage('このファイルはMarkdownファイルではありません。');
+				return;
+			}
+
+			if (isCustomEditor) {
+				// WYSIWYGエディタ → テキストエディタ
+				await vscode.commands.executeCommand('vscode.openWith', uri, 'default');
+			} else {
+				// テキストエディタ → WYSIWYGエディタ
+				await vscode.commands.executeCommand('vscode.openWith', uri, MarkdownEditorProvider.viewType);
+			}
+		})
+	);
 }
 
 // This method is called when your extension is deactivated
