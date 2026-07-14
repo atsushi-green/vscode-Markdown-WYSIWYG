@@ -48,7 +48,7 @@
         "displayName": "Markdown WYSIWYG Editor",
         "selector": [
           {
-            "filenamePattern": "*.md"
+            "filenamePattern": "{file,untitled,vscode-remote,vscode-vfs,vscode-userdata,vsls}:/**/*.md"
           }
         ],
         "priority": "default"
