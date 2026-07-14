@@ -235,12 +235,36 @@ npm run watch
 # プロダクションビルド
 npm run package
 
-# テスト実行
-npm run test
+# テスト実行（ユニット + 統合）
+npm run test:all
 
 # VSIXパッケージ作成
 npx @vscode/vsce package
 ```
+
+### テスト
+
+テストは2層構成です。
+
+| コマンド | 種類 | 内容 |
+|---------|------|------|
+| `npm run test:unit` | ユニットテスト | jsdom上でWebviewモジュールを検証（VS Code不要・高速） |
+| `npm run test` | 統合テスト | VS Code本体を起動して拡張機能を検証 |
+| `npm run test:all` | 両方 | ユニットテスト → 統合テストの順に実行 |
+
+**ユニットテスト**（`src/test/unit/`）は、`media/modules/` 配下のWebviewモジュールを
+jsdomで構築したWebview相当のDOM環境に読み込んで検証します。
+
+* `markdown.test.ts`: Markdown⇔HTMLの相互変換（見出し、装飾、リスト、引用、コードブロック、テーブル）、変換の往復で内容が保存されること、HTMLエスケープ
+* `table.test.ts`: テーブルの行・列の追加/削除、キーボードによるセル移動、コピー、Markdownへの書き戻し
+* `search.test.ts`: 検索、各検索オプション（大文字小文字/単語単位/正規表現）、マッチ間のナビゲーション
+* `utils.test.ts`: 改行コード正規化、カーソル位置の保存/復元などの共通処理
+
+**統合テスト**（`src/test/extension.test.ts`）は、`@vscode/test-cli` で実際のVS Codeを
+起動し、コマンドの登録、WYSIWYGエディタとテキストエディタの切り替え、ドキュメントへの
+書き戻し（変更箇所のみの最小範囲編集・改行コードの保持）を検証します。
+
+テストを追加・変更した場合は、`npm run test:all` がすべてパスすることを確認してください。
 
 ### プロジェクト構造
 
@@ -249,7 +273,9 @@ vscode-Markdown-WYSIWYG-/
 ├── src/
 │   ├── extension.ts           # 拡張機能エントリーポイント
 │   ├── markdownEditor.ts      # カスタムエディタ実装
-│   └── test/                  # テストコード
+│   └── test/
+│       ├── extension.test.ts  # 統合テスト（VS Code起動）
+│       └── unit/              # ユニットテスト（jsdom）
 ├── media/
 │   ├── editor.js              # Webview エントリーポイント
 │   ├── modules/               # Webview モジュール群
@@ -267,6 +293,7 @@ vscode-Markdown-WYSIWYG-/
 ├── dist/                      # ビルド出力
 ├── package.json               # パッケージ設定
 ├── tsconfig.json              # TypeScript設定
+├── .vscode-test.mjs           # 統合テスト設定
 └── esbuild.js                 # ビルド設定
 ```
 
