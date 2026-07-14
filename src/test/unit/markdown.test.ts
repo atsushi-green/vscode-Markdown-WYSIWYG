@@ -121,6 +121,30 @@ suite('MarkdownModule', () => {
             assert.strictEqual(html, '<blockquote>引用1<br>引用2</blockquote>');
         });
 
+        test('ネストした引用（> >）を入れ子のblockquoteに変換する', () => {
+            const html = env.markdown.markdownToHtml('> 引用1\n> > ネスト\n> 引用2');
+            assert.strictEqual(
+                html,
+                '<blockquote>引用1<blockquote>ネスト</blockquote>引用2</blockquote>'
+            );
+        });
+
+        test('スペースなしのネスト引用（>>）も1階層深い引用として扱う', () => {
+            const html = env.markdown.markdownToHtml('> 外側\n>> 内側');
+            assert.strictEqual(
+                html,
+                '<blockquote>外側<blockquote>内側</blockquote></blockquote>'
+            );
+        });
+
+        test('2階層以上飛んだネスト引用も安全に処理する', () => {
+            const html = env.markdown.markdownToHtml('> 外側\n> > > 深い');
+            assert.strictEqual(
+                html,
+                '<blockquote>外側<blockquote><blockquote>深い</blockquote></blockquote></blockquote>'
+            );
+        });
+
         test('テーブルをthead/tbody付きで変換する', () => {
             const md = '| 列A | 列B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |';
             const html = env.markdown.markdownToHtml(md);
@@ -222,6 +246,18 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md, '> 引用1\n> 引用2\n');
         });
 
+        test('ネストしたblockquoteを> > 形式でシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<blockquote>引用1<blockquote>ネスト</blockquote>引用2</blockquote>'
+            );
+            assert.strictEqual(md, '> 引用1\n> > ネスト\n> 引用2\n');
+        });
+
+        test('空のblockquoteは出力しない', () => {
+            const md = env.markdown.htmlToMarkdown('<blockquote></blockquote>');
+            assert.strictEqual(md, '');
+        });
+
         test('テーブルをセル内装飾を保持してシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown(
                 '<table><thead><tr><th>列A</th><th>列B</th></tr></thead>' +
@@ -278,6 +314,7 @@ suite('MarkdownModule', () => {
                 '',
                 '> 引用行1',
                 '> 引用行2',
+                '> > ネスト引用',
                 '',
                 '```python',
                 'print("hello")',

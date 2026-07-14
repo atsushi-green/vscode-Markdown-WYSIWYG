@@ -157,6 +157,38 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * 引用行アイテム配列からネストしたblockquote HTMLを構築
+     * items: [{ level, text }]
+     * 同一レベルの連続行は<br>で連結し、深いレベルは入れ子のblockquoteにする。
+     */
+    function buildQuoteHtml(items) {
+        let index = 0;
+
+        function build(level) {
+            let html = '<blockquote>';
+            let needBr = false;
+
+            while (index < items.length && items[index].level >= level) {
+                if (items[index].level > level) {
+                    html += build(level + 1);
+                    needBr = false;
+                } else {
+                    if (needBr) {
+                        html += '<br>';
+                    }
+                    html += convertInline(escapeHtml(items[index].text));
+                    needBr = true;
+                    index++;
+                }
+            }
+
+            return html + '</blockquote>';
+        }
+
+        return items.length ? build(items[0].level) : '';
+    }
+
+    /**
      * MarkdownからHTMLへの変換（行ベースのブロックパーサー）
      */
     function markdownToHtml(markdown) {
@@ -235,18 +267,18 @@ window.MarkdownModule = (function() {
                 continue;
             }
 
-            // --- 引用 ---
+            // --- 引用（ネスト対応: > > で1階層深く） ---
             if (/^> ?/.test(line)) {
-                const quoteLines = [];
-                while (i < lines.length && /^> ?/.test(lines[i])) {
-                    quoteLines.push(lines[i].replace(/^> ?/, ''));
+                const quoteItems = [];
+                while (i < lines.length && /^>/.test(lines[i])) {
+                    const m = /^((?:> ?)+)(.*)$/.exec(lines[i]);
+                    quoteItems.push({
+                        level: (m[1].match(/>/g) || []).length,
+                        text: m[2]
+                    });
                     i++;
                 }
-                out.push(
-                    '<blockquote>' +
-                    quoteLines.map(l => convertInline(escapeHtml(l))).join('<br>') +
-                    '</blockquote>'
-                );
+                out.push(buildQuoteHtml(quoteItems));
                 continue;
             }
 
@@ -419,6 +451,35 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * blockquote要素の内容を行の配列へ直列化（ネスト対応）
+     * 返す行はこのblockquote内での相対表現（ネストした引用は既に「> 」プレフィックス付き）。
+     */
+    function serializeBlockquoteLines(el) {
+        const lines = [];
+        let buffer = '';
+
+        const flush = () => {
+            const text = buffer.replace(/\n{2,}/g, '\n').replace(/^\n+|\n+$/g, '');
+            if (text.trim()) {
+                text.split('\n').forEach(l => lines.push(l.trim()));
+            }
+            buffer = '';
+        };
+
+        el.childNodes.forEach(child => {
+            if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'BLOCKQUOTE') {
+                flush();
+                serializeBlockquoteLines(child).forEach(l => lines.push('> ' + l));
+            } else {
+                buffer += serializeInline(child);
+            }
+        });
+        flush();
+
+        return lines;
+    }
+
+    /**
      * table要素をMarkdownテーブルへ直列化
      * セル内のインライン装飾（太字・リンク等）も保持する
      */
@@ -503,10 +564,11 @@ window.MarkdownModule = (function() {
             case 'OL':
                 return serializeList(el, 0) + '\n';
             case 'BLOCKQUOTE': {
-                const inner = serializeInlineChildren(el)
-                    .replace(/\n{2,}/g, '\n')
-                    .replace(/^\n+|\n+$/g, '');
-                return inner.split('\n').map(l => '> ' + l.trim()).join('\n') + '\n\n';
+                const lines = serializeBlockquoteLines(el);
+                if (!lines.length) {
+                    return '';
+                }
+                return lines.map(l => '> ' + l).join('\n') + '\n\n';
             }
             case 'TABLE':
                 return serializeTable(el);

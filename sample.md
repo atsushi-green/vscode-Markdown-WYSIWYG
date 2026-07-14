@@ -62,6 +62,12 @@ function greet(name) {
 > Markdown WYSIWYG Editorを使えば、
 > 引用も簡単に入力できます。
 
+ネストした引用にも対応しています。
+
+> 外側の引用
+> > 内側の引用
+> 外側に戻る
+
 ### リンク
 
 [VS Code公式サイト](https://code.visualstudio.com/)
