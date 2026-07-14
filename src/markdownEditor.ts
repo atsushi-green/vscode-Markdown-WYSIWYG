@@ -174,6 +174,20 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             </head>
             <body>
                 <div class="toolbar">
+                    <button class="toolbar-btn" data-command="bold" title="太字 (Ctrl+B)"><strong>B</strong></button>
+                    <button class="toolbar-btn" data-command="italic" title="斜体 (Ctrl+I)"><em>I</em></button>
+                    <button class="toolbar-btn" data-command="underline" title="下線 (Ctrl+U)"><u>U</u></button>
+                    <span class="toolbar-separator"></span>
+                    <button class="toolbar-btn" data-command="h1" title="見出し1">H1</button>
+                    <button class="toolbar-btn" data-command="h2" title="見出し2">H2</button>
+                    <button class="toolbar-btn" data-command="h3" title="見出し3">H3</button>
+                    <span class="toolbar-separator"></span>
+                    <button class="toolbar-btn" data-command="ul" title="箇条書きリスト">•&#8801;</button>
+                    <button class="toolbar-btn" data-command="ol" title="番号付きリスト">1&#8801;</button>
+                    <button class="toolbar-btn" data-command="quote" title="引用">&#10077;</button>
+                    <span class="toolbar-separator"></span>
+                    <button class="toolbar-btn" data-command="link" title="リンク挿入">&#128279;</button>
+                    <button class="toolbar-btn" data-command="code" title="コードブロック">&lt;/&gt;</button>
                     <div class="toolbar-spacer"></div>
                     <button class="toolbar-btn toggle-btn" id="toggleView" title="生マークダウン表示切替 (Ctrl+/)">
                         📄 Raw

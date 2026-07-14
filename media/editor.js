@@ -71,6 +71,10 @@
      */
     function setupToolbarEvents() {
         document.querySelectorAll('.toolbar-btn').forEach(button => {
+            // クリックでエディタの選択範囲が失われないようフォーカス移動を抑止
+            if (button.hasAttribute('data-command')) {
+                button.addEventListener('mousedown', (e) => e.preventDefault());
+            }
             button.addEventListener('click', () => {
                 const command = button.getAttribute('data-command');
                 if (command) {
