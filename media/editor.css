@@ -180,11 +180,87 @@ body {
 }
 
 #editor pre {
+    position: relative;
     background-color: var(--vscode-textCodeBlock-background);
-    padding: 16px;
+    /* 上は言語セレクタと重ならないよう広めに取る */
+    padding: 30px 16px 16px;
     border-radius: 3px;
     overflow-x: auto;
     margin: 1em 0;
+}
+
+/* コードブロック右上のUI（言語セレクタ・コピーボタン） */
+.code-block-toolbar {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.code-lang-selector,
+.code-copy-btn {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--vscode-descriptionForeground);
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    border: 1px solid var(--vscode-editorGroup-border);
+    cursor: pointer;
+    user-select: none;
+    opacity: 0.55;
+    transition: opacity 0.1s ease;
+}
+
+#editor pre:hover .code-lang-selector,
+#editor pre:hover .code-copy-btn,
+.code-lang-selector[data-editing="true"],
+.code-copy-btn[data-state="copied"] {
+    opacity: 1;
+}
+
+.code-lang-selector:hover,
+.code-copy-btn:hover {
+    color: var(--vscode-foreground);
+}
+
+/* コピーボタンのラベルも擬似要素で描画（テキストノードを増やさない） */
+.code-copy-btn::before {
+    content: '📋 コピー';
+}
+
+.code-copy-btn[data-state="copied"] {
+    color: var(--vscode-charts-green, var(--vscode-foreground));
+}
+
+.code-copy-btn[data-state="copied"]::before {
+    content: '✅ コピー済み';
+}
+
+/* ラベルはテキストノードを増やさないよう擬似要素で描画 */
+.code-lang-selector::before {
+    content: attr(data-lang);
+}
+
+.code-lang-selector[data-editing="true"]::before {
+    content: none;
+}
+
+.code-lang-input {
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1.4;
+    width: 96px;
+    padding: 0 2px;
+    color: var(--vscode-input-foreground);
+    background-color: var(--vscode-input-background);
+    border: 1px solid var(--vscode-focusBorder);
+    border-radius: 2px;
+    outline: none;
 }
 
 #editor pre code {
@@ -320,19 +396,6 @@ body {
 /* アトリビュート */
 #editor .hljs-attr {
     color: #9cdcfe !important;
-}
-
-/* コードブロックの言語ラベル表示（オプション）*/
-#editor pre code[data-lang]::before {
-    content: attr(data-lang);
-    display: block;
-    text-align: right;
-    font-size: 0.75em;
-    color: var(--vscode-descriptionForeground);
-    margin-bottom: 0.5em;
-    opacity: 0.7;
-    font-weight: bold;
-    text-transform: uppercase;
 }
 
 #editor blockquote {
