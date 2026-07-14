@@ -37,9 +37,27 @@
         "category": "Markdown WYSIWYG"
       },
       {
+        "command": "markdown-wysiwyg-editor.openAsText",
+        "title": "Markdown: テキストエディタで開く",
+        "category": "Markdown WYSIWYG"
+      },
+      {
+        "command": "markdown-wysiwyg-editor.toggleEditor",
+        "title": "Markdown: エディタ切り替え (WYSIWYG/テキスト)",
+        "category": "Markdown WYSIWYG"
+      },
+      {
         "command": "markdown-wysiwyg-editor.newMarkdownFile",
         "title": "Markdown: 新しいWYSIWYGドキュメントを作成",
         "category": "Markdown WYSIWYG"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "markdown-wysiwyg-editor.toggleEditor",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m",
+        "when": "resourceLangId == markdown"
       }
     ],
     "customEditors": [
@@ -65,6 +83,14 @@
       "commandPalette": [
         {
           "command": "markdown-wysiwyg-editor.openEditor",
+          "when": "resourceLangId == markdown"
+        },
+        {
+          "command": "markdown-wysiwyg-editor.openAsText",
+          "when": "resourceLangId == markdown"
+        },
+        {
+          "command": "markdown-wysiwyg-editor.toggleEditor",
           "when": "resourceLangId == markdown"
         },
         {
