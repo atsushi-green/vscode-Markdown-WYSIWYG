@@ -866,6 +866,14 @@ pre.mermaid-source {
     vertical-align: top;
 }
 
+/* 空のセルでも行ボックスを生成させ、行の高さを揃える */
+.table-container th::after,
+.table-container td::after {
+    content: '';
+    display: inline-block;
+    width: 0;
+}
+
 .table-container th {
     background-color: var(--vscode-editorGroupHeader-tabsBackground);
     font-weight: 600;
