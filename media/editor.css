@@ -423,6 +423,19 @@ body {
     list-style-type: decimal;
 }
 
+/* タスクリスト（GFM: - [ ] / - [x]） */
+#editor li.task-list-item {
+    list-style-type: none;
+    margin-left: -1.3em;
+}
+
+#editor li.task-list-item > input.task-checkbox {
+    margin-right: 0.4em;
+    vertical-align: middle;
+    cursor: pointer;
+    accent-color: var(--vscode-checkbox-selectBackground, var(--vscode-focusBorder));
+}
+
 #editor hr {
     border: none;
     border-top: 1px solid var(--vscode-editorGroup-border);

@@ -36,6 +36,9 @@
         // エディタの変更を監視
         setupEditorInputEvent();
 
+        // タスクリストのチェックボックス操作を監視
+        setupTaskCheckboxEvent();
+
         // VS Codeからのメッセージを受信
         setupMessageListener();
 
@@ -128,6 +131,33 @@
             mermaidModule.update();
 
             // 文書への書き戻し（変換コストが高いためデバウンス）
+            if (editSyncTimeout) {
+                clearTimeout(editSyncTimeout);
+            }
+            editSyncTimeout = setTimeout(syncEditorToDocument, 150);
+        });
+    }
+
+    /**
+     * タスクリストのチェックボックス操作の設定
+     * 再レンダリングで要素が作り直されるため、エディタへの委譲で監視する
+     */
+    function setupTaskCheckboxEvent() {
+        state.editor.addEventListener('change', (event) => {
+            const target = event.target;
+            if (!target || target.tagName !== 'INPUT' ||
+                !target.classList.contains('task-checkbox')) {
+                return;
+            }
+
+            // checked状態を属性へ反映（クローン・シリアライズ時に状態を保持するため）
+            if (target.checked) {
+                target.setAttribute('checked', '');
+            } else {
+                target.removeAttribute('checked');
+            }
+
+            // 文書への書き戻し（入力イベントと同じデバウンス経路）
             if (editSyncTimeout) {
                 clearTimeout(editSyncTimeout);
             }

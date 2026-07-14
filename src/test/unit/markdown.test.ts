@@ -85,6 +85,37 @@ suite('MarkdownModule', () => {
             assert.strictEqual(html, '<ol><li>一</li><li>二</li></ol>');
         });
 
+        test('タスクリスト（- [ ] / - [x]）をチェックボックス付きliに変換する', () => {
+            const html = env.markdown.markdownToHtml('- [ ] 未完了\n- [x] 完了');
+            assert.ok(html.includes('<li class="task-list-item">'), html);
+            assert.ok(
+                html.includes('<input type="checkbox" class="task-checkbox" contenteditable="false"> 未完了'),
+                html
+            );
+            assert.ok(
+                html.includes('<input type="checkbox" class="task-checkbox" contenteditable="false" checked> 完了'),
+                html
+            );
+        });
+
+        test('大文字X（- [X]）もチェック済みとして扱う', () => {
+            const html = env.markdown.markdownToHtml('- [X] 完了');
+            assert.ok(html.includes(' checked> 完了'), html);
+        });
+
+        test('タスクリストと通常リストの混在・ネストを変換する', () => {
+            const html = env.markdown.markdownToHtml('- [ ] 親タスク\n  - 通常ネスト\n- 通常項目');
+            assert.ok(html.includes('<li class="task-list-item">'), html);
+            assert.ok(html.includes('<ul><li>通常ネスト</li></ul>'), html);
+            assert.ok(html.includes('<li>通常項目</li>'), html);
+        });
+
+        test('タスク記法でない角括弧（リンク等）はチェックボックスにしない', () => {
+            const html = env.markdown.markdownToHtml('- [リンク](https://example.com)');
+            assert.ok(!html.includes('checkbox'), html);
+            assert.ok(html.includes('<a href="https://example.com">リンク</a>'), html);
+        });
+
         test('引用ブロック（複数行）を変換する', () => {
             const html = env.markdown.markdownToHtml('> 引用1\n> 引用2');
             assert.strictEqual(html, '<blockquote>引用1<br>引用2</blockquote>');
@@ -153,6 +184,25 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md, '1. 一\n2. 二\n');
         });
 
+        test('タスクリストのチェックボックスを[ ]/[x]でシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<ul>' +
+                '<li class="task-list-item"><input type="checkbox" class="task-checkbox"> 未完了</li>' +
+                '<li class="task-list-item"><input type="checkbox" class="task-checkbox" checked> 完了</li>' +
+                '</ul>'
+            );
+            assert.strictEqual(md, '* [ ] 未完了\n* [x] 完了\n');
+        });
+
+        test('チェック状態はchecked属性から判定する（クリック後の状態を反映）', () => {
+            // change ハンドラが属性を付与した後のDOMを模擬
+            const md = env.markdown.htmlToMarkdown(
+                '<ul><li class="task-list-item">' +
+                '<input type="checkbox" class="task-checkbox" checked=""> タスク</li></ul>'
+            );
+            assert.strictEqual(md, '* [x] タスク\n');
+        });
+
         test('コードブロックを言語付きフェンスでシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown(
                 '<pre><code class="language-python" data-lang="python">print(1)\n</code></pre>'
@@ -219,6 +269,9 @@ suite('MarkdownModule', () => {
                 '* 項目1',
                 '* 項目2',
                 '  * ネスト項目',
+                '',
+                '* [ ] 未完了タスク',
+                '* [x] 完了タスク',
                 '',
                 '1. 番号1',
                 '2. 番号2',

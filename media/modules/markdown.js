@@ -119,7 +119,9 @@ window.MarkdownModule = (function() {
 
     /**
      * リストアイテム配列からネストしたリストHTMLを構築
-     * items: [{ level, ordered, text }]
+     * items: [{ level, ordered, task, checked, text }]
+     * タスクアイテムはチェックボックス付きのliとして構築する。
+     * チェック状態は属性（checked）で持たせ、クローン・innerHTML経由でも保持されるようにする。
      */
     function buildListHtml(items) {
         let index = 0;
@@ -130,7 +132,15 @@ window.MarkdownModule = (function() {
             let html = `<${tag}>`;
 
             while (index < items.length && items[index].level >= level) {
-                html += `<li>${convertInline(escapeHtml(items[index].text))}`;
+                const item = items[index];
+                if (item.task) {
+                    const checkedAttr = item.checked ? ' checked' : '';
+                    html += '<li class="task-list-item">' +
+                        `<input type="checkbox" class="task-checkbox" contenteditable="false"${checkedAttr}> ` +
+                        convertInline(escapeHtml(item.text));
+                } else {
+                    html += `<li>${convertInline(escapeHtml(item.text))}`;
+                }
                 index++;
                 // 次のアイテムがより深い場合は、このliの中にネストさせる
                 if (index < items.length && items[index].level > level) {
@@ -246,10 +256,14 @@ window.MarkdownModule = (function() {
                 while (i < lines.length && /^(\s*)([-*]|\d+\.) /.test(lines[i])) {
                     const m = /^(\s*)([-*]|\d+\.) (.*)$/.exec(lines[i]);
                     const indent = m[1].replace(/\t/g, '  ').length;
+                    // タスクリスト記法（GFM: - [ ] / - [x]）の検出
+                    const task = /^\[([ xX])\] (.*)$/.exec(m[3]);
                     items.push({
                         level: Math.floor(indent / 2),
                         ordered: /^\d+\.$/.test(m[2]),
-                        text: m[3]
+                        task: task !== null,
+                        checked: task !== null && task[1].toLowerCase() === 'x',
+                        text: task !== null ? task[2] : m[3]
                     });
                     i++;
                 }
@@ -369,20 +383,32 @@ window.MarkdownModule = (function() {
                 return;
             }
 
-            // li直下のインライン内容と、ネストしたリストを分離
+            // li直下のインライン内容と、ネストしたリスト・タスクチェックボックスを分離
             let text = '';
             const nestedLists = [];
+            let checkbox = null;
             li.childNodes.forEach(child => {
                 if (child.nodeType === Node.ELEMENT_NODE &&
                     (child.tagName === 'UL' || child.tagName === 'OL')) {
                     nestedLists.push(child);
+                } else if (child.nodeType === Node.ELEMENT_NODE &&
+                    child.tagName === 'INPUT' &&
+                    child.getAttribute('type') === 'checkbox') {
+                    checkbox = child;
                 } else {
                     text += serializeInline(child);
                 }
             });
 
+            // チェック状態は属性を優先（クローン・innerHTML経由ではプロパティが失われるため）
+            let taskPrefix = '';
+            if (checkbox) {
+                const checked = checkbox.hasAttribute('checked') || checkbox.checked;
+                taskPrefix = checked ? '[x] ' : '[ ] ';
+            }
+
             const marker = ordered ? `${index++}. ` : '* ';
-            md += '  '.repeat(depth) + marker + text.replace(/\n+/g, ' ').trim() + '\n';
+            md += '  '.repeat(depth) + marker + taskPrefix + text.replace(/\n+/g, ' ').trim() + '\n';
 
             nestedLists.forEach(nested => {
                 md += serializeList(nested, depth + 1);
