@@ -123,8 +123,8 @@ npm run compile-tests
 ```
 
 - **ユニットテスト** (`src/test/unit/`): `media/modules/` のWebviewモジュール
-  （Markdown⇔HTML変換、テーブル編集、検索、ユーティリティ）をjsdomで構築した
-  Webview相当のDOM環境で検証する。`src/test/unit/helper.ts` が実際のWebviewと
+  （Markdown⇔HTML変換、テーブル編集、検索、コマンド・オートブロック変換、
+  ユーティリティ）をjsdomで構築したWebview相当のDOM環境で検証する。`src/test/unit/helper.ts` が実際のWebviewと
   同じ順序でモジュールを読み込み、`acquireVsCodeApi` をスタブする。
 - **統合テスト** (`src/test/extension.test.ts`): `@vscode/test-cli` でVS Code本体を
   起動し、コマンド登録、WYSIWYG⇔テキストエディタ切り替え、`updateTextDocument` の

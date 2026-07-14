@@ -164,6 +164,23 @@ suite('MarkdownModule', () => {
             assert.ok(html.includes('<td>a|b</td>'), html);
         });
 
+        test('水平線（--- / *** / ___）をhrに変換する', () => {
+            assert.strictEqual(env.markdown.markdownToHtml('---'), '<hr>');
+            assert.strictEqual(env.markdown.markdownToHtml('***'), '<hr>');
+            assert.strictEqual(env.markdown.markdownToHtml('___'), '<hr>');
+            assert.strictEqual(env.markdown.markdownToHtml('-----'), '<hr>');
+        });
+
+        test('2文字以下の --- もどきは水平線にしない', () => {
+            const html = env.markdown.markdownToHtml('--');
+            assert.strictEqual(html, '<p>--</p>');
+        });
+
+        test('段落の直後の水平線で段落を区切る', () => {
+            const html = env.markdown.markdownToHtml('段落\n---\n次の段落');
+            assert.strictEqual(html, '<p>段落</p><hr><p>次の段落</p>');
+        });
+
         test('本文のHTML特殊文字をエスケープする（XSS防止）', () => {
             const html = env.markdown.markdownToHtml('<script>alert(1)</script>');
             assert.ok(!html.includes('<script>'), html);
@@ -277,6 +294,11 @@ suite('MarkdownModule', () => {
             assert.ok(md.includes('| a\\|b |'), md);
         });
 
+        test('hr要素を---でシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown('<p>前</p><hr><p>後</p>');
+            assert.strictEqual(md, '前\n\n---\n\n後\n');
+        });
+
         test('contenteditableが生成する行単位のdivを1行として扱う', () => {
             const md = env.markdown.htmlToMarkdown('<div>1行目</div><div>2行目</div>');
             assert.strictEqual(md, '1行目\n2行目\n');
@@ -315,6 +337,8 @@ suite('MarkdownModule', () => {
                 '> 引用行1',
                 '> 引用行2',
                 '> > ネスト引用',
+                '',
+                '---',
                 '',
                 '```python',
                 'print("hello")',

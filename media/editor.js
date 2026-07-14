@@ -406,6 +406,10 @@
                 return;
             }
 
+            if (commands.handleHorizontalRule(e)) {
+                return;
+            }
+
             if (commands.handleCodeFence(e)) {
                 return;
             }

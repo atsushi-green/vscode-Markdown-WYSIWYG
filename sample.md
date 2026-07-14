@@ -68,6 +68,12 @@ function greet(name) {
 > > 内側の引用
 > 外側に戻る
 
+### 水平線
+
+`---` だけの行でEnterを押すと水平線になります。
+
+---
+
 ### リンク
 
 [VS Code公式サイト](https://code.visualstudio.com/)

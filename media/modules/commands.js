@@ -608,6 +608,50 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * --- / *** / ___ の直後にEnterで水平線化
+     */
+    function handleHorizontalRule(event) {
+        if (event.key !== 'Enter' || event.ctrlKey || event.metaKey || event.altKey) {
+            return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        const block = utils.findBlockAncestor(range.startContainer);
+        if (!block) {
+            return false;
+        }
+
+        // リスト項目内では変換しない（リスト記法と紛らわしいため）
+        if (block.tagName === 'LI') {
+            return false;
+        }
+
+        const text = block.textContent.trim();
+        if (!/^(-{3,}|\*{3,}|_{3,})$/.test(text)) {
+            return false;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const hr = document.createElement('hr');
+        const p = document.createElement('p');
+        p.appendChild(document.createElement('br'));
+        block.replaceWith(hr);
+        hr.after(p);
+        utils.placeCaretAt(p, 0);
+
+        // 変換結果を文書へ書き戻すため入力イベントを発火
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    }
+
+    /**
      * ``` の直後にEnterでコードブロック化
      */
     function handleCodeFence(event) {
@@ -841,6 +885,7 @@ window.CommandsModule = (function() {
         insertBlockquote: insertBlockquote,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,
+        handleHorizontalRule: handleHorizontalRule,
         handleCodeFence: handleCodeFence,
         handleHeadingConfirm: handleHeadingConfirm,
         applyInlineFormatting: applyInlineFormatting

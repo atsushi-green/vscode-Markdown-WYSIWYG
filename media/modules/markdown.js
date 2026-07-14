@@ -18,8 +18,11 @@ window.MarkdownModule = (function() {
     // ブロックレベル要素のタグ集合（シリアライズ時の判定に使用）
     const BLOCK_TAGS = new Set([
         'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE'
+        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE', 'HR'
     ]);
+
+    // 水平線（--- / *** / ___ 3文字以上の単独行）の判定
+    const HR_PATTERN = /^ {0,3}(-{3,}|\*{3,}|_{3,})\s*$/;
 
     /**
      * ゼロ幅文字を除去
@@ -112,6 +115,7 @@ window.MarkdownModule = (function() {
         if (matchFence(line)) return true;
         if (/^(#{1,6}) /.test(line)) return true;
         if (/^> ?/.test(line)) return true;
+        if (HR_PATTERN.test(line)) return true;
         if (/^(\s*)([-*]|\d+\.) /.test(line)) return true;
         if (isTableStart(line, nextLine)) return true;
         return false;
@@ -221,6 +225,13 @@ window.MarkdownModule = (function() {
 
             // --- 空行 ---
             if (!line.trim()) {
+                i++;
+                continue;
+            }
+
+            // --- 水平線 ---
+            if (HR_PATTERN.test(line)) {
+                out.push('<hr>');
                 i++;
                 continue;
             }
@@ -572,6 +583,8 @@ window.MarkdownModule = (function() {
             }
             case 'TABLE':
                 return serializeTable(el);
+            case 'HR':
+                return '---\n\n';
             default:
                 return serializeInlineChildren(el);
         }
