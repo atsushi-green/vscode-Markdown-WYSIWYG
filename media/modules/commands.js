@@ -398,6 +398,9 @@ window.CommandsModule = (function() {
             case 'underline':
                 document.execCommand('underline', false, null);
                 break;
+            case 'strikethrough':
+                document.execCommand('strikeThrough', false, null);
+                break;
             case 'h1':
                 formatHeading(1);
                 break;
@@ -861,6 +864,9 @@ window.CommandsModule = (function() {
 
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
+
+        // 取り消し線（~~text~~）
+        html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
 
         // 太字
         html = html.replace(/(\*\*|__)([^*]+?)\1/g, '<strong>$2</strong>');

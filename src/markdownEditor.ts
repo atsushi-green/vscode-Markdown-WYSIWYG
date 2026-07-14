@@ -177,6 +177,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                     <button class="toolbar-btn" data-command="bold" title="太字 (Ctrl+B)"><strong>B</strong></button>
                     <button class="toolbar-btn" data-command="italic" title="斜体 (Ctrl+I)"><em>I</em></button>
                     <button class="toolbar-btn" data-command="underline" title="下線 (Ctrl+U)"><u>U</u></button>
+                    <button class="toolbar-btn" data-command="strikethrough" title="取り消し線 (Ctrl+Shift+X)"><s>S</s></button>
                     <span class="toolbar-separator"></span>
                     <button class="toolbar-btn" data-command="h1" title="見出し1">H1</button>
                     <button class="toolbar-btn" data-command="h2" title="見出し2">H2</button>

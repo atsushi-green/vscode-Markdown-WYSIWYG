@@ -39,6 +39,24 @@ suite('CommandsModule', () => {
         sel.addRange(range);
     }
 
+    suite('applyInlineFormatting', () => {
+        test('~~text~~ のライブ変換でdel要素になる', () => {
+            env.editor.innerHTML = '<p>~~取り消し~~ 後続</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true);
+            const del = env.editor.querySelector('del');
+            assert.ok(del, env.editor.innerHTML);
+            assert.strictEqual(del!.textContent, '取り消し');
+        });
+
+        test('++text++ のライブ変換でu要素になる（既存記法の回帰確認）', () => {
+            env.editor.innerHTML = '<p>++下線++ 後続</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true);
+            assert.ok(env.editor.querySelector('u'), env.editor.innerHTML);
+        });
+    });
+
     suite('handleHorizontalRule', () => {
         /** エディタに1ブロック置き、キャレットをその先頭に置く */
         function setupBlock(html: string): HTMLElement {

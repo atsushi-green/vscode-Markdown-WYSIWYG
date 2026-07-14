@@ -42,6 +42,11 @@ suite('MarkdownModule', () => {
             assert.ok(html.includes('<strong><em>強調</em></strong>'), html);
         });
 
+        test('取り消し線（~~text~~）をdelに変換する', () => {
+            const html = env.markdown.markdownToHtml('前 ~~取り消し~~ 後');
+            assert.ok(html.includes('<del>取り消し</del>'), html);
+        });
+
         test('連続行は1つの段落にまとめ、行間は<br>にする', () => {
             const html = env.markdown.markdownToHtml('1行目\n2行目');
             assert.strictEqual(html, '<p>1行目<br>2行目</p>');
@@ -213,6 +218,12 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md, '**太字** *斜体* ++下線++ `c` [リンク](https://example.com)\n');
         });
 
+        test('取り消し線（del/s/strike）を~~でシリアライズする', () => {
+            assert.strictEqual(env.markdown.htmlToMarkdown('<p><del>a</del></p>'), '~~a~~\n');
+            assert.strictEqual(env.markdown.htmlToMarkdown('<p><s>b</s></p>'), '~~b~~\n');
+            assert.strictEqual(env.markdown.htmlToMarkdown('<p><strike>c</strike></p>'), '~~c~~\n');
+        });
+
         test('ネストしたリストを2スペースインデントでシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown(
                 '<ul><li>項目1<ul><li>ネスト</li></ul></li><li>項目2</li></ul>'
@@ -322,7 +333,7 @@ suite('MarkdownModule', () => {
                 '',
                 '## 見出し2',
                 '',
-                '段落テキスト **太字** *斜体* ++下線++ `コード` [リンク](https://example.com)',
+                '段落テキスト **太字** *斜体* ++下線++ ~~取り消し~~ `コード` [リンク](https://example.com)',
                 '',
                 '* 項目1',
                 '* 項目2',

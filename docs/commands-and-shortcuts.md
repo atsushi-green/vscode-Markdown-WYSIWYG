@@ -24,6 +24,7 @@
 | 太字 | `Ctrl+B` | `Cmd+B` |
 | 斜体 | `Ctrl+I` | `Cmd+I` |
 | 下線 | `Ctrl+U` | `Cmd+U` |
+| 取り消し線 | `Ctrl+Shift+X` | `Cmd+Shift+X` |
 
 ### 表示切り替え
 
@@ -66,7 +67,7 @@
 
 ## ツールバーのコマンド（`data-command` 属性経由）
 
-`commands.executeCommand()` が処理するコマンド種別: `bold`, `italic`, `underline`, `h1`, `h2`, `h3`, `ul`, `ol`, `link`, `code`, `quote`
+`commands.executeCommand()` が処理するコマンド種別: `bold`, `italic`, `underline`, `strikethrough`, `h1`, `h2`, `h3`, `ul`, `ol`, `link`, `code`, `quote`
 
 上記すべてがエディタ上部の書式ツールバーにボタンとして配置されている
 （B / I / U ｜ H1 / H2 / H3 ｜ 箇条書き / 番号付き / 引用 ｜ リンク / コードブロック）。

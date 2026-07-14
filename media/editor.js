@@ -462,6 +462,13 @@
                         e.preventDefault();
                         commands.executeCommand('underline');
                         break;
+                    case 'x':
+                        // Ctrl+X（切り取り）と区別するためShift併用時のみ
+                        if (e.shiftKey) {
+                            e.preventDefault();
+                            commands.executeCommand('strikethrough');
+                        }
+                        break;
                 }
             }
         });

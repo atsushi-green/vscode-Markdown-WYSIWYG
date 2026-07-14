@@ -57,6 +57,9 @@ window.MarkdownModule = (function() {
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
 
+        // 取り消し線（~~text~~）
+        html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+
         // 太字斜体
         html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
         html = html.replace(/___(.+?)___/g, '<strong><em>$1</em></strong>');
@@ -368,6 +371,13 @@ window.MarkdownModule = (function() {
             case 'U': {
                 const inner = serializeInlineChildren(node);
                 return inner ? `++${inner}++` : '';
+            }
+            case 'DEL':
+            case 'S':
+            case 'STRIKE': {
+                // execCommand('strikeThrough')はブラウザによりstrike/sを生成する
+                const inner = serializeInlineChildren(node);
+                return inner ? `~~${inner}~~` : '';
             }
             case 'CODE': {
                 const text = stripZeroWidth(node.textContent);
