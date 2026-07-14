@@ -108,4 +108,86 @@ suite('CommandsModule', () => {
             assert.strictEqual(env.editor.querySelector('hr'), null);
         });
     });
+
+    suite('convertTaskLists（タスクリストのライブ変換）', () => {
+        /** li直下にチェックボックスがあり、チェック状態が期待通りか検証する */
+        function assertTaskItem(li: HTMLElement, checked: boolean): void {
+            const box = li.querySelector('input.task-checkbox') as HTMLInputElement | null;
+            assert.ok(box, li.outerHTML);
+            assert.ok(li.classList.contains('task-list-item'), li.outerHTML);
+            assert.strictEqual(box!.hasAttribute('checked'), checked, li.outerHTML);
+            // チェックボックスはli直下の先頭要素であること
+            assert.strictEqual(li.querySelector('input.task-checkbox')!.parentElement, li);
+        }
+
+        test('li先頭の [ ] がチェックボックスへ変換される（- [ ] 入力相当）', () => {
+            env.editor.innerHTML = '<ul><li>[ ] 牛乳を買う</li></ul>';
+            const { didFormat } = env.commands.convertTaskLists(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const li = env.editor.querySelector('li') as HTMLElement;
+            assertTaskItem(li, false);
+            assert.ok(li.textContent!.includes('牛乳を買う'), li.textContent!);
+        });
+
+        test('li先頭の [] （中身なし）も変換される（- [] 入力相当）', () => {
+            env.editor.innerHTML = '<ul><li>[] タスク</li></ul>';
+            const { didFormat } = env.commands.convertTaskLists(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            assertTaskItem(env.editor.querySelector('li') as HTMLElement, false);
+        });
+
+        test('li先頭の [x] はチェック済みで変換される', () => {
+            env.editor.innerHTML = '<ul><li>[x] 完了済み</li></ul>';
+            env.commands.convertTaskLists(env.editor);
+            assertTaskItem(env.editor.querySelector('li') as HTMLElement, true);
+        });
+
+        test('本文なしの [ ] だけでも変換される（閉じ括弧の直後が行末）', () => {
+            env.editor.innerHTML = '<ul><li>[ ]</li></ul>';
+            const { didFormat } = env.commands.convertTaskLists(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            assertTaskItem(env.editor.querySelector('li') as HTMLElement, false);
+        });
+
+        test('段落先頭の -[] （スペース無し）はタスクリストへ変換される', () => {
+            env.editor.innerHTML = '<p>-[] やること</p>';
+            const { didFormat } = env.commands.convertTaskLists(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const ul = env.editor.querySelector('ul');
+            assert.ok(ul, env.editor.innerHTML);
+            assertTaskItem(ul!.querySelector('li') as HTMLElement, false);
+            assert.ok(ul!.textContent!.includes('やること'), ul!.textContent!);
+        });
+
+        test('段落先頭の -[x] はチェック済みタスクリストへ変換される', () => {
+            env.editor.innerHTML = '<p>-[x] 済</p>';
+            env.commands.convertTaskLists(env.editor);
+            const li = env.editor.querySelector('li') as HTMLElement;
+            assertTaskItem(li, true);
+        });
+
+        test('既にチェックボックスを持つli（変換済み）は二重変換しない', () => {
+            env.editor.innerHTML =
+                '<ul><li class="task-list-item">' +
+                '<input type="checkbox" class="task-checkbox" contenteditable="false"> タスク</li></ul>';
+            const { didFormat } = env.commands.convertTaskLists(env.editor);
+            assert.strictEqual(didFormat, false);
+            assert.strictEqual(env.editor.querySelectorAll('input.task-checkbox').length, 1);
+        });
+
+        test('タスク記法でない通常のli/段落は変換しない', () => {
+            env.editor.innerHTML = '<ul><li>普通の項目</li></ul><p>[未完]の括弧テキスト</p>';
+            const { didFormat } = env.commands.convertTaskLists(env.editor);
+            assert.strictEqual(didFormat, false);
+            assert.strictEqual(env.editor.querySelector('input.task-checkbox'), null);
+        });
+
+        test('変換後にhtmlToMarkdownで [ ] / [x] へ往復する（ラウンドトリップ）', () => {
+            env.editor.innerHTML = '<ul><li>[ ] 未完</li><li>[x] 完了</li></ul>';
+            env.commands.convertTaskLists(env.editor);
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/\[ \] 未完/.test(md), md);
+            assert.ok(/\[x\] 完了/.test(md), md);
+        });
+    });
 });

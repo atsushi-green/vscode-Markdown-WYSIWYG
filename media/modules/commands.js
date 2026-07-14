@@ -798,7 +798,134 @@ window.CommandsModule = (function() {
      * インラインマークダウンを即時反映
      */
     function applyInlineFormatting() {
-        return walkInline(state.editor);
+        const taskResult = convertTaskLists(state.editor);
+        const inlineResult = walkInline(state.editor);
+        return {
+            didFormat: taskResult.didFormat || inlineResult.didFormat,
+            caretHandled: taskResult.caretHandled || inlineResult.caretHandled
+        };
+    }
+
+    /**
+     * チェックボックス要素（レンダリング時と同じ構造）を生成する
+     */
+    function createTaskCheckbox(checked) {
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.className = 'task-checkbox';
+        input.setAttribute('contenteditable', 'false');
+        if (checked) {
+            input.checked = true;
+            input.setAttribute('checked', '');
+        }
+        return input;
+    }
+
+    /**
+     * 要素直下の先頭テキストノードを返す。
+     * 先頭が要素（既存チェックボックスや <strong> 等）やBRの場合はnull。
+     */
+    function leadingTextNode(el) {
+        let node = el.firstChild;
+        while (node) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                if (node.textContent.length > 0) {
+                    return node;
+                }
+                node = node.nextSibling;
+                continue;
+            }
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * 指定テキストノードのoffset位置にキャレットを置く
+     */
+    function setCaretInText(textNode, offset) {
+        const selection = window.getSelection();
+        if (!selection) {
+            return;
+        }
+        const range = document.createRange();
+        range.setStart(textNode, Math.min(offset, textNode.textContent.length));
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+
+    /**
+     * タスクリスト記法（[ ] / [] / [x]）をライブでチェックボックスへ変換する。
+     * ファイル読込時のパーサ（markdownToHtml）は `- [ ] ` しか解釈しないため、
+     * 入力中にGUIへ反映されない問題を補う。
+     * - 既存の li の先頭が [ ] / [] / [x] の場合: チェックボックスを差し込む
+     *   （`- [ ]` / `- []` を入力したケース。`- ` で handleAutoBlock が li 化済み）
+     * - リスト化されていない段落の先頭が -[] / -[ ] / -[x] の場合: タスクリスト化する
+     *   （`-[]` のようにスペース無しで handleAutoBlock が発火しなかったケース）
+     * いずれもキャレットはチェックボックス直後（本文の先頭）へ移動する。
+     */
+    function convertTaskLists(root) {
+        let didFormat = false;
+        let caretHandled = false;
+
+        // 記法トークン: [ ] / [] / [x] / [X]（閉じ括弧の直後はスペースか行末）
+        const TASK_RE = /^(\[[ xX]?\])(\s|$)/;
+
+        // --- ケース1: 既存の li 先頭 ---
+        const lis = Array.prototype.slice.call(root.querySelectorAll('li'));
+        lis.forEach(function(li) {
+            const textNode = leadingTextNode(li);
+            if (!textNode) {
+                return;
+            }
+            const m = TASK_RE.exec(textNode.textContent);
+            if (!m) {
+                return;
+            }
+            const checked = /x/i.test(m[1]);
+            textNode.textContent = textNode.textContent.slice(m[0].length);
+            li.classList.add('task-list-item');
+            li.insertBefore(document.createTextNode(' '), li.firstChild);
+            li.insertBefore(createTaskCheckbox(checked), li.firstChild);
+            setCaretInText(textNode, 0);
+            caretHandled = true;
+            didFormat = true;
+        });
+
+        // --- ケース2: リスト化されていない段落先頭（-[] 等） ---
+        const blocks = Array.prototype.slice.call(root.children);
+        blocks.forEach(function(block) {
+            if (block.tagName !== 'P' && block.tagName !== 'DIV') {
+                return;
+            }
+            const textNode = leadingTextNode(block);
+            if (!textNode) {
+                return;
+            }
+            const m = /^([-*])\s?(\[[ xX]?\])(\s|$)/.exec(textNode.textContent);
+            if (!m) {
+                return;
+            }
+            const checked = /x/i.test(m[2]);
+            textNode.textContent = textNode.textContent.slice(m[0].length);
+
+            const ul = document.createElement('ul');
+            const li = document.createElement('li');
+            li.className = 'task-list-item';
+            li.appendChild(createTaskCheckbox(checked));
+            li.appendChild(document.createTextNode(' '));
+            while (block.firstChild) {
+                li.appendChild(block.firstChild);
+            }
+            ul.appendChild(li);
+            block.replaceWith(ul);
+            setCaretInText(textNode, 0);
+            caretHandled = true;
+            didFormat = true;
+        });
+
+        return { didFormat: didFormat, caretHandled: caretHandled };
     }
 
     /**
@@ -894,6 +1021,7 @@ window.CommandsModule = (function() {
         handleHorizontalRule: handleHorizontalRule,
         handleCodeFence: handleCodeFence,
         handleHeadingConfirm: handleHeadingConfirm,
-        applyInlineFormatting: applyInlineFormatting
+        applyInlineFormatting: applyInlineFormatting,
+        convertTaskLists: convertTaskLists
     };
 })();
