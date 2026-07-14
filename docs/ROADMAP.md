@@ -51,6 +51,7 @@
 | todo | YAML front matter の折りたたみ表示 | M | |
 | todo | テーブルのセル結合 | L | Markdown標準外。方式検討から |
 | todo | HTMLエクスポート機能 | M | |
+| todo | PDFエクスポート機能 | L | まずS/Mに分割してから着手。方式候補: (1) VS Code標準の印刷（Webview→ブラウザ印刷ダイアログ）にCSS `@media print` を用意して委ねる案（軽量・依存追加なし）、(2) `puppeteer-core` 等でHTML→PDFをヘッドレス変換する案（見た目の再現度は高いが依存が重く拡張機能サイズが増える）。Mermaid図のPNG化（html2canvas）で確立した「クリーンHTML抽出→変換」の流れを流用できる。まずは(1)の印刷スタイル対応から着手し、要望が強ければ(2)を検討するのが妥当 |
 
 ## 完了 (done)
 
