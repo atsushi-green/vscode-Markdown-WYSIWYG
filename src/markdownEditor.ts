@@ -101,7 +101,28 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'editor.css')
         );
 
-        // JavaScriptファイルのURI
+        // JavaScriptモジュールファイルのURI
+        const stateUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'state.js')
+        );
+        const utilsUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'utils.js')
+        );
+        const markdownModuleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'markdown.js')
+        );
+        const mermaidModuleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'mermaid.js')
+        );
+        const tableModuleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'table.js')
+        );
+        const searchModuleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'search.js')
+        );
+        const commandsModuleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'commands.js')
+        );
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'editor.js')
         );
@@ -190,6 +211,14 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 <script nonce="${nonce}" src="${hljsSqlUri}"></script>
                 <script nonce="${nonce}" src="${html2canvasUri}"></script>
                 <script nonce="${nonce}" src="${mermaidUri}"></script>
+                <!-- Editor modules (order matters due to dependencies) -->
+                <script nonce="${nonce}" src="${stateUri}"></script>
+                <script nonce="${nonce}" src="${utilsUri}"></script>
+                <script nonce="${nonce}" src="${markdownModuleUri}"></script>
+                <script nonce="${nonce}" src="${mermaidModuleUri}"></script>
+                <script nonce="${nonce}" src="${tableModuleUri}"></script>
+                <script nonce="${nonce}" src="${searchModuleUri}"></script>
+                <script nonce="${nonce}" src="${commandsModuleUri}"></script>
                 <script nonce="${nonce}" src="${scriptUri}"></script>
             </body>
             </html>

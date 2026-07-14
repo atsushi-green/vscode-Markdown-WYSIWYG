@@ -251,7 +251,15 @@ vscode-Markdown-WYSIWYG-/
 │   ├── markdownEditor.ts      # カスタムエディタ実装
 │   └── test/                  # テストコード
 ├── media/
-│   ├── editor.js              # Webview JavaScript
+│   ├── editor.js              # Webview エントリーポイント
+│   ├── modules/               # Webview モジュール群
+│   │   ├── state.js           # グローバル状態管理
+│   │   ├── utils.js           # 共通ユーティリティ
+│   │   ├── markdown.js        # Markdown⇔HTML 変換
+│   │   ├── mermaid.js         # Mermaid図の描画・エクスポート
+│   │   ├── table.js           # テーブル編集
+│   │   ├── search.js          # 検索ウィジェット
+│   │   └── commands.js        # 書式コマンド・ライブ変換
 │   ├── editor.css             # Webview スタイル
 │   ├── mermaid.min.js         # Mermaid ライブラリ
 │   ├── html2canvas.min.js     # 画像変換ライブラリ
