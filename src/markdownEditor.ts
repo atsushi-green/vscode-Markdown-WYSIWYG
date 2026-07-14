@@ -198,22 +198,41 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 
     /**
      * ドキュメントの内容を更新
+     *
+     * 全文置換ではなく、変更前後で共通する先頭・末尾を除いた最小範囲のみを
+     * 置換する。これによりUndo履歴の肥大化と、テキストエディタ側で同じ
+     * ファイルを開いている場合のカーソル飛び・スクロール飛びを防ぐ。
      */
     private updateTextDocument(document: vscode.TextDocument, content: string) {
+        // ドキュメント側のEOLに合わせる（ファイルの改行コードを勝手に変えない）
+        const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+        const normalized = content.replace(/\r\n?|\n/g, eol);
+
+        const oldText = document.getText();
+        if (oldText === normalized) {
+            return Promise.resolve(true);
+        }
+
+        // 共通の先頭部分を求める
+        let start = 0;
+        const maxStart = Math.min(oldText.length, normalized.length);
+        while (start < maxStart && oldText.charCodeAt(start) === normalized.charCodeAt(start)) {
+            start++;
+        }
+
+        // 共通の末尾部分を求める（先頭の共通部分と重ならない範囲で）
+        let oldEnd = oldText.length;
+        let newEnd = normalized.length;
+        while (oldEnd > start && newEnd > start && oldText.charCodeAt(oldEnd - 1) === normalized.charCodeAt(newEnd - 1)) {
+            oldEnd--;
+            newEnd--;
+        }
+
         const edit = new vscode.WorkspaceEdit();
-
-        // ドキュメント全体を新しい内容で置換
-        const fullRange = new vscode.Range(
-            0,
-            0,
-            document.lineCount - 1,
-            document.lineAt(document.lineCount - 1).text.length
-        );
-
         edit.replace(
             document.uri,
-            fullRange,
-            content
+            new vscode.Range(document.positionAt(start), document.positionAt(oldEnd)),
+            normalized.substring(start, newEnd)
         );
 
         return vscode.workspace.applyEdit(edit);
