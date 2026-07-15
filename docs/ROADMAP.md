@@ -38,7 +38,6 @@
 | todo | 検索に加えて「置換」機能を追加 | M | media/modules/search.js を拡張 |
 | todo | 右クリックメニューから表を挿入（行数・列数を入力して空の表を作成） | M | 現状 `table.js` は既存表のレンダリングのみで、新規表を作る手段（`insertTable`相当）が無い。UIはMermaidのコンテキストメニュー（`mermaidContextMenu` / `mermaid.js`の`showContextMenu`/`hideContextMenu`）と同じ仕組みを流用できる。エディタ本体への汎用右クリックメニュー自体も未実装のため、「エディタの空欄で右クリック→メニュー表示→行数・列数入力→空のMarkdownテーブルをカーソル位置に挿入→table.jsのrenderで即インタラクティブ化」という流れになる見込み |
 | todo | GitHubアラート記法（`> [!NOTE]` など）の表示対応 | M | NOTE/TIP/IMPORTANT/WARNING/CAUTION |
-| todo | 単語数・文字数のステータス表示 | S | |
 | todo | 画像のクリップボード貼り付け（ファイル保存＋相対パス挿入） | L | 拡張機能側でファイル書き込みが必要。分割して実装 |
 
 ## 優先度: 低
@@ -66,6 +65,7 @@
 | 2026-07-15 | 引用内での `> ` 入力によるネスト引用の作成（`handleNestedQuote`） | `19ff5cc` |
 | 2026-07-15 | 引用ブロックのEnter（引用を抜ける）/Shift+Enter（引用内改行）対応（`handleBlockquoteEnter`） | `cc7a1d6` |
 | 2026-07-15 | JS/TS/JSON/YAML/Go/Rust のシンタックスハイライト対応の明文化（commonビルドに既存・回帰テスト追加） | `9db72a8` |
+| 2026-07-15 | 単語数・文字数のステータス表示（右下バー・`utils.countText`） | `_______` |
 
 ## 見送り (blocked)
 

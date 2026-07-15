@@ -23,6 +23,43 @@
     const searchModule = window.SearchModule;
     const commands = window.CommandsModule;
 
+    // 単語数・文字数ステータスバー要素（初期化時に生成）
+    let wordCountStatusEl = null;
+
+    /**
+     * 単語数・文字数ステータスバーを生成する（一度だけ）
+     */
+    function initWordCountStatus() {
+        if (wordCountStatusEl || document.getElementById('word-count-status')) {
+            wordCountStatusEl = wordCountStatusEl || document.getElementById('word-count-status');
+            updateWordCount();
+            return;
+        }
+        wordCountStatusEl = document.createElement('div');
+        wordCountStatusEl.id = 'word-count-status';
+        wordCountStatusEl.className = 'word-count-status';
+        document.body.appendChild(wordCountStatusEl);
+        updateWordCount();
+    }
+
+    /**
+     * 現在の編集内容から単語数・文字数を数え直して表示を更新する。
+     * RAWモードではrawEditorの値、通常モードではエディタのテキストを対象にする。
+     */
+    function updateWordCount() {
+        if (!wordCountStatusEl) {
+            return;
+        }
+        let text = '';
+        if (state.isRawMode && state.rawEditor) {
+            text = state.rawEditor.value || '';
+        } else if (state.editor) {
+            text = state.editor.textContent || '';
+        }
+        const c = utils.countText(text);
+        wordCountStatusEl.textContent = `単語数: ${c.words} / 文字数: ${c.chars}`;
+    }
+
     /**
      * エディタの初期化
      */
@@ -62,6 +99,9 @@
 
         // コードブロック言語セレクタのイベント
         commands.setupCodeLangEvents();
+
+        // 単語数・文字数ステータスバーを生成
+        initWordCountStatus();
 
         console.log('[Editor] Initialized');
     }
@@ -134,6 +174,9 @@
             // Mermaid図を更新
             mermaidModule.update();
 
+            // 単語数・文字数の表示を更新
+            updateWordCount();
+
             // 文書への書き戻し（変換コストが高いためデバウンス）
             if (editSyncTimeout) {
                 clearTimeout(editSyncTimeout);
@@ -204,6 +247,7 @@
                 state.isUpdating = false;
             }
             state.lastSentMarkdown = incoming;
+            updateWordCount();
             return;
         }
 
@@ -249,6 +293,9 @@
         state.lastSentMarkdown = incoming;
 
         state.isUpdating = false;
+
+        // 単語数・文字数の表示を更新
+        updateWordCount();
     }
 
     /**
@@ -301,6 +348,9 @@
                 content: normalized
             });
         }
+
+        // モード切り替え後の内容で単語数・文字数を更新
+        updateWordCount();
     }
 
     /**
@@ -318,6 +368,9 @@
                 type: 'edit',
                 content: md
             });
+
+            // 単語数・文字数の表示を更新
+            updateWordCount();
         });
     }
 

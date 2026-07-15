@@ -23,6 +23,7 @@
 | 2026-07-15 | `19ff5cc` feat: 引用内での「> 」入力によるネスト引用の作成 | 引用ブロック内の行頭で `> ` を入力すると1段深いネスト引用（`> > `）が作られるように。従来は `findBlockAncestor` が BLOCKQUOTE を返さず `handleAutoBlock` が発火しなかった。`commands.js` に `handleNestedQuote` を追加。ネスト構造は既存の `buildQuoteHtml`/`serializeBlockquoteLines` が往復対応済み。引用UX改善（Enterで抜ける等）の残タスクはROADMAPに分割。 |
 | 2026-07-15 | `cc7a1d6` feat: 引用ブロックのEnter/Shift+Enter対応 | 引用ブロックの末尾で `Enter` を押すと引用を抜けて後続の段落へ移り、`Shift+Enter` では引用内で改行（`<br>`）して引用を継続するように。`commands.js` に `handleBlockquoteEnter` を追加し、`editor.js` のkeydown処理（コードブロックEnter処理の前）に配線。`<br>` は `> 行1` / `> 行2` として往復変換される。 |
 | 2026-07-15 | `9db72a8` docs+test: JS/TS/JSON/YAML/Go/Rust のシンタックスハイライト対応を明文化 | 同梱の `highlight.min.js` は highlight.js の commonビルドで、これら6言語（と `js`/`ts`/`yml`/`golang`/`rs` 別名）を含む約36言語を登録済みであることを確認。個別バンドルの追加は不要だった。回帰テスト `syntax-highlight.test.ts` を追加し、README/AGENTS/features のハイライト対応言語の記述を実態（旧: Python/Bash/PowerShell/C/SQLのみ）に合わせて更新。 |
+| 2026-07-15 | `_______` feat: 単語数・文字数のステータス表示 | エディタ右下に固定表示するステータスバーで、単語数と文字数（空白除外・Unicodeコードポイント単位）をリアルタイム表示。数え上げは純粋関数 `utils.countText` として実装しユニットテストを追加、UIは `editor.js` が動的生成（`markdownEditor.ts` は変更しない）。通常/Rawモード両方に対応。 |
 
 ## 作業中（未コミット）の変更
 

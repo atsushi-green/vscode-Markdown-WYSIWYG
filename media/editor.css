@@ -103,6 +103,24 @@ body {
     outline: none;
 }
 
+/* 単語数・文字数ステータスバー（右下に固定表示） */
+.word-count-status {
+    position: fixed;
+    right: 12px;
+    bottom: 10px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-family: var(--vscode-font-family, sans-serif);
+    color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+    background-color: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-editorWidget-border, var(--vscode-editorGroup-border));
+    border-radius: 4px;
+    opacity: 0.85;
+    pointer-events: none;
+    user-select: none;
+    z-index: 10;
+}
+
 /* Markdownスタイル */
 #editor h1 {
     font-size: 2em;

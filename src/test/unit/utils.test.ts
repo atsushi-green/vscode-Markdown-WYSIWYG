@@ -21,6 +21,47 @@ suite('EditorUtils', () => {
         });
     });
 
+    suite('countText', () => {
+        test('英文の単語数と文字数を数える（文字数は空白を除く）', () => {
+            const c = env.utils.countText('hello world foo');
+            assert.strictEqual(c.words, 3);
+            assert.strictEqual(c.chars, 13); // 'helloworldfoo'
+        });
+
+        test('日本語は空白なしでも文字数を数える（単語数は連続塊で1）', () => {
+            const c = env.utils.countText('こんにちは世界');
+            assert.strictEqual(c.words, 1);
+            assert.strictEqual(c.chars, 7);
+        });
+
+        test('改行・タブ・連続スペースは文字数に含めない', () => {
+            const c = env.utils.countText('a\n\tb   c\r\nd');
+            assert.strictEqual(c.words, 4);
+            assert.strictEqual(c.chars, 4); // 'abcd'
+        });
+
+        test('空文字・空白のみは0/0', () => {
+            for (const input of ['', '   \n\t ']) {
+                const c = env.utils.countText(input);
+                assert.strictEqual(c.words, 0, JSON.stringify(input));
+                assert.strictEqual(c.chars, 0, JSON.stringify(input));
+            }
+        });
+
+        test('nullやundefinedでも例外にならず0/0を返す', () => {
+            for (const input of [undefined, null]) {
+                const c = env.utils.countText(input);
+                assert.strictEqual(c.words, 0);
+                assert.strictEqual(c.chars, 0);
+            }
+        });
+
+        test('絵文字（サロゲートペア）を1文字として数える', () => {
+            const c = env.utils.countText('😀😀');
+            assert.strictEqual(c.chars, 2);
+        });
+    });
+
     suite('findAncestor', () => {
         test('条件に一致する祖先要素を返す', () => {
             env.editor.innerHTML = '<pre><code>x</code></pre>';

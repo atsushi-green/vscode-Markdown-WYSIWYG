@@ -15,6 +15,20 @@ window.EditorUtils = (function() {
     }
 
     /**
+     * テキストから単語数・文字数を数える（純粋関数）
+     * - words: 空白区切りの語数（英文向け。日本語のように空白を使わない
+     *   言語では語数はあくまで目安）
+     * - chars: 空白・改行を除いた文字数（日本語でも意味のある指標）。
+     *   Unicodeコードポイント単位で数える（絵文字などサロゲートペア対応）。
+     */
+    function countText(text) {
+        const normalized = normalizeEol(text || '');
+        const words = (normalized.match(/\S+/g) || []).length;
+        const chars = Array.from(normalized.replace(/\s+/g, '')).length;
+        return { words: words, chars: chars };
+    }
+
+    /**
      * トースト通知を表示
      */
     function showToast(message) {
@@ -231,6 +245,7 @@ window.EditorUtils = (function() {
     // 公開API
     return {
         normalizeEol: normalizeEol,
+        countText: countText,
         showToast: showToast,
         saveCursorPosition: saveCursorPosition,
         restoreCursorPosition: restoreCursorPosition,
