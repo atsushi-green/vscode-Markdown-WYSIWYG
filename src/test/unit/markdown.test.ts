@@ -37,6 +37,42 @@ suite('MarkdownModule', () => {
             assert.ok(html.includes('<a href="https://example.com">リンク</a>'), `a: ${html}`);
         });
 
+        test('インラインコード内の記法は装飾せずそのまま保持する', () => {
+            assert.strictEqual(
+                env.markdown.markdownToHtml('`**太字**`'),
+                '<p><code>**太字**</code></p>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('`~~消~~`'),
+                '<p><code>~~消~~</code></p>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('`[text](url)`'),
+                '<p><code>[text](url)</code></p>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('`a_b_c`'),
+                '<p><code>a_b_c</code></p>'
+            );
+        });
+
+        test('インラインコードの外側の記法は通常どおり装飾する', () => {
+            const html = env.markdown.markdownToHtml('前 `**x**` 後 **太字**');
+            assert.strictEqual(
+                html,
+                '<p>前 <code>**x**</code> 後 <strong>太字</strong></p>'
+            );
+        });
+
+        test('インラインコード内の記法はWYSIWYG往復で失われない', () => {
+            ['`**太字**`', '文中の `[a](b)` と **強調**', '`~~x~~` と `code2`'].forEach(src => {
+                const rt = env.markdown.htmlToMarkdown(
+                    env.markdown.markdownToHtml(src)
+                );
+                assert.strictEqual(rt.trim(), src, `roundtrip: ${src}`);
+            });
+        });
+
         test('太字斜体（***text***）を変換する', () => {
             const html = env.markdown.markdownToHtml('***強調***');
             assert.ok(html.includes('<strong><em>強調</em></strong>'), html);

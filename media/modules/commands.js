@@ -1416,13 +1416,18 @@ window.CommandsModule = (function() {
      * インラインテキストを変換
      */
     function convertInlineText(text) {
-        let html = text;
+        // インラインコードを先にプレースホルダ（NUL文字＋通し番号）へ退避し、
+        // コード内の文字列に他のインライン整形（リンク・強調・取り消し線など）が
+        // 適用されて `**太字**` 等が装飾に化けるのを防ぐ。整形後に復元する。
+        // markdown.js の convertInline と同じ保護方針。
+        const codeSpans = [];
+        let html = text.replace(/`([^`]+)`/g, function (_m, p1) {
+            codeSpans.push(p1);
+            return '\u0000' + (codeSpans.length - 1) + '\u0000';
+        });
 
         // リンク
         html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2">$1</a>');
-
-        // インラインコード
-        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
@@ -1436,6 +1441,11 @@ window.CommandsModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避したインラインコードを <code> として復元（中身は整形しない）
+        html = html.replace(/\u0000(\d+)\u0000/g, function (_m, i) {
+            return '<code>' + codeSpans[Number(i)] + '</code>';
+        });
 
         return html;
     }

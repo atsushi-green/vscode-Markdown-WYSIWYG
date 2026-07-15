@@ -98,6 +98,26 @@ suite('CommandsModule', () => {
             assert.strictEqual(env.editor.querySelectorAll('strong').length, 1);
             assert.ok(env.editor.querySelector('em'), env.editor.innerHTML);
         });
+
+        test('インラインコード内の記法はライブ変換で装飾されずcodeに保持される', () => {
+            env.editor.innerHTML = '<p>`**太字**` 後続</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const code = env.editor.querySelector('code');
+            assert.ok(code, env.editor.innerHTML);
+            // コード内はstrong化されず、記法文字がそのまま残る
+            assert.strictEqual(code!.textContent, '**太字**');
+            assert.strictEqual(code!.querySelector('strong'), null, env.editor.innerHTML);
+        });
+
+        test('インラインコードの外側の記法はライブ変換で装飾される', () => {
+            env.editor.innerHTML = '<p>`code` と **太字**</p>';
+            env.commands.applyInlineFormatting();
+            assert.ok(env.editor.querySelector('code'), env.editor.innerHTML);
+            const strong = env.editor.querySelector('strong');
+            assert.ok(strong, env.editor.innerHTML);
+            assert.strictEqual(strong!.textContent, '太字');
+        });
     });
 
     suite('handleHorizontalRule', () => {
