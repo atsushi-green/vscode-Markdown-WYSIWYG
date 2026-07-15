@@ -138,6 +138,15 @@
 - 通常モードではエディタのテキスト、Rawモードでは生Markdownを対象に、入力・文書更新・モード切り替えのたびに更新。
 - ステータスバーはWebview内でJSから動的生成し、拡張機能側のHTMLテンプレート（`markdownEditor.ts`）には手を入れない設計。
 
+## 9.6 目次(TOC)の自動生成
+
+- `Ctrl+Shift+O`（Mac: `Cmd+Shift+O`）または `executeCommand('toc')` で、ドキュメント内の見出し(h1〜h6)から目次を生成し、キャレット位置のブロック直後（キャレットが無ければ先頭）へ挿入する。
+- 目次はネストした箇条書き＋GitHub風のアンカーリンク（`* [見出し](#slug)`）。
+  - `markdown.slugify(text)`: 小文字化・記号除去・空白のハイフン化（日本語などの文字はそのまま）。
+  - `markdown.buildTocMarkdown(headings)`: 最も浅い見出しをインデント0段に相対化し、重複スラッグには `-1` / `-2` … を付与（GitHubのアンカー生成と同じ規則）。純粋関数で `src/test/unit/markdown.test.ts` にて往復含めて検証。
+  - `commands.insertToc()`: 見出し収集（`heading-hash` スパンの `#` は除外）→ 目次Markdown生成 → HTML化 → DOM挿入。
+- 生成した目次は `markdownToHtml` ⇔ `htmlToMarkdown` の往復で保持される（リストマーカーはシリアライザに合わせ `* `）。
+
 ## 10. キーボードショートカット（書式設定）
 
 - 太字: `Ctrl+B` / `Cmd+B`

@@ -354,4 +354,45 @@ suite('CommandsModule', () => {
             assert.strictEqual(handled, false);
         });
     });
+
+    suite('insertToc（目次の生成・挿入）', () => {
+        /** 見出しHTMLを組み立てる（実レンダリングと同じ heading-hash スパン付き） */
+        function heading(level: number, text: string): string {
+            return `<h${level}><span class="heading-hash">${'#'.repeat(level)} </span>${text}</h${level}>`;
+        }
+
+        test('見出しから目次リストを生成して挿入する', () => {
+            env.editor.innerHTML =
+                heading(1, 'タイトル') + heading(2, '節A') + heading(2, '節B') + '<p>本文</p>';
+            env.commands.insertToc();
+            const ul = env.editor.querySelector('ul');
+            assert.ok(ul, env.editor.innerHTML);
+            const links = ul!.querySelectorAll('a');
+            assert.strictEqual(links.length, 3);
+            assert.strictEqual(links[0].getAttribute('href'), '#タイトル');
+            assert.strictEqual(links[1].getAttribute('href'), '#節a');
+        });
+
+        test('heading-hashスパンの「#」は目次テキストに含まれない', () => {
+            env.editor.innerHTML = heading(2, 'はじめに');
+            env.commands.insertToc();
+            const link = env.editor.querySelector('ul a');
+            assert.ok(link, env.editor.innerHTML);
+            assert.strictEqual(link!.textContent, 'はじめに');
+        });
+
+        test('見出しが無い場合は目次を挿入しない', () => {
+            env.editor.innerHTML = '<p>本文だけ</p>';
+            env.commands.insertToc();
+            assert.strictEqual(env.editor.querySelector('ul'), null);
+        });
+
+        test('挿入した目次は htmlToMarkdown で入れ子リンク付きリストになる', () => {
+            env.editor.innerHTML = heading(1, 'Title') + heading(2, 'Sub');
+            env.commands.insertToc();
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/\* \[Title\]\(#title\)/.test(md), md);
+            assert.ok(/ {2}\* \[Sub\]\(#sub\)/.test(md), md);
+        });
+    });
 });

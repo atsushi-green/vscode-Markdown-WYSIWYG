@@ -33,7 +33,7 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 見出しから目次（TOC）を自動生成して挿入するコマンド | M | |
+| todo | 目次(TOC)生成をツールバーボタンからも実行できるようにする | S | `executeCommand('toc')` は実装済み。現状キーボードショートカット（`Ctrl+Shift+O`）のみ。ツールバーへのボタン追加は `src/markdownEditor.ts` のHTMLテンプレート変更が必要で統合テスト（`npm test`）を伴う |
 | todo | リンクの挿入・編集ダイアログ（Ctrl+K） | M | 選択テキストをリンク化 |
 | todo | 検索に加えて「置換」機能を追加 | M | media/modules/search.js を拡張 |
 | todo | 右クリックメニューから表を挿入（行数・列数を入力して空の表を作成） | M | 現状 `table.js` は既存表のレンダリングのみで、新規表を作る手段（`insertTable`相当）が無い。UIはMermaidのコンテキストメニュー（`mermaidContextMenu` / `mermaid.js`の`showContextMenu`/`hideContextMenu`）と同じ仕組みを流用できる。エディタ本体への汎用右クリックメニュー自体も未実装のため、「エディタの空欄で右クリック→メニュー表示→行数・列数入力→空のMarkdownテーブルをカーソル位置に挿入→table.jsのrenderで即インタラクティブ化」という流れになる見込み |
@@ -66,6 +66,7 @@
 | 2026-07-15 | 引用ブロックのEnter（引用を抜ける）/Shift+Enter（引用内改行）対応（`handleBlockquoteEnter`） | `cc7a1d6` |
 | 2026-07-15 | JS/TS/JSON/YAML/Go/Rust のシンタックスハイライト対応の明文化（commonビルドに既存・回帰テスト追加） | `9db72a8` |
 | 2026-07-15 | 単語数・文字数のステータス表示（右下バー・`utils.countText`） | `4b86e1c` |
+| 2026-07-15 | 見出しから目次(TOC)を生成・挿入するコマンド（`Ctrl+Shift+O`・`slugify`/`buildTocMarkdown`/`insertToc`） | `_______` |
 
 ## 見送り (blocked)
 

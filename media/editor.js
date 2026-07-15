@@ -459,6 +459,13 @@
                 return;
             }
 
+            // 目次（TOC）の生成・挿入（Ctrl+Shift+O / Cmd+Shift+O）
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
+                e.preventDefault();
+                commands.executeCommand('toc');
+                return;
+            }
+
             if (commands.handleAutoBlock(e)) {
                 return;
             }

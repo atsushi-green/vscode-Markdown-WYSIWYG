@@ -426,4 +426,75 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md, '| H1 | H2 |\n| --- | --- |\n| a | b |\n\n');
         });
     });
+
+    suite('slugify', () => {
+        test('英字は小文字化し空白をハイフンにする', () => {
+            assert.strictEqual(env.markdown.slugify('Hello World'), 'hello-world');
+        });
+
+        test('記号を除去する', () => {
+            assert.strictEqual(env.markdown.slugify('Foo: Bar! (baz)?'), 'foo-bar-baz');
+        });
+
+        test('日本語はそのまま残す', () => {
+            assert.strictEqual(env.markdown.slugify('第1章 はじめに'), '第1章-はじめに');
+        });
+
+        test('アンダースコアとハイフンは保持する', () => {
+            assert.strictEqual(env.markdown.slugify('a_b-c'), 'a_b-c');
+        });
+    });
+
+    suite('buildTocMarkdown', () => {
+        test('見出しレベルに応じてネストした箇条書きを作る', () => {
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 1, text: 'Title' },
+                { level: 2, text: 'Section A' },
+                { level: 3, text: 'Detail' },
+                { level: 2, text: 'Section B' }
+            ]);
+            assert.strictEqual(
+                toc,
+                '* [Title](#title)\n' +
+                '  * [Section A](#section-a)\n' +
+                '    * [Detail](#detail)\n' +
+                '  * [Section B](#section-b)\n'
+            );
+        });
+
+        test('最も浅い見出しをインデント0段に相対化する', () => {
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 2, text: 'A' },
+                { level: 3, text: 'B' }
+            ]);
+            assert.strictEqual(toc, '* [A](#a)\n  * [B](#b)\n');
+        });
+
+        test('重複する見出しには -1, -2 を付与する', () => {
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 1, text: 'Intro' },
+                { level: 1, text: 'Intro' },
+                { level: 1, text: 'Intro' }
+            ]);
+            assert.strictEqual(
+                toc,
+                '* [Intro](#intro)\n* [Intro](#intro-1)\n* [Intro](#intro-2)\n'
+            );
+        });
+
+        test('見出しが空なら空文字を返す', () => {
+            assert.strictEqual(env.markdown.buildTocMarkdown([]), '');
+        });
+
+        test('生成したTOCは markdownToHtml→htmlToMarkdown で往復しても保たれる', () => {
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 1, text: 'Title' },
+                { level: 2, text: 'Section A' },
+                { level: 2, text: 'Section B' }
+            ]);
+            const html = env.markdown.markdownToHtml(toc);
+            const md = env.markdown.htmlToMarkdown(html);
+            assert.strictEqual(md.trim(), toc.trim());
+        });
+    });
 });

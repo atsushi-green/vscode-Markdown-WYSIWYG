@@ -17,6 +17,7 @@ VS Code上でMarkdownファイルをWYSIWYG（What You See Is What You Get）形
 * **シンタックスハイライト**: コードブロック内のコードが自動的に色付け（JavaScript/TypeScript/JSON/YAML/Go/Rust など約36言語 + 自動判定）
 * **リアルタイム同期**: WYSIWYGビューとMarkdownソースが常に同期
 * **単語数・文字数表示**: エディタ右下に現在の単語数と文字数（空白を除く）をリアルタイム表示
+* **目次(TOC)の自動生成**: 見出しから目次を生成して挿入（`Ctrl+Shift+O`）。GitHub風のアンカーリンク付き
 * **キーボードショートカット**: `Ctrl+B`（太字）、`Ctrl+I`（斜体）など、一般的なショートカットをサポート
 * **VS Codeテーマに対応**: エディタのカラーテーマに自動的に適応
 
@@ -195,6 +196,7 @@ Mermaid記法を使用してダイアグラムを作成できます。
 | 斜体 | テキストを斜体に | `Ctrl+I` | `Cmd+I` |
 | 下線 | テキストに下線 | `Ctrl+U` | `Cmd+U` |
 | 取り消し線 | テキストに取り消し線 | `Ctrl+Shift+X` | `Cmd+Shift+X` |
+| 目次を挿入 | 見出しから目次(TOC)を生成して挿入 | `Ctrl+Shift+O` | `Cmd+Shift+O` |
 
 ### 表示切り替え
 

@@ -25,6 +25,7 @@
 | 斜体 | `Ctrl+I` | `Cmd+I` |
 | 下線 | `Ctrl+U` | `Cmd+U` |
 | 取り消し線 | `Ctrl+Shift+X` | `Cmd+Shift+X` |
+| 目次(TOC)を挿入 | `Ctrl+Shift+O` | `Cmd+Shift+O` |
 
 ### 表示切り替え
 
@@ -70,8 +71,9 @@
 
 ## ツールバーのコマンド（`data-command` 属性経由）
 
-`commands.executeCommand()` が処理するコマンド種別: `bold`, `italic`, `underline`, `strikethrough`, `h1`, `h2`, `h3`, `ul`, `ol`, `link`, `code`, `quote`
+`commands.executeCommand()` が処理するコマンド種別: `bold`, `italic`, `underline`, `strikethrough`, `h1`, `h2`, `h3`, `ul`, `ol`, `link`, `code`, `quote`, `toc`
 
-上記すべてがエディタ上部の書式ツールバーにボタンとして配置されている
+`toc` を除くすべてがエディタ上部の書式ツールバーにボタンとして配置されている
 （B / I / U ｜ H1 / H2 / H3 ｜ 箇条書き / 番号付き / 引用 ｜ リンク / コードブロック）。
 ボタンは `mousedown` を抑止するため、クリックしてもエディタの選択範囲は失われない。
+`toc`（目次の生成・挿入）は現状キーボードショートカット `Ctrl+Shift+O` / `Cmd+Shift+O` からのみ実行できる（ツールバーボタンは今後追加予定）。

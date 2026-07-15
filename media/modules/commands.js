@@ -7,6 +7,7 @@ window.CommandsModule = (function() {
 
     const state = window.EditorState;
     const utils = window.EditorUtils;
+    const markdown = window.MarkdownModule;
 
     /**
      * highlight.jsが読み込まれたかチェック
@@ -425,9 +426,85 @@ window.CommandsModule = (function() {
             case 'quote':
                 insertBlockquote();
                 break;
+            case 'toc':
+                insertToc();
+                break;
         }
 
         state.editor.focus();
+    }
+
+    /**
+     * 見出し要素からアンカー表示用の `#` スパンを除いたテキストを取り出す
+     */
+    function headingText(heading) {
+        let text = '';
+        heading.childNodes.forEach(child => {
+            if (child.nodeType === Node.ELEMENT_NODE &&
+                child.classList &&
+                child.classList.contains('heading-hash')) {
+                return;
+            }
+            text += child.textContent;
+        });
+        return text.trim();
+    }
+
+    /**
+     * エディタ内の見出しから目次（TOC）を生成し、キャレット位置のブロックの
+     * 直後（キャレットが無ければ先頭）に挿入する。
+     * 見出しが無い場合はトーストで知らせて何もしない。
+     */
+    function insertToc() {
+        const headings = [];
+        state.editor.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => {
+            const text = headingText(h);
+            if (text) {
+                headings.push({ level: Number(h.tagName[1]), text: text });
+            }
+        });
+
+        if (!headings.length) {
+            utils.showToast('見出しが見つかりません');
+            return;
+        }
+
+        const tocMarkdown = markdown.buildTocMarkdown(headings);
+        const temp = document.createElement('div');
+        temp.innerHTML = markdown.markdownToHtml(tocMarkdown);
+        const nodes = Array.prototype.slice.call(temp.childNodes);
+        if (!nodes.length) {
+            return;
+        }
+
+        // 挿入位置を決める（キャレットのあるトップレベルブロックの直後）
+        const selection = window.getSelection();
+        let block = null;
+        if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            if (state.editor.contains(range.startContainer)) {
+                block = utils.findBlockAncestor(range.startContainer);
+                while (block && block.parentNode !== state.editor) {
+                    block = block.parentNode;
+                }
+            }
+        }
+
+        if (block && block.parentNode === state.editor) {
+            let ref = block;
+            nodes.forEach(n => {
+                ref.after(n);
+                ref = n;
+            });
+        } else {
+            const first = state.editor.firstChild;
+            nodes.forEach(n => {
+                state.editor.insertBefore(n, first);
+            });
+        }
+
+        // 文書へ反映
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     /**
@@ -1121,6 +1198,7 @@ window.CommandsModule = (function() {
         insertLink: insertLink,
         insertCodeBlock: insertCodeBlock,
         insertBlockquote: insertBlockquote,
+        insertToc: insertToc,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,
         handleHorizontalRule: handleHorizontalRule,

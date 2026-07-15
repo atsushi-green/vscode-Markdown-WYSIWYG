@@ -196,6 +196,47 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * 見出しテキストをアンカー用スラッグへ変換する（GitHub風）。
+     * 小文字化し、文字・数字・アンダースコア・ハイフン・空白以外の記号を除去、
+     * 空白はハイフンに変換する。日本語などの文字はそのまま残す。
+     */
+    function slugify(text) {
+        return (text || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}_\s-]/gu, '')
+            .replace(/\s+/g, '-');
+    }
+
+    /**
+     * 見出し配列から目次（TOC）のMarkdownを組み立てる（純粋関数）。
+     * headings: [{ level, text }]
+     * - 最も浅い見出しをインデント0段として相対化する
+     * - 各行は `* [text](#slug)` 形式。重複スラッグには -1, -2 ... を付与
+     *   （GitHubの見出しアンカー生成と同じ規則）
+     * - リストマーカーは htmlToMarkdown の出力（`* `）に合わせ、往復で安定させる
+     */
+    function buildTocMarkdown(headings) {
+        if (!headings || !headings.length) {
+            return '';
+        }
+        const minLevel = headings.reduce((m, h) => Math.min(m, h.level), Infinity);
+        const seen = {};
+        const lines = headings.map(h => {
+            let slug = slugify(h.text) || 'section';
+            if (seen[slug] === undefined) {
+                seen[slug] = 0;
+            } else {
+                seen[slug] += 1;
+                slug = slug + '-' + seen[slug];
+            }
+            const indent = '  '.repeat(Math.max(0, h.level - minLevel));
+            return indent + '* [' + h.text + '](#' + slug + ')';
+        });
+        return lines.join('\n') + '\n';
+    }
+
+    /**
      * MarkdownからHTMLへの変換（行ベースのブロックパーサー）
      */
     function markdownToHtml(markdown) {
@@ -743,6 +784,8 @@ window.MarkdownModule = (function() {
         markdownToHtml: markdownToHtml,
         htmlToMarkdown: htmlToMarkdown,
         convertTableToMarkdown: convertTableToMarkdown,
-        getCleanHtmlFromEditor: getCleanHtmlFromEditor
+        getCleanHtmlFromEditor: getCleanHtmlFromEditor,
+        slugify: slugify,
+        buildTocMarkdown: buildTocMarkdown
     };
 })();
