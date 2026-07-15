@@ -423,6 +423,11 @@
                 return;
             }
 
+            // 引用ブロック内でのEnter / Shift+Enter処理
+            if (commands.handleBlockquoteEnter(e)) {
+                return;
+            }
+
             // コードブロック内でのEnterキー処理
             if (e.key === 'Enter' && !e.shiftKey) {
                 const selection = window.getSelection();

@@ -643,6 +643,75 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 指定要素を含む最も外側のblockquoteを返す（ネスト対応）
+     */
+    function outermostBlockquote(el) {
+        let result = el;
+        let current = el.parentNode;
+        while (current && current !== state.editor) {
+            if (current.tagName === 'BLOCKQUOTE') {
+                result = current;
+            }
+            current = current.parentNode;
+        }
+        return result;
+    }
+
+    /**
+     * 引用ブロック内でのEnter / Shift+Enterを処理する。
+     * - Shift+Enter: 引用内に改行（<br>）を挿入して引用を継続する
+     * - Enter: キャレットが引用の末尾にあるとき、引用を抜けて後続の段落へ移る
+     *   （末尾以外での分割は実機依存のため、この段階では何もしない）
+     */
+    function handleBlockquoteEnter(event) {
+        if (event.key !== 'Enter' || event.ctrlKey || event.metaKey || event.altKey) {
+            return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        const bq = utils.findAncestor(range.startContainer, function(el) {
+            return el.tagName === 'BLOCKQUOTE';
+        });
+        if (!bq) {
+            return false;
+        }
+
+        // Shift+Enter: 引用内で改行
+        if (event.shiftKey) {
+            event.preventDefault();
+            const br = document.createElement('br');
+            range.deleteContents();
+            range.insertNode(br);
+            range.setStartAfter(br);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+
+        // Enter: 末尾にいるときだけ引用を抜ける
+        const outer = outermostBlockquote(bq);
+        const textBefore = utils.getTextBeforeCaret(outer, range);
+        if (textBefore.length < outer.textContent.length) {
+            return false;
+        }
+
+        event.preventDefault();
+        const p = document.createElement('p');
+        p.appendChild(document.createElement('br'));
+        outer.after(p);
+        utils.placeCaretAt(p, 0);
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    }
+
+    /**
      * --- / *** / ___ の直後にEnterで水平線化
      */
     function handleHorizontalRule(event) {
@@ -1057,6 +1126,7 @@ window.CommandsModule = (function() {
         handleHorizontalRule: handleHorizontalRule,
         handleCodeFence: handleCodeFence,
         handleHeadingConfirm: handleHeadingConfirm,
+        handleBlockquoteEnter: handleBlockquoteEnter,
         applyInlineFormatting: applyInlineFormatting,
         convertTaskLists: convertTaskLists
     };

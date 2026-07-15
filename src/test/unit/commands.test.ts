@@ -5,12 +5,13 @@ import * as assert from 'assert';
 import { createEditorEnv, EditorEnv } from './helper';
 
 /** handleXxx 系に渡すキーボードイベントの疑似オブジェクトを作る */
-function fakeKeyEvent(key: string, modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) {
+function fakeKeyEvent(key: string, modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) {
     return {
         key,
         ctrlKey: false,
         metaKey: false,
         altKey: false,
+        shiftKey: false,
         ...modifiers,
         defaultPrevented: false,
         preventDefault() { this.defaultPrevented = true; },
@@ -278,6 +279,79 @@ suite('CommandsModule', () => {
             assert.strictEqual(handled, true, env.editor.innerHTML);
             assert.ok(env.editor.querySelector('blockquote'), env.editor.innerHTML);
             assert.strictEqual(env.editor.querySelector('blockquote > blockquote'), null);
+        });
+    });
+
+    suite('handleBlockquoteEnter（引用内のEnter/Shift+Enter）', () => {
+        /** 指定要素の先頭テキストノードの指定オフセットにキャレットを置く */
+        function placeCaretAt(node: Node, offset: number): void {
+            const text = (node.firstChild ?? node) as Text;
+            const range = env.document.createRange();
+            range.setStart(text, offset);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        /** 先頭テキストノードの末尾にキャレットを置く */
+        function placeCaretAtEnd(node: Node): void {
+            const text = (node.firstChild ?? node) as Text;
+            placeCaretAt(node, text.textContent!.length);
+        }
+
+        test('Shift+Enterで引用内に<br>が挿入される', () => {
+            env.editor.innerHTML = '<blockquote>行1</blockquote>';
+            const bq = env.editor.querySelector('blockquote') as HTMLElement;
+            placeCaretAtEnd(bq);
+            const handled = env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.ok(bq.querySelector('br'), env.editor.innerHTML);
+        });
+
+        test('Shift+Enterの改行は htmlToMarkdown で2つの `> ` 行へ往復する', () => {
+            env.editor.innerHTML = '<blockquote>行1</blockquote>';
+            const bq = env.editor.querySelector('blockquote') as HTMLElement;
+            placeCaretAtEnd(bq);
+            env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            bq.appendChild(env.document.createTextNode('行2'));
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/^> 行1$/m.test(md), JSON.stringify(md));
+            assert.ok(/^> 行2$/m.test(md), JSON.stringify(md));
+        });
+
+        test('Enterを引用の末尾で押すと引用を抜けて後続の段落へ移る', () => {
+            env.editor.innerHTML = '<blockquote>引用</blockquote>';
+            const bq = env.editor.querySelector('blockquote') as HTMLElement;
+            placeCaretAtEnd(bq);
+            const handled = env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(bq.nextElementSibling?.tagName, 'P', env.editor.innerHTML);
+        });
+
+        test('Enterを引用の途中で押した場合は何もしない（false）', () => {
+            env.editor.innerHTML = '<blockquote>引用テキスト</blockquote>';
+            const bq = env.editor.querySelector('blockquote') as HTMLElement;
+            placeCaretAt(bq, 2);
+            const handled = env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, false);
+            assert.strictEqual(bq.nextElementSibling, null);
+        });
+
+        test('ネストした引用の末尾でEnterすると最も外側の引用を抜ける', () => {
+            env.editor.innerHTML = '<blockquote><blockquote>内側</blockquote></blockquote>';
+            const inner = env.editor.querySelector('blockquote > blockquote') as HTMLElement;
+            placeCaretAtEnd(inner);
+            const handled = env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const outer = env.editor.querySelector('blockquote') as HTMLElement;
+            assert.strictEqual(outer.nextElementSibling?.tagName, 'P', env.editor.innerHTML);
+        });
+
+        test('引用ブロックの外では何もしない（false）', () => {
+            env.editor.innerHTML = '<p>ふつうの段落</p>';
+            placeCaretAtEnd(env.editor.querySelector('p') as HTMLElement);
+            const handled = env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, false);
         });
     });
 });
