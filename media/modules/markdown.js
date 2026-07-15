@@ -209,6 +209,22 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * 見出しの生Markdownテキストから、表示される可視テキストを取り出す。
+     * インライン記法をHTMLへ変換してからタグを除去し、escapeHtmlで導入した
+     * 実体参照を元に戻すことで、レンダリング後のheading要素のtextContent
+     * （commands.jsのheadingTextが返す値）と一致させる。
+     * これにより見出しに付与するidスラッグをTOCのアンカーと確実に揃える。
+     */
+    function headingPlainText(rawText) {
+        return convertInline(escapeHtml(rawText))
+            .replace(/<[^>]*>/g, '')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&')
+            .trim();
+    }
+
+    /**
      * 見出し配列から目次（TOC）のMarkdownを組み立てる（純粋関数）。
      * headings: [{ level, text }]
      * - 最も浅い見出しをインデント0段として相対化する
@@ -244,6 +260,8 @@ window.MarkdownModule = (function() {
         const lines = src.split('\n');
         const out = [];
         let i = 0;
+        // 見出しidの重複を連番（-1, -2 ...）で解消する。buildTocMarkdownと同じ規則。
+        const seenSlugs = {};
 
         while (i < lines.length) {
             const line = lines[i];
@@ -284,8 +302,17 @@ window.MarkdownModule = (function() {
             const h = /^(#{1,6}) (.*)$/.exec(line);
             if (h) {
                 const level = h[1].length;
+                // TOC（buildTocMarkdown）と同一のスラッグ生成・重複連番規則でidを付与し、
+                // 目次のアンカーリンク（[text](#slug)）から該当見出しへ遷移できるようにする。
+                let slug = slugify(headingPlainText(h[2])) || 'section';
+                if (seenSlugs[slug] === undefined) {
+                    seenSlugs[slug] = 0;
+                } else {
+                    seenSlugs[slug] += 1;
+                    slug = slug + '-' + seenSlugs[slug];
+                }
                 out.push(
-                    `<h${level}><span class="heading-hash">${h[1]} </span>` +
+                    `<h${level} id="${slug}"><span class="heading-hash">${h[1]} </span>` +
                     `${convertInline(escapeHtml(h[2]))}</h${level}>`
                 );
                 i++;

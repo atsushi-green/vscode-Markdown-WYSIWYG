@@ -12,17 +12,17 @@ suite('MarkdownModule', () => {
     });
 
     suite('markdownToHtml', () => {
-        test('見出し（h1〜h6）をheading-hashスパン付きで変換する', () => {
+        test('見出し（h1〜h6）をheading-hashスパン付き・idアンカー付きで変換する', () => {
             const html = env.markdown.markdownToHtml('# タイトル');
             assert.strictEqual(
                 html,
-                '<h1><span class="heading-hash"># </span>タイトル</h1>'
+                '<h1 id="タイトル"><span class="heading-hash"># </span>タイトル</h1>'
             );
 
             const html3 = env.markdown.markdownToHtml('### 小見出し');
             assert.strictEqual(
                 html3,
-                '<h3><span class="heading-hash">### </span>小見出し</h3>'
+                '<h3 id="小見出し"><span class="heading-hash">### </span>小見出し</h3>'
             );
         });
 
@@ -495,6 +495,55 @@ suite('MarkdownModule', () => {
             const html = env.markdown.markdownToHtml(toc);
             const md = env.markdown.htmlToMarkdown(html);
             assert.strictEqual(md.trim(), toc.trim());
+        });
+    });
+
+    suite('見出しidアンカー（TOC遷移）', () => {
+        test('見出しにslugifyと同じidを付与する', () => {
+            const html = env.markdown.markdownToHtml('## Section A');
+            assert.ok(html.includes('<h2 id="section-a">'), html);
+        });
+
+        test('日本語見出しにもidを付与する', () => {
+            const html = env.markdown.markdownToHtml('# 第1章 はじめに');
+            assert.ok(html.includes('<h1 id="第1章-はじめに">'), html);
+        });
+
+        test('重複見出しには -1, -2 を付与する（TOCと同じ規則）', () => {
+            const html = env.markdown.markdownToHtml('# Intro\n\n# Intro\n\n# Intro');
+            assert.ok(html.includes('<h1 id="intro">'), html);
+            assert.ok(html.includes('<h1 id="intro-1">'), html);
+            assert.ok(html.includes('<h1 id="intro-2">'), html);
+        });
+
+        test('インライン記法を含む見出しでも可視テキストからidを作る', () => {
+            const html = env.markdown.markdownToHtml('## **Bold** Heading');
+            // 装飾記号(**)を除いた可視テキスト "Bold Heading" のスラッグと一致する
+            assert.ok(html.includes('id="bold-heading"'), html);
+        });
+
+        test('TOCのアンカー(#slug)と見出しidが一致し遷移先が存在する', () => {
+            const md = '# Title\n\n## Section A\n\n## Section A';
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 1, text: 'Title' },
+                { level: 2, text: 'Section A' },
+                { level: 2, text: 'Section A' }
+            ]);
+            const html = env.markdown.markdownToHtml(md);
+            // TOCが指す各アンカー(#slug)に対応するid属性が本文側に存在すること
+            const anchors: string[] = (toc.match(/\(#([^)]+)\)/g) || [])
+                .map((a: string) => a.slice(2, -1));
+            anchors.forEach((slug: string) => {
+                assert.ok(html.includes(`id="${slug}"`), `missing id=${slug}: ${html}`);
+            });
+        });
+
+        test('id付き見出しを htmlToMarkdown で往復してもidは残らず内容が保たれる', () => {
+            const original = '# タイトル\n\n## Section A\n';
+            const roundTripped = env.markdown.htmlToMarkdown(
+                env.markdown.markdownToHtml(original)
+            );
+            assert.strictEqual(roundTripped.trim(), original.trim());
         });
     });
 });

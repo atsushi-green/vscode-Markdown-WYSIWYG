@@ -146,6 +146,7 @@
   - `markdown.buildTocMarkdown(headings)`: 最も浅い見出しをインデント0段に相対化し、重複スラッグには `-1` / `-2` … を付与（GitHubのアンカー生成と同じ規則）。純粋関数で `src/test/unit/markdown.test.ts` にて往復含めて検証。
   - `commands.insertToc()`: 見出し収集（`heading-hash` スパンの `#` は除外）→ 目次Markdown生成 → HTML化 → DOM挿入。
 - 生成した目次は `markdownToHtml` ⇔ `htmlToMarkdown` の往復で保持される（リストマーカーはシリアライザに合わせ `* `）。
+- **目次リンクの遷移**: `markdownToHtml` は見出し要素へ `buildTocMarkdown` と同一のスラッグ生成・重複連番（`-1`/`-2` …）で `id` を付与する。目次のアンカーリンク（`[見出し](#slug)`）をクリックすると `commands.scrollToAnchor` が対応する `id` の見出しへスクロールする（contentEditable内ではアンカーの既定遷移が効かないため明示的に処理）。付与した `id` は `htmlToMarkdown` では出力されず往復に影響しない。
 
 ## 10. キーボードショートカット（書式設定）
 

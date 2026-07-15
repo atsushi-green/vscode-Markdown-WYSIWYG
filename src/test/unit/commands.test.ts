@@ -634,4 +634,38 @@ suite('CommandsModule', () => {
             assert.ok(/ {2}\* \[Sub\]\(#sub\)/.test(md), md);
         });
     });
+
+    suite('scrollToAnchor（TOCアンカーの遷移）', () => {
+        test('#slug に対応するid要素へscrollIntoViewする', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# Title\n\n## Section A');
+            const targetId = env.markdown.slugify('Section A'); // 'section-a'
+            const target = env.editor.querySelector('[id="' + targetId + '"]') as HTMLElement;
+            assert.ok(target, env.editor.innerHTML);
+            let scrolled = false;
+            target.scrollIntoView = function () { scrolled = true; };
+            env.commands.scrollToAnchor('#' + targetId);
+            assert.ok(scrolled, 'scrollIntoView が呼ばれていない');
+        });
+
+        test('日本語のパーセントエンコードされたアンカーもデコードして遷移する', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# 日本語見出し');
+            const slug = env.markdown.slugify('日本語見出し');
+            const target = env.editor.querySelector('[id="' + slug + '"]') as HTMLElement;
+            assert.ok(target, env.editor.innerHTML);
+            let scrolled = false;
+            target.scrollIntoView = function () { scrolled = true; };
+            env.commands.scrollToAnchor('#' + encodeURIComponent(slug));
+            assert.ok(scrolled, 'エンコードされたアンカーで遷移できていない');
+        });
+
+        test('該当id要素が無ければ何もしない（例外を投げない）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# Title');
+            assert.doesNotThrow(() => env.commands.scrollToAnchor('#does-not-exist'));
+        });
+
+        test('#で始まらないhrefは無視する', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# Title');
+            assert.doesNotThrow(() => env.commands.scrollToAnchor('https://example.com'));
+        });
+    });
 });

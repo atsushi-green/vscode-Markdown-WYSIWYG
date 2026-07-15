@@ -25,6 +25,7 @@
 | 2026-07-15 | `9db72a8` docs+test: JS/TS/JSON/YAML/Go/Rust のシンタックスハイライト対応を明文化 | 同梱の `highlight.min.js` は highlight.js の commonビルドで、これら6言語（と `js`/`ts`/`yml`/`golang`/`rs` 別名）を含む約36言語を登録済みであることを確認。個別バンドルの追加は不要だった。回帰テスト `syntax-highlight.test.ts` を追加し、README/AGENTS/features のハイライト対応言語の記述を実態（旧: Python/Bash/PowerShell/C/SQLのみ）に合わせて更新。 |
 | 2026-07-15 | `4b86e1c` feat: 単語数・文字数のステータス表示 | エディタ右下に固定表示するステータスバーで、単語数と文字数（空白除外・Unicodeコードポイント単位）をリアルタイム表示。数え上げは純粋関数 `utils.countText` として実装しユニットテストを追加、UIは `editor.js` が動的生成（`markdownEditor.ts` は変更しない）。通常/Rawモード両方に対応。 |
 | 2026-07-15 | `83433dc` feat: 見出しから目次(TOC)を生成・挿入するコマンド | `Ctrl+Shift+O`（Mac: `Cmd+Shift+O`）で見出し(h1〜h6)からGitHub風アンカーリンク付きの目次を生成し、キャレット位置へ挿入。`markdown.slugify`/`markdown.buildTocMarkdown`（純粋関数）＋ `commands.insertToc`（DOM挿入）を追加。重複見出しは `-1`/`-2` 付与、往復変換で安定。ツールバーボタンは未設置（キーボードショートカットのみ）。 |
+| 2026-07-16 | `______` fix: TOC目次リンクの見出し遷移バグを修正 | 目次のアンカーリンク（`[見出し](#slug)`）をクリックしても該当見出しへ遷移しなかった問題を修正。`markdownToHtml` が見出しへ `buildTocMarkdown` と同一のスラッグ生成・重複連番（`-1`/`-2`）で `id` を付与するようにし、contentEditable内で既定遷移が効かないアンカークリックを `commands.scrollToAnchor` で該当 `id` へスクロールするよう明示処理。`id` は `htmlToMarkdown` で出力されず往復に非影響。ユニットテスト（markdown/commands）を追加。 |
 
 ## 作業中（未コミット）の変更
 

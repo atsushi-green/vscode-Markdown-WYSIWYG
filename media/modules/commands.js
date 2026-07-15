@@ -374,13 +374,52 @@ window.CommandsModule = (function() {
                 return;
             }
             const copyBtn = target.closest('.code-copy-btn');
-            if (!copyBtn) {
+            if (copyBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                copyCodeBlock(copyBtn);
                 return;
             }
-            e.preventDefault();
-            e.stopPropagation();
-            copyCodeBlock(copyBtn);
+            // ページ内アンカーリンク（TOCの [text](#slug) など）のクリックで
+            // 該当id要素へスクロールする。contentEditable内ではリンクの既定遷移が
+            // 効かない（キャレット設置になる）ため、明示的に処理する。
+            const anchor = target.closest('a[href^="#"]');
+            if (anchor) {
+                scrollToAnchor(anchor.getAttribute('href'));
+                e.preventDefault();
+                e.stopPropagation();
+            }
         });
+    }
+
+    /**
+     * ページ内アンカー（`#slug`）に対応するid要素へスクロールする。
+     * 見出しレンダリング（markdownToHtml）がslugifyと同じ規則で付与したidと突き合わせる。
+     */
+    function scrollToAnchor(href) {
+        if (!href || href.charAt(0) !== '#') {
+            return;
+        }
+        let id = href.slice(1);
+        try {
+            id = decodeURIComponent(id);
+        } catch (_e) {
+            // 不正なエスケープはそのまま扱う
+        }
+        if (!id) {
+            return;
+        }
+        let el = null;
+        // idにCSSセレクタで扱いにくい文字（日本語等）が含まれてもよいよう属性で探す。
+        const escaped = id.replace(/["\\]/g, '\\$&');
+        try {
+            el = state.editor.querySelector('[id="' + escaped + '"]');
+        } catch (_e) {
+            el = null;
+        }
+        if (el && typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
     }
 
     /**
@@ -1413,6 +1452,7 @@ window.CommandsModule = (function() {
         insertCodeBlock: insertCodeBlock,
         insertBlockquote: insertBlockquote,
         insertToc: insertToc,
+        scrollToAnchor: scrollToAnchor,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,
         handleHorizontalRule: handleHorizontalRule,
