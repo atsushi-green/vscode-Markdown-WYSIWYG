@@ -55,6 +55,48 @@ suite('CommandsModule', () => {
             assert.strictEqual(didFormat, true);
             assert.ok(env.editor.querySelector('u'), env.editor.innerHTML);
         });
+
+        /**
+         * 分割テキストノードを持つ段落を組み立てる（実機のcontenteditable相当）。
+         * fragments を順に別々のテキストノードとして追加する。
+         */
+        function appendSplitParagraph(fragments: string[]): HTMLElement {
+            const p = env.document.createElement('p');
+            for (const frag of fragments) {
+                p.appendChild(env.document.createTextNode(frag));
+            }
+            env.editor.appendChild(p);
+            return p;
+        }
+
+        test('**太字** が複数テキストノードに割れていてもstrongへ変換される', () => {
+            // 実機では入力途中に「**bo」「ld** 後続」のように隣接ノードへ分割される
+            appendSplitParagraph(['**bo', 'ld** 後続']);
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const strong = env.editor.querySelector('strong');
+            assert.ok(strong, env.editor.innerHTML);
+            assert.strictEqual(strong!.textContent, 'bold');
+        });
+
+        test('~~取り消し線~~ が複数テキストノードに割れていてもdelへ変換される', () => {
+            appendSplitParagraph(['~~取り', '消し~~ 後続']);
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const del = env.editor.querySelector('del');
+            assert.ok(del, env.editor.innerHTML);
+            assert.strictEqual(del!.textContent, '取り消し');
+        });
+
+        test('分割ノードでも要素境界はまたいで結合しない（回帰確認）', () => {
+            // 既に<strong>がある場合、その前後のテキストは別要素なので結合されない
+            env.editor.innerHTML = '<p>前<strong>太字</strong>*斜*後</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            // 既存のstrongは保持され、*斜* はemになる
+            assert.strictEqual(env.editor.querySelectorAll('strong').length, 1);
+            assert.ok(env.editor.querySelector('em'), env.editor.innerHTML);
+        });
     });
 
     suite('handleHorizontalRule', () => {

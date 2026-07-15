@@ -798,6 +798,10 @@ window.CommandsModule = (function() {
      * インラインマークダウンを即時反映
      */
     function applyInlineFormatting() {
+        // contenteditableは入力中のテキストを複数の隣接テキストノードに分割するため、
+        // `**` の開始と終了が別ノードに割れて convertInlineText の正規表現にマッチしない
+        // ことがある。隣接テキストノードを結合してから走査する（要素境界はまたがない）。
+        state.editor.normalize();
         const taskResult = convertTaskLists(state.editor);
         const inlineResult = walkInline(state.editor);
         return {
