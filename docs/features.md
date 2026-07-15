@@ -62,7 +62,7 @@
 
 `media/modules/commands.js` + highlight.js（`media/highlight.min.js` ほか個別言語バンドル）。
 
-- 対応言語: Python, Bash/Shell, PowerShell, C/C++, SQL（個別バンドルを明示読み込み）、加えてそれ以外は `highlightAuto` による自動言語判定。
+- 対応言語: `media/highlight.min.js` は highlight.js の **commonビルド**で、JavaScript/TypeScript/JSON/YAML/Go/Rust を含む約36言語を登録済み（`js`/`ts`/`yml`/`golang`/`rs` などの別名も解決）。加えて PowerShell を個別バンドル（`hljs-powershell.min.js`）で追加。言語未指定・未登録の場合は `highlightAuto` による自動言語判定。登録言語は `src/test/unit/syntax-highlight.test.ts` で回帰的に検証。
 - コードブロックの言語ラベルをCSSの `::before` で右上に表示（`data-lang` 属性を利用）。
 - 二重ハイライト防止（`hljs`クラスや `hljs-*` スパンの有無をチェックしてから適用）。
 - Mermaidコードブロック（`data-lang="mermaid"`）はハイライト対象から除外し、Mermaidモジュールに処理を委譲。

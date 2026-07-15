@@ -27,7 +27,7 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | シンタックスハイライト対応言語の追加（JavaScript/TypeScript/JSON/YAML/Go/Rust） | S | highlight.jsの言語登録のみ |
+| todo | 冗長な個別ハイライトバンドルの読み込み整理 | S | `src/markdownEditor.ts` が `hljs-python`/`hljs-bash`/`hljs-c`/`hljs-sql` を個別読み込みしているが、これらは同梱の commonビルド `highlight.min.js` に既に含まれており重複。個別読み込みが本当に必要なのは `hljs-powershell` のみ（commonビルド外）。読み込みとファイルの整理で拡張機能サイズを削減できる。`src/markdownEditor.ts` 変更のため統合テスト（`npm test`）が必要 |
 
 ## 優先度: 中
 
@@ -65,6 +65,7 @@
 | 2026-07-15 | 太字・取り消し線のライブ変換が分割テキストノードでマッチしない問題の修正（走査前に `normalize()`） | `67080b7` |
 | 2026-07-15 | 引用内での `> ` 入力によるネスト引用の作成（`handleNestedQuote`） | `19ff5cc` |
 | 2026-07-15 | 引用ブロックのEnter（引用を抜ける）/Shift+Enter（引用内改行）対応（`handleBlockquoteEnter`） | `cc7a1d6` |
+| 2026-07-15 | JS/TS/JSON/YAML/Go/Rust のシンタックスハイライト対応の明文化（commonビルドに既存・回帰テスト追加） | `_______` |
 
 ## 見送り (blocked)
 

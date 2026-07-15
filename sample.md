@@ -61,6 +61,38 @@ function greet(name) {
 }
 ```
 
+JavaScript/TypeScript/JSON/YAML/Go/Rust などもハイライトされます（別名 `ts` / `yml` / `golang` / `rs` も可）。
+
+```typescript
+interface User { id: number; name: string; }
+const user: User = { id: 1, name: "Ada" };
+```
+
+```json
+{ "name": "sample", "version": "1.0.0", "private": true }
+```
+
+```yaml
+name: sample
+items:
+  - first
+  - second
+```
+
+```go
+package main
+
+func main() {
+    println("hello")
+}
+```
+
+```rust
+fn main() {
+    println!("hello");
+}
+```
+
 ### 引用
 
 > これは引用文です。

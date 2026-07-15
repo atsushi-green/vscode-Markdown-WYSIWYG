@@ -14,7 +14,7 @@ VS Code上でMarkdownファイルをWYSIWYG（What You See Is What You Get）形
   * 高解像度PNG画像としてエクスポート（4x スケール）
   * クリップボードへの画像コピー
 * **リッチテキストツールバー**: 太字、斜体、見出し、リスト、リンク、コードブロック、引用などをボタン一つで挿入
-* **シンタックスハイライト**: コードブロック内のコードが自動的に色付け（Python、Bash、PowerShell、C、SQL対応）
+* **シンタックスハイライト**: コードブロック内のコードが自動的に色付け（JavaScript/TypeScript/JSON/YAML/Go/Rust など約36言語 + 自動判定）
 * **リアルタイム同期**: WYSIWYGビューとMarkdownソースが常に同期
 * **キーボードショートカット**: `Ctrl+B`（太字）、`Ctrl+I`（斜体）など、一般的なショートカットをサポート
 * **VS Codeテーマに対応**: エディタのカラーテーマに自動的に適応
@@ -150,11 +150,15 @@ code .
 
 ### 🎨 シンタックスハイライト対応言語
 
-* Python
-* Bash / Shell
-* PowerShell
-* C / C++
-* SQL
+highlight.js の commonビルドを同梱しており、約36言語に対応しています。主なもの:
+
+* JavaScript / TypeScript（`js` / `ts`）
+* JSON / YAML（`yml`）
+* Go（`golang`）/ Rust（`rs`）
+* Python / Ruby / Java / C / C++ / C#
+* Bash / Shell / PowerShell / SQL
+
+上記以外の言語や、言語指定がない場合も自動判定でハイライトされます。
 
 ### 📊 Mermaid図の使い方
 
@@ -216,7 +220,7 @@ Mermaid記法を使用してダイアグラムを作成できます。
 
 * 複雑なMarkdown構文（テーブル、脚注など）は完全にサポートされていません
 * 画像の挿入はまだサポートされていません（今後のアップデートで対応予定）
-* シンタックスハイライトは限定された言語のみ対応（Python、Bash、PowerShell、C、SQL）
+* シンタックスハイライトは同梱の highlight.js（commonビルド）が対応する約36言語＋自動判定に限られます
 
 ## 🛠️ 開発者向け情報
 
