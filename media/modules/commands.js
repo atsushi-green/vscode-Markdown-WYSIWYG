@@ -789,6 +789,87 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * タスクリスト項目内でのEnterを処理する。
+     * ブラウザ標準のli分割ではチェックボックス（contenteditable=false）が
+     * 新しい行に引き継がれないため、通常リストと同じ挙動を自前で実装する。
+     * - 項目に本文があるとき: キャレット位置で分割し、次の行に未チェックの項目を作る
+     * - 項目が空のとき: 項目を削除してリストを抜ける（通常リストのEnterと同じ）
+     */
+    function handleTaskListEnter(event) {
+        if (event.key !== 'Enter' || event.shiftKey ||
+            event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
+            return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        const li = utils.findAncestor(range.startContainer, function(el) {
+            return el.tagName === 'LI' &&
+                el.classList && el.classList.contains('task-list-item');
+        });
+        if (!li) {
+            return false;
+        }
+
+        event.preventDefault();
+        if (!range.collapsed) {
+            range.deleteContents();
+        }
+
+        const list = li.parentElement;
+
+        // 空項目: 項目を削除してリストを抜ける（後続項目があればリストを分割）
+        if (li.textContent.trim() === '') {
+            const p = document.createElement('p');
+            p.appendChild(document.createElement('br'));
+            if (li.nextElementSibling) {
+                const rest = list.cloneNode(false);
+                while (li.nextSibling) {
+                    rest.appendChild(li.nextSibling);
+                }
+                list.after(p);
+                p.after(rest);
+            } else {
+                list.after(p);
+            }
+            li.remove();
+            if (!list.querySelector('li')) {
+                list.remove();
+            }
+            utils.placeCaretAt(p, 0);
+            state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+
+        // 本文あり: キャレット以降を新しいタスク項目へ移す
+        const newLi = document.createElement('li');
+        newLi.className = 'task-list-item';
+        newLi.appendChild(createTaskCheckbox(false));
+        const spacer = document.createTextNode(' ');
+        newLi.appendChild(spacer);
+
+        const tail = document.createRange();
+        tail.setStart(range.startContainer, range.startOffset);
+        tail.setEnd(li, li.childNodes.length);
+        // キャレットがチェックボックスより前にある場合、既存のチェックボックスを
+        // 移動対象に含めない
+        const ownCheckbox = li.querySelector(':scope > input.task-checkbox');
+        if (ownCheckbox && tail.intersectsNode(ownCheckbox)) {
+            tail.setStartAfter(ownCheckbox);
+        }
+        newLi.appendChild(tail.extractContents());
+
+        li.after(newLi);
+        setCaretInText(spacer, 1);
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    }
+
+    /**
      * --- / *** / ___ の直後にEnterで水平線化
      */
     function handleHorizontalRule(event) {
@@ -1205,6 +1286,7 @@ window.CommandsModule = (function() {
         handleCodeFence: handleCodeFence,
         handleHeadingConfirm: handleHeadingConfirm,
         handleBlockquoteEnter: handleBlockquoteEnter,
+        handleTaskListEnter: handleTaskListEnter,
         applyInlineFormatting: applyInlineFormatting,
         convertTaskLists: convertTaskLists
     };

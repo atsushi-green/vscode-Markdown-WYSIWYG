@@ -355,6 +355,111 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('handleTaskListEnter（タスクリスト内のEnter）', () => {
+        const CHECKBOX = '<input type="checkbox" class="task-checkbox" contenteditable="false">';
+
+        /** タスク項目のテキストノード（チェックボックス直後）の指定オフセットにキャレットを置く */
+        function placeCaretInTaskText(li: HTMLElement, offset: number): void {
+            const text = li.lastChild as Text;
+            const range = env.document.createRange();
+            range.setStart(text, Math.min(offset, text.textContent!.length));
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('本文末尾でEnterすると次に未チェックのタスク項目が作られる', () => {
+            env.editor.innerHTML = `<ul><li class="task-list-item">${CHECKBOX} タスク1</li></ul>`;
+            const li = env.editor.querySelector('li') as HTMLElement;
+            placeCaretInTaskText(li, (li.lastChild as Text).textContent!.length);
+            const handled = env.commands.handleTaskListEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const items = env.editor.querySelectorAll('li.task-list-item');
+            assert.strictEqual(items.length, 2, env.editor.innerHTML);
+            const newLi = items[1];
+            const checkbox = newLi.querySelector('input.task-checkbox') as HTMLInputElement;
+            assert.ok(checkbox, env.editor.innerHTML);
+            assert.strictEqual(checkbox.checked, false);
+        });
+
+        test('本文の途中でEnterすると項目が分割され後半が新項目へ移る', () => {
+            env.editor.innerHTML = `<ul><li class="task-list-item">${CHECKBOX} 前半後半</li></ul>`;
+            const li = env.editor.querySelector('li') as HTMLElement;
+            placeCaretInTaskText(li, 3); // " 前半" の直後
+            const handled = env.commands.handleTaskListEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const items = env.editor.querySelectorAll('li.task-list-item');
+            assert.strictEqual(items.length, 2, env.editor.innerHTML);
+            assert.strictEqual(items[0].textContent!.trim(), '前半');
+            assert.strictEqual(items[1].textContent!.trim(), '後半');
+        });
+
+        test('Enter後のHTMLは htmlToMarkdown で2つの `* [ ]` 行へ往復する', () => {
+            env.editor.innerHTML = `<ul><li class="task-list-item">${CHECKBOX} タスク1</li></ul>`;
+            const li = env.editor.querySelector('li') as HTMLElement;
+            placeCaretInTaskText(li, (li.lastChild as Text).textContent!.length);
+            env.commands.handleTaskListEnter(fakeKeyEvent('Enter'));
+            const newLi = env.editor.querySelectorAll('li')[1];
+            newLi.appendChild(env.document.createTextNode('タスク2'));
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/^\* \[ \] タスク1$/m.test(md), JSON.stringify(md));
+            assert.ok(/^\* \[ \] タスク2$/m.test(md), JSON.stringify(md));
+        });
+
+        test('空のタスク項目でEnterするとリストを抜けて段落へ移る', () => {
+            env.editor.innerHTML =
+                `<ul><li class="task-list-item">${CHECKBOX} タスク1</li>` +
+                `<li class="task-list-item">${CHECKBOX} </li></ul>`;
+            const empty = env.editor.querySelectorAll('li')[1] as HTMLElement;
+            placeCaretInTaskText(empty, 1);
+            const handled = env.commands.handleTaskListEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('li').length, 1, env.editor.innerHTML);
+            const ul = env.editor.querySelector('ul') as HTMLElement;
+            assert.strictEqual(ul.nextElementSibling?.tagName, 'P', env.editor.innerHTML);
+        });
+
+        test('唯一の空タスク項目でEnterするとリスト自体が削除される', () => {
+            env.editor.innerHTML = `<ul><li class="task-list-item">${CHECKBOX} </li></ul>`;
+            const li = env.editor.querySelector('li') as HTMLElement;
+            placeCaretInTaskText(li, 1);
+            const handled = env.commands.handleTaskListEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('ul'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('p'), env.editor.innerHTML);
+        });
+
+        test('リスト途中の空タスク項目でEnterするとリストが分割される', () => {
+            env.editor.innerHTML =
+                `<ul><li class="task-list-item">${CHECKBOX} タスク1</li>` +
+                `<li class="task-list-item">${CHECKBOX} </li>` +
+                `<li class="task-list-item">${CHECKBOX} タスク3</li></ul>`;
+            const empty = env.editor.querySelectorAll('li')[1] as HTMLElement;
+            placeCaretInTaskText(empty, 1);
+            const handled = env.commands.handleTaskListEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const uls = env.editor.querySelectorAll('ul');
+            assert.strictEqual(uls.length, 2, env.editor.innerHTML);
+            assert.strictEqual(uls[0].nextElementSibling?.tagName, 'P', env.editor.innerHTML);
+        });
+
+        test('Shift+Enterでは何もしない（false）', () => {
+            env.editor.innerHTML = `<ul><li class="task-list-item">${CHECKBOX} タスク1</li></ul>`;
+            const li = env.editor.querySelector('li') as HTMLElement;
+            placeCaretInTaskText(li, 4);
+            const handled = env.commands.handleTaskListEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            assert.strictEqual(handled, false);
+        });
+
+        test('通常のリスト項目では何もしない（false）', () => {
+            env.editor.innerHTML = '<ul><li>ふつうの項目</li></ul>';
+            placeCaretIn(env.editor.querySelector('li') as HTMLElement);
+            const handled = env.commands.handleTaskListEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, false);
+        });
+    });
+
     suite('insertToc（目次の生成・挿入）', () => {
         /** 見出しHTMLを組み立てる（実レンダリングと同じ heading-hash スパン付き） */
         function heading(level: number, text: string): string {

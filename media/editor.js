@@ -488,6 +488,11 @@
                 return;
             }
 
+            // タスクリスト項目内でのEnter処理（次のタスク項目を作成）
+            if (commands.handleTaskListEnter(e)) {
+                return;
+            }
+
             // コードブロック内でのEnterキー処理
             if (e.key === 'Enter' && !e.shiftKey) {
                 const selection = window.getSelection();
