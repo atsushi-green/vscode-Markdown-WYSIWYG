@@ -7,6 +7,7 @@ window.CommandsModule = (function() {
 
     const state = window.EditorState;
     const utils = window.EditorUtils;
+    const markdown = window.MarkdownModule;
 
     /**
      * highlight.jsが読み込まれたかチェック
@@ -398,6 +399,9 @@ window.CommandsModule = (function() {
             case 'underline':
                 document.execCommand('underline', false, null);
                 break;
+            case 'strikethrough':
+                document.execCommand('strikeThrough', false, null);
+                break;
             case 'h1':
                 formatHeading(1);
                 break;
@@ -422,9 +426,85 @@ window.CommandsModule = (function() {
             case 'quote':
                 insertBlockquote();
                 break;
+            case 'toc':
+                insertToc();
+                break;
         }
 
         state.editor.focus();
+    }
+
+    /**
+     * 見出し要素からアンカー表示用の `#` スパンを除いたテキストを取り出す
+     */
+    function headingText(heading) {
+        let text = '';
+        heading.childNodes.forEach(child => {
+            if (child.nodeType === Node.ELEMENT_NODE &&
+                child.classList &&
+                child.classList.contains('heading-hash')) {
+                return;
+            }
+            text += child.textContent;
+        });
+        return text.trim();
+    }
+
+    /**
+     * エディタ内の見出しから目次（TOC）を生成し、キャレット位置のブロックの
+     * 直後（キャレットが無ければ先頭）に挿入する。
+     * 見出しが無い場合はトーストで知らせて何もしない。
+     */
+    function insertToc() {
+        const headings = [];
+        state.editor.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => {
+            const text = headingText(h);
+            if (text) {
+                headings.push({ level: Number(h.tagName[1]), text: text });
+            }
+        });
+
+        if (!headings.length) {
+            utils.showToast('見出しが見つかりません');
+            return;
+        }
+
+        const tocMarkdown = markdown.buildTocMarkdown(headings);
+        const temp = document.createElement('div');
+        temp.innerHTML = markdown.markdownToHtml(tocMarkdown);
+        const nodes = Array.prototype.slice.call(temp.childNodes);
+        if (!nodes.length) {
+            return;
+        }
+
+        // 挿入位置を決める（キャレットのあるトップレベルブロックの直後）
+        const selection = window.getSelection();
+        let block = null;
+        if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            if (state.editor.contains(range.startContainer)) {
+                block = utils.findBlockAncestor(range.startContainer);
+                while (block && block.parentNode !== state.editor) {
+                    block = block.parentNode;
+                }
+            }
+        }
+
+        if (block && block.parentNode === state.editor) {
+            let ref = block;
+            nodes.forEach(n => {
+                ref.after(n);
+                ref = n;
+            });
+        } else {
+            const first = state.editor.firstChild;
+            nodes.forEach(n => {
+                state.editor.insertBefore(n, first);
+            });
+        }
+
+        // 文書へ反映
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     /**
@@ -554,10 +634,379 @@ window.CommandsModule = (function() {
     }
 
     /**
-     * 先頭プレフィックス入力でブロックを変換
+     * ノードがキャレット位置より前にあるかを判定する
+     */
+    function isNodeBeforeCaret(node, range) {
+        const idx = Array.prototype.indexOf.call(node.parentNode.childNodes, node);
+        // (parent, idx + 1) = node の直後の位置。それがキャレット以前ならnodeは前にある
+        return range.comparePoint(node.parentNode, idx + 1) <= 0;
+    }
+
+    /**
+     * ブロック内でキャレットの属する行を区切る<br>を探す。
+     * dir='before': キャレット直前の<br>（無ければnull＝行はブロック先頭から）
+     * dir='after' : キャレット直後の<br>（無ければnull＝行はブロック末尾まで）
+     */
+    function findLineBr(block, range, dir) {
+        const brs = block.querySelectorAll('br');
+        let before = null;
+        for (let i = 0; i < brs.length; i++) {
+            if (isNodeBeforeCaret(brs[i], range)) {
+                before = brs[i];
+            } else if (dir === 'after') {
+                return brs[i];
+            }
+        }
+        return dir === 'before' ? before : null;
+    }
+
+    /**
+     * エディタ直下に直接入力された裸テキスト（ブロック未生成）を
+     * ブロック変換のプレフィックスらしい場合だけ<p>で包んで返す。
+     * 空ドキュメントに「> 」等を入力したケースで発生する。
+     */
+    function wrapBareTextAtRoot(range) {
+        const node = range.startContainer;
+        if (node.nodeType !== Node.TEXT_NODE || node.parentNode !== state.editor) {
+            return null;
+        }
+        const prefix = node.textContent.slice(0, range.startOffset).trim();
+        if (!/^([-*]|\d+\.|>)$/.test(prefix)) {
+            return null;
+        }
+        const offset = range.startOffset;
+        const p = document.createElement('p');
+        state.editor.insertBefore(p, node);
+        p.appendChild(node);
+        // ノード移動でrangeが無効化されるため張り直す
+        range.setStart(node, offset);
+        range.collapse(true);
+        return p;
+    }
+
+    /**
+     * 先頭プレフィックス入力でブロックを変換。
+     * 複数行ブロック（Shift+Enter改行や複数行Markdown段落由来）では
+     * <br>区切りの「現在行」を対象に判定・変換する。
      */
     function handleAutoBlock(event) {
         if (event.key !== ' ' || event.ctrlKey || event.metaKey || event.altKey) {
+            return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        let block = utils.findBlockAncestor(range.startContainer);
+        if (!block) {
+            // 引用ブロック内で「> 」を入力した場合はネストした引用を作る
+            // （findBlockAncestor は BLOCKQUOTE を返さないためここで専用処理する）
+            if (handleNestedQuote(event, range)) {
+                return true;
+            }
+            // 空ドキュメント等でエディタ直下に直接入力されたケース
+            block = wrapBareTextAtRoot(range);
+            if (!block) {
+                return false;
+            }
+        }
+
+        // 現在行（直前の<br>から）のテキストで判定する
+        const brBefore = findLineBr(block, range, 'before');
+        const lineStart = document.createRange();
+        if (brBefore) {
+            lineStart.setStartAfter(brBefore);
+        } else {
+            lineStart.setStart(block, 0);
+        }
+        lineStart.setEnd(range.startContainer, range.startOffset);
+        const trimmed = lineStart.toString().trim();
+
+        const unordered = /^[-*]$/.test(trimmed);
+        const ordered = /^\d+\.$/.test(trimmed);
+        const quote = /^>$/.test(trimmed);
+
+        if (!unordered && !ordered && !quote) {
+            return false;
+        }
+
+        // remaining: キャレットから行末（次の<br>またはブロック末尾）まで
+        const brAfter = findLineBr(block, range, 'after');
+        const lineEnd = document.createRange();
+        lineEnd.setStart(range.startContainer, range.startOffset);
+        if (brAfter) {
+            lineEnd.setEndBefore(brAfter);
+        } else {
+            lineEnd.setEnd(block, block.childNodes.length);
+        }
+        const remaining = lineEnd.toString().replace(/^\s+/, '');
+
+        event.preventDefault();
+
+        let newBlock;
+        let caretTarget;
+        if (unordered || ordered) {
+            newBlock = document.createElement(ordered ? 'ol' : 'ul');
+            const li = document.createElement('li');
+            newBlock.appendChild(li);
+            caretTarget = li;
+        } else {
+            newBlock = document.createElement('blockquote');
+            caretTarget = newBlock;
+        }
+        if (remaining) {
+            caretTarget.textContent = remaining;
+        } else {
+            // 空ブロックは高さゼロで描画されない（blockquoteの左ボーダーも
+            // 見えずキャレットも失われる）ため、プレースホルダの<br>で
+            // 1行分の高さを確保する
+            caretTarget.appendChild(document.createElement('br'));
+        }
+
+        if (!brBefore && !brAfter) {
+            // 単一行ブロック: そのまま置き換え
+            block.replaceWith(newBlock);
+        } else {
+            // 複数行ブロック: 現在行だけを変換し、前後の行は残す
+            if (brAfter) {
+                const tail = document.createRange();
+                tail.setStartAfter(brAfter);
+                tail.setEnd(block, block.childNodes.length);
+                const tailFrag = tail.extractContents();
+                // 内容のない後続行（末尾のプレースホルダ<br>のみ等）は残さない
+                if (tailFrag.textContent || tailFrag.querySelector('br,img')) {
+                    const tailBlock = document.createElement('p');
+                    tailBlock.appendChild(tailFrag);
+                    block.after(tailBlock);
+                }
+            }
+            const line = document.createRange();
+            if (brBefore) {
+                line.setStartBefore(brBefore);
+            } else {
+                line.setStart(block, 0);
+            }
+            line.setEnd(block, block.childNodes.length);
+            line.deleteContents();
+            block.after(newBlock);
+            if (!brBefore || (!block.textContent && !block.querySelector('br,img'))) {
+                block.remove();
+            }
+        }
+
+        if (remaining) {
+            utils.placeCaretAt(caretTarget, 0);
+        } else {
+            // placeCaretAtは空テキストノードを作ってしまうため、
+            // プレースホルダ<br>の前（要素先頭）に直接キャレットを置く
+            const caretRange = document.createRange();
+            caretRange.setStart(caretTarget, 0);
+            caretRange.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(caretRange);
+            state.editor.focus();
+        }
+        return true;
+    }
+
+    /**
+     * 引用ブロック内の行頭で「> 」を入力したとき、1段深いネスト引用を作る。
+     * 対象行が「>」のみ（フレッシュな行頭）のときだけ発火する安全側の実装。
+     * ネスト構造は buildQuoteHtml / serializeBlockquoteLines が
+     * `> > text` として往復変換に対応済み。
+     */
+    function handleNestedQuote(event, range) {
+        const bq = utils.findAncestor(range.startContainer, function(el) {
+            return el.tagName === 'BLOCKQUOTE';
+        });
+        if (!bq) {
+            return false;
+        }
+
+        const textBefore = utils.getTextBeforeCaret(bq, range);
+        if (textBefore.trim() !== '>') {
+            return false;
+        }
+        const remaining = bq.textContent.slice(textBefore.length).replace(/^\s+/, '');
+
+        event.preventDefault();
+
+        const nested = document.createElement('blockquote');
+        nested.textContent = remaining;
+        bq.textContent = '';
+        bq.appendChild(nested);
+        utils.placeCaretAt(nested, 0);
+        return true;
+    }
+
+    /**
+     * 指定要素を含む最も外側のblockquoteを返す（ネスト対応）
+     */
+    function outermostBlockquote(el) {
+        let result = el;
+        let current = el.parentNode;
+        while (current && current !== state.editor) {
+            if (current.tagName === 'BLOCKQUOTE') {
+                result = current;
+            }
+            current = current.parentNode;
+        }
+        return result;
+    }
+
+    /**
+     * 引用ブロック内でのEnter / Shift+Enterを処理する。
+     * - Shift+Enter: 引用内に改行（<br>）を挿入して引用を継続する
+     * - Enter: キャレットが引用の末尾にあるとき、引用を抜けて後続の段落へ移る
+     *   （末尾以外での分割は実機依存のため、この段階では何もしない）
+     */
+    function handleBlockquoteEnter(event) {
+        if (event.key !== 'Enter' || event.ctrlKey || event.metaKey || event.altKey) {
+            return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        const bq = utils.findAncestor(range.startContainer, function(el) {
+            return el.tagName === 'BLOCKQUOTE';
+        });
+        if (!bq) {
+            return false;
+        }
+
+        // Shift+Enter: 引用内で改行
+        if (event.shiftKey) {
+            event.preventDefault();
+            const br = document.createElement('br');
+            range.deleteContents();
+            range.insertNode(br);
+            // 挿入した<br>の後ろに内容が無い場合、末尾の<br>は描画上の改行として
+            // 見えない（1回のShift+Enterでキャレットが進まない）ため、
+            // プレースホルダの<br>を補う。シリアライズ時は末尾の空行として除去される。
+            const rest = document.createRange();
+            rest.setStartAfter(br);
+            rest.setEnd(bq, bq.childNodes.length);
+            if (rest.toString().length === 0 &&
+                !rest.cloneContents().querySelector('br')) {
+                br.after(document.createElement('br'));
+            }
+            range.setStartAfter(br);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+
+        // Enter: 末尾にいるときだけ引用を抜ける
+        const outer = outermostBlockquote(bq);
+        const textBefore = utils.getTextBeforeCaret(outer, range);
+        if (textBefore.length < outer.textContent.length) {
+            return false;
+        }
+
+        event.preventDefault();
+        const p = document.createElement('p');
+        p.appendChild(document.createElement('br'));
+        outer.after(p);
+        utils.placeCaretAt(p, 0);
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    }
+
+    /**
+     * タスクリスト項目内でのEnterを処理する。
+     * ブラウザ標準のli分割ではチェックボックス（contenteditable=false）が
+     * 新しい行に引き継がれないため、通常リストと同じ挙動を自前で実装する。
+     * - 項目に本文があるとき: キャレット位置で分割し、次の行に未チェックの項目を作る
+     * - 項目が空のとき: 項目を削除してリストを抜ける（通常リストのEnterと同じ）
+     */
+    function handleTaskListEnter(event) {
+        if (event.key !== 'Enter' || event.shiftKey ||
+            event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
+            return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        const li = utils.findAncestor(range.startContainer, function(el) {
+            return el.tagName === 'LI' &&
+                el.classList && el.classList.contains('task-list-item');
+        });
+        if (!li) {
+            return false;
+        }
+
+        event.preventDefault();
+        if (!range.collapsed) {
+            range.deleteContents();
+        }
+
+        const list = li.parentElement;
+
+        // 空項目: 項目を削除してリストを抜ける（後続項目があればリストを分割）
+        if (li.textContent.trim() === '') {
+            const p = document.createElement('p');
+            p.appendChild(document.createElement('br'));
+            if (li.nextElementSibling) {
+                const rest = list.cloneNode(false);
+                while (li.nextSibling) {
+                    rest.appendChild(li.nextSibling);
+                }
+                list.after(p);
+                p.after(rest);
+            } else {
+                list.after(p);
+            }
+            li.remove();
+            if (!list.querySelector('li')) {
+                list.remove();
+            }
+            utils.placeCaretAt(p, 0);
+            state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+
+        // 本文あり: キャレット以降を新しいタスク項目へ移す
+        const newLi = document.createElement('li');
+        newLi.className = 'task-list-item';
+        newLi.appendChild(createTaskCheckbox(false));
+        const spacer = document.createTextNode(' ');
+        newLi.appendChild(spacer);
+
+        const tail = document.createRange();
+        tail.setStart(range.startContainer, range.startOffset);
+        tail.setEnd(li, li.childNodes.length);
+        // キャレットがチェックボックスより前にある場合、既存のチェックボックスを
+        // 移動対象に含めない
+        const ownCheckbox = li.querySelector(':scope > input.task-checkbox');
+        if (ownCheckbox && tail.intersectsNode(ownCheckbox)) {
+            tail.setStartAfter(ownCheckbox);
+        }
+        newLi.appendChild(tail.extractContents());
+
+        li.after(newLi);
+        setCaretInText(spacer, 1);
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    }
+
+    /**
+     * --- / *** / ___ の直後にEnterで水平線化
+     */
+    function handleHorizontalRule(event) {
+        if (event.key !== 'Enter' || event.ctrlKey || event.metaKey || event.altKey) {
             return false;
         }
 
@@ -572,39 +1021,29 @@ window.CommandsModule = (function() {
             return false;
         }
 
-        const textBefore = utils.getTextBeforeCaret(block, range);
-        const remaining = block.textContent.slice(textBefore.length).replace(/^\s+/, '');
-        const trimmed = textBefore.trim();
+        // リスト項目内では変換しない（リスト記法と紛らわしいため）
+        if (block.tagName === 'LI') {
+            return false;
+        }
 
-        const unordered = /^[-*]$/.test(trimmed);
-        const ordered = /^\d+\.$/.test(trimmed);
-        const quote = /^>$/.test(trimmed);
-
-        if (!unordered && !ordered && !quote) {
+        const text = block.textContent.trim();
+        if (!/^(-{3,}|\*{3,}|_{3,})$/.test(text)) {
             return false;
         }
 
         event.preventDefault();
+        event.stopPropagation();
 
-        if (unordered || ordered) {
-            const list = document.createElement(ordered ? 'ol' : 'ul');
-            const li = document.createElement('li');
-            li.textContent = remaining;
-            list.appendChild(li);
-            block.replaceWith(list);
-            utils.placeCaretAt(li, 0);
-            return true;
-        }
+        const hr = document.createElement('hr');
+        const p = document.createElement('p');
+        p.appendChild(document.createElement('br'));
+        block.replaceWith(hr);
+        hr.after(p);
+        utils.placeCaretAt(p, 0);
 
-        if (quote) {
-            const bq = document.createElement('blockquote');
-            bq.textContent = remaining;
-            block.replaceWith(bq);
-            utils.placeCaretAt(bq, 0);
-            return true;
-        }
-
-        return false;
+        // 変換結果を文書へ書き戻すため入力イベントを発火
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
     }
 
     /**
@@ -751,7 +1190,138 @@ window.CommandsModule = (function() {
      * インラインマークダウンを即時反映
      */
     function applyInlineFormatting() {
-        return walkInline(state.editor);
+        // contenteditableは入力中のテキストを複数の隣接テキストノードに分割するため、
+        // `**` の開始と終了が別ノードに割れて convertInlineText の正規表現にマッチしない
+        // ことがある。隣接テキストノードを結合してから走査する（要素境界はまたがない）。
+        state.editor.normalize();
+        const taskResult = convertTaskLists(state.editor);
+        const inlineResult = walkInline(state.editor);
+        return {
+            didFormat: taskResult.didFormat || inlineResult.didFormat,
+            caretHandled: taskResult.caretHandled || inlineResult.caretHandled
+        };
+    }
+
+    /**
+     * チェックボックス要素（レンダリング時と同じ構造）を生成する
+     */
+    function createTaskCheckbox(checked) {
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.className = 'task-checkbox';
+        input.setAttribute('contenteditable', 'false');
+        if (checked) {
+            input.checked = true;
+            input.setAttribute('checked', '');
+        }
+        return input;
+    }
+
+    /**
+     * 要素直下の先頭テキストノードを返す。
+     * 先頭が要素（既存チェックボックスや <strong> 等）やBRの場合はnull。
+     */
+    function leadingTextNode(el) {
+        let node = el.firstChild;
+        while (node) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                if (node.textContent.length > 0) {
+                    return node;
+                }
+                node = node.nextSibling;
+                continue;
+            }
+            return null;
+        }
+        return null;
+    }
+
+    /**
+     * 指定テキストノードのoffset位置にキャレットを置く
+     */
+    function setCaretInText(textNode, offset) {
+        const selection = window.getSelection();
+        if (!selection) {
+            return;
+        }
+        const range = document.createRange();
+        range.setStart(textNode, Math.min(offset, textNode.textContent.length));
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+
+    /**
+     * タスクリスト記法（[ ] / [] / [x]）をライブでチェックボックスへ変換する。
+     * ファイル読込時のパーサ（markdownToHtml）は `- [ ] ` しか解釈しないため、
+     * 入力中にGUIへ反映されない問題を補う。
+     * - 既存の li の先頭が [ ] / [] / [x] の場合: チェックボックスを差し込む
+     *   （`- [ ]` / `- []` を入力したケース。`- ` で handleAutoBlock が li 化済み）
+     * - リスト化されていない段落の先頭が -[] / -[ ] / -[x] の場合: タスクリスト化する
+     *   （`-[]` のようにスペース無しで handleAutoBlock が発火しなかったケース）
+     * いずれもキャレットはチェックボックス直後（本文の先頭）へ移動する。
+     */
+    function convertTaskLists(root) {
+        let didFormat = false;
+        let caretHandled = false;
+
+        // 記法トークン: [ ] / [] / [x] / [X]（閉じ括弧の直後はスペースか行末）
+        const TASK_RE = /^(\[[ xX]?\])(\s|$)/;
+
+        // --- ケース1: 既存の li 先頭 ---
+        const lis = Array.prototype.slice.call(root.querySelectorAll('li'));
+        lis.forEach(function(li) {
+            const textNode = leadingTextNode(li);
+            if (!textNode) {
+                return;
+            }
+            const m = TASK_RE.exec(textNode.textContent);
+            if (!m) {
+                return;
+            }
+            const checked = /x/i.test(m[1]);
+            textNode.textContent = textNode.textContent.slice(m[0].length);
+            li.classList.add('task-list-item');
+            li.insertBefore(document.createTextNode(' '), li.firstChild);
+            li.insertBefore(createTaskCheckbox(checked), li.firstChild);
+            setCaretInText(textNode, 0);
+            caretHandled = true;
+            didFormat = true;
+        });
+
+        // --- ケース2: リスト化されていない段落先頭（-[] 等） ---
+        const blocks = Array.prototype.slice.call(root.children);
+        blocks.forEach(function(block) {
+            if (block.tagName !== 'P' && block.tagName !== 'DIV') {
+                return;
+            }
+            const textNode = leadingTextNode(block);
+            if (!textNode) {
+                return;
+            }
+            const m = /^([-*])\s?(\[[ xX]?\])(\s|$)/.exec(textNode.textContent);
+            if (!m) {
+                return;
+            }
+            const checked = /x/i.test(m[2]);
+            textNode.textContent = textNode.textContent.slice(m[0].length);
+
+            const ul = document.createElement('ul');
+            const li = document.createElement('li');
+            li.className = 'task-list-item';
+            li.appendChild(createTaskCheckbox(checked));
+            li.appendChild(document.createTextNode(' '));
+            while (block.firstChild) {
+                li.appendChild(block.firstChild);
+            }
+            ul.appendChild(li);
+            block.replaceWith(ul);
+            setCaretInText(textNode, 0);
+            caretHandled = true;
+            didFormat = true;
+        });
+
+        return { didFormat: didFormat, caretHandled: caretHandled };
     }
 
     /**
@@ -818,6 +1388,9 @@ window.CommandsModule = (function() {
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
 
+        // 取り消し線（~~text~~）
+        html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+
         // 太字
         html = html.replace(/(\*\*|__)([^*]+?)\1/g, '<strong>$2</strong>');
 
@@ -839,10 +1412,15 @@ window.CommandsModule = (function() {
         insertLink: insertLink,
         insertCodeBlock: insertCodeBlock,
         insertBlockquote: insertBlockquote,
+        insertToc: insertToc,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,
+        handleHorizontalRule: handleHorizontalRule,
         handleCodeFence: handleCodeFence,
         handleHeadingConfirm: handleHeadingConfirm,
-        applyInlineFormatting: applyInlineFormatting
+        handleBlockquoteEnter: handleBlockquoteEnter,
+        handleTaskListEnter: handleTaskListEnter,
+        applyInlineFormatting: applyInlineFormatting,
+        convertTaskLists: convertTaskLists
     };
 })();

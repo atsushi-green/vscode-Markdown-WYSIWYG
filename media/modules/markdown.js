@@ -18,8 +18,11 @@ window.MarkdownModule = (function() {
     // ブロックレベル要素のタグ集合（シリアライズ時の判定に使用）
     const BLOCK_TAGS = new Set([
         'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE'
+        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE', 'HR'
     ]);
+
+    // 水平線（--- / *** / ___ 3文字以上の単独行）の判定
+    const HR_PATTERN = /^ {0,3}(-{3,}|\*{3,}|_{3,})\s*$/;
 
     /**
      * ゼロ幅文字を除去
@@ -53,6 +56,9 @@ window.MarkdownModule = (function() {
 
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
+
+        // 取り消し線（~~text~~）
+        html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
 
         // 太字斜体
         html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
@@ -112,6 +118,7 @@ window.MarkdownModule = (function() {
         if (matchFence(line)) return true;
         if (/^(#{1,6}) /.test(line)) return true;
         if (/^> ?/.test(line)) return true;
+        if (HR_PATTERN.test(line)) return true;
         if (/^(\s*)([-*]|\d+\.) /.test(line)) return true;
         if (isTableStart(line, nextLine)) return true;
         return false;
@@ -119,7 +126,9 @@ window.MarkdownModule = (function() {
 
     /**
      * リストアイテム配列からネストしたリストHTMLを構築
-     * items: [{ level, ordered, text }]
+     * items: [{ level, ordered, task, checked, text }]
+     * タスクアイテムはチェックボックス付きのliとして構築する。
+     * チェック状態は属性（checked）で持たせ、クローン・innerHTML経由でも保持されるようにする。
      */
     function buildListHtml(items) {
         let index = 0;
@@ -130,7 +139,15 @@ window.MarkdownModule = (function() {
             let html = `<${tag}>`;
 
             while (index < items.length && items[index].level >= level) {
-                html += `<li>${convertInline(escapeHtml(items[index].text))}`;
+                const item = items[index];
+                if (item.task) {
+                    const checkedAttr = item.checked ? ' checked' : '';
+                    html += '<li class="task-list-item">' +
+                        `<input type="checkbox" class="task-checkbox" contenteditable="false"${checkedAttr}> ` +
+                        convertInline(escapeHtml(item.text));
+                } else {
+                    html += `<li>${convertInline(escapeHtml(item.text))}`;
+                }
                 index++;
                 // 次のアイテムがより深い場合は、このliの中にネストさせる
                 if (index < items.length && items[index].level > level) {
@@ -144,6 +161,79 @@ window.MarkdownModule = (function() {
         }
 
         return items.length ? build(items[0].level) : '';
+    }
+
+    /**
+     * 引用行アイテム配列からネストしたblockquote HTMLを構築
+     * items: [{ level, text }]
+     * 同一レベルの連続行は<br>で連結し、深いレベルは入れ子のblockquoteにする。
+     */
+    function buildQuoteHtml(items) {
+        let index = 0;
+
+        function build(level) {
+            let html = '<blockquote>';
+            let needBr = false;
+
+            while (index < items.length && items[index].level >= level) {
+                if (items[index].level > level) {
+                    html += build(level + 1);
+                    needBr = false;
+                } else {
+                    if (needBr) {
+                        html += '<br>';
+                    }
+                    html += convertInline(escapeHtml(items[index].text));
+                    needBr = true;
+                    index++;
+                }
+            }
+
+            return html + '</blockquote>';
+        }
+
+        return items.length ? build(items[0].level) : '';
+    }
+
+    /**
+     * 見出しテキストをアンカー用スラッグへ変換する（GitHub風）。
+     * 小文字化し、文字・数字・アンダースコア・ハイフン・空白以外の記号を除去、
+     * 空白はハイフンに変換する。日本語などの文字はそのまま残す。
+     */
+    function slugify(text) {
+        return (text || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}_\s-]/gu, '')
+            .replace(/\s+/g, '-');
+    }
+
+    /**
+     * 見出し配列から目次（TOC）のMarkdownを組み立てる（純粋関数）。
+     * headings: [{ level, text }]
+     * - 最も浅い見出しをインデント0段として相対化する
+     * - 各行は `* [text](#slug)` 形式。重複スラッグには -1, -2 ... を付与
+     *   （GitHubの見出しアンカー生成と同じ規則）
+     * - リストマーカーは htmlToMarkdown の出力（`* `）に合わせ、往復で安定させる
+     */
+    function buildTocMarkdown(headings) {
+        if (!headings || !headings.length) {
+            return '';
+        }
+        const minLevel = headings.reduce((m, h) => Math.min(m, h.level), Infinity);
+        const seen = {};
+        const lines = headings.map(h => {
+            let slug = slugify(h.text) || 'section';
+            if (seen[slug] === undefined) {
+                seen[slug] = 0;
+            } else {
+                seen[slug] += 1;
+                slug = slug + '-' + seen[slug];
+            }
+            const indent = '  '.repeat(Math.max(0, h.level - minLevel));
+            return indent + '* [' + h.text + '](#' + slug + ')';
+        });
+        return lines.join('\n') + '\n';
     }
 
     /**
@@ -179,6 +269,13 @@ window.MarkdownModule = (function() {
 
             // --- 空行 ---
             if (!line.trim()) {
+                i++;
+                continue;
+            }
+
+            // --- 水平線 ---
+            if (HR_PATTERN.test(line)) {
+                out.push('<hr>');
                 i++;
                 continue;
             }
@@ -225,18 +322,18 @@ window.MarkdownModule = (function() {
                 continue;
             }
 
-            // --- 引用 ---
+            // --- 引用（ネスト対応: > > で1階層深く） ---
             if (/^> ?/.test(line)) {
-                const quoteLines = [];
-                while (i < lines.length && /^> ?/.test(lines[i])) {
-                    quoteLines.push(lines[i].replace(/^> ?/, ''));
+                const quoteItems = [];
+                while (i < lines.length && /^>/.test(lines[i])) {
+                    const m = /^((?:> ?)+)(.*)$/.exec(lines[i]);
+                    quoteItems.push({
+                        level: (m[1].match(/>/g) || []).length,
+                        text: m[2]
+                    });
                     i++;
                 }
-                out.push(
-                    '<blockquote>' +
-                    quoteLines.map(l => convertInline(escapeHtml(l))).join('<br>') +
-                    '</blockquote>'
-                );
+                out.push(buildQuoteHtml(quoteItems));
                 continue;
             }
 
@@ -246,10 +343,14 @@ window.MarkdownModule = (function() {
                 while (i < lines.length && /^(\s*)([-*]|\d+\.) /.test(lines[i])) {
                     const m = /^(\s*)([-*]|\d+\.) (.*)$/.exec(lines[i]);
                     const indent = m[1].replace(/\t/g, '  ').length;
+                    // タスクリスト記法（GFM: - [ ] / - [x]）の検出
+                    const task = /^\[([ xX])\] (.*)$/.exec(m[3]);
                     items.push({
                         level: Math.floor(indent / 2),
                         ordered: /^\d+\.$/.test(m[2]),
-                        text: m[3]
+                        task: task !== null,
+                        checked: task !== null && task[1].toLowerCase() === 'x',
+                        text: task !== null ? task[2] : m[3]
                     });
                     i++;
                 }
@@ -312,6 +413,13 @@ window.MarkdownModule = (function() {
                 const inner = serializeInlineChildren(node);
                 return inner ? `++${inner}++` : '';
             }
+            case 'DEL':
+            case 'S':
+            case 'STRIKE': {
+                // execCommand('strikeThrough')はブラウザによりstrike/sを生成する
+                const inner = serializeInlineChildren(node);
+                return inner ? `~~${inner}~~` : '';
+            }
             case 'CODE': {
                 const text = stripZeroWidth(node.textContent);
                 return text ? `\`${text}\`` : '';
@@ -369,20 +477,32 @@ window.MarkdownModule = (function() {
                 return;
             }
 
-            // li直下のインライン内容と、ネストしたリストを分離
+            // li直下のインライン内容と、ネストしたリスト・タスクチェックボックスを分離
             let text = '';
             const nestedLists = [];
+            let checkbox = null;
             li.childNodes.forEach(child => {
                 if (child.nodeType === Node.ELEMENT_NODE &&
                     (child.tagName === 'UL' || child.tagName === 'OL')) {
                     nestedLists.push(child);
+                } else if (child.nodeType === Node.ELEMENT_NODE &&
+                    child.tagName === 'INPUT' &&
+                    child.getAttribute('type') === 'checkbox') {
+                    checkbox = child;
                 } else {
                     text += serializeInline(child);
                 }
             });
 
+            // チェック状態は属性を優先（クローン・innerHTML経由ではプロパティが失われるため）
+            let taskPrefix = '';
+            if (checkbox) {
+                const checked = checkbox.hasAttribute('checked') || checkbox.checked;
+                taskPrefix = checked ? '[x] ' : '[ ] ';
+            }
+
             const marker = ordered ? `${index++}. ` : '* ';
-            md += '  '.repeat(depth) + marker + text.replace(/\n+/g, ' ').trim() + '\n';
+            md += '  '.repeat(depth) + marker + taskPrefix + text.replace(/\n+/g, ' ').trim() + '\n';
 
             nestedLists.forEach(nested => {
                 md += serializeList(nested, depth + 1);
@@ -390,6 +510,35 @@ window.MarkdownModule = (function() {
         });
 
         return md;
+    }
+
+    /**
+     * blockquote要素の内容を行の配列へ直列化（ネスト対応）
+     * 返す行はこのblockquote内での相対表現（ネストした引用は既に「> 」プレフィックス付き）。
+     */
+    function serializeBlockquoteLines(el) {
+        const lines = [];
+        let buffer = '';
+
+        const flush = () => {
+            const text = buffer.replace(/\n{2,}/g, '\n').replace(/^\n+|\n+$/g, '');
+            if (text.trim()) {
+                text.split('\n').forEach(l => lines.push(l.trim()));
+            }
+            buffer = '';
+        };
+
+        el.childNodes.forEach(child => {
+            if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'BLOCKQUOTE') {
+                flush();
+                serializeBlockquoteLines(child).forEach(l => lines.push('> ' + l));
+            } else {
+                buffer += serializeInline(child);
+            }
+        });
+        flush();
+
+        return lines;
     }
 
     /**
@@ -477,13 +626,16 @@ window.MarkdownModule = (function() {
             case 'OL':
                 return serializeList(el, 0) + '\n';
             case 'BLOCKQUOTE': {
-                const inner = serializeInlineChildren(el)
-                    .replace(/\n{2,}/g, '\n')
-                    .replace(/^\n+|\n+$/g, '');
-                return inner.split('\n').map(l => '> ' + l.trim()).join('\n') + '\n\n';
+                const lines = serializeBlockquoteLines(el);
+                if (!lines.length) {
+                    return '';
+                }
+                return lines.map(l => '> ' + l).join('\n') + '\n\n';
             }
             case 'TABLE':
                 return serializeTable(el);
+            case 'HR':
+                return '---\n\n';
             default:
                 return serializeInlineChildren(el);
         }
@@ -632,6 +784,8 @@ window.MarkdownModule = (function() {
         markdownToHtml: markdownToHtml,
         htmlToMarkdown: htmlToMarkdown,
         convertTableToMarkdown: convertTableToMarkdown,
-        getCleanHtmlFromEditor: getCleanHtmlFromEditor
+        getCleanHtmlFromEditor: getCleanHtmlFromEditor,
+        slugify: slugify,
+        buildTocMarkdown: buildTocMarkdown
     };
 })();

@@ -23,6 +23,43 @@
     const searchModule = window.SearchModule;
     const commands = window.CommandsModule;
 
+    // 単語数・文字数ステータスバー要素（初期化時に生成）
+    let wordCountStatusEl = null;
+
+    /**
+     * 単語数・文字数ステータスバーを生成する（一度だけ）
+     */
+    function initWordCountStatus() {
+        if (wordCountStatusEl || document.getElementById('word-count-status')) {
+            wordCountStatusEl = wordCountStatusEl || document.getElementById('word-count-status');
+            updateWordCount();
+            return;
+        }
+        wordCountStatusEl = document.createElement('div');
+        wordCountStatusEl.id = 'word-count-status';
+        wordCountStatusEl.className = 'word-count-status';
+        document.body.appendChild(wordCountStatusEl);
+        updateWordCount();
+    }
+
+    /**
+     * 現在の編集内容から単語数・文字数を数え直して表示を更新する。
+     * RAWモードではrawEditorの値、通常モードではエディタのテキストを対象にする。
+     */
+    function updateWordCount() {
+        if (!wordCountStatusEl) {
+            return;
+        }
+        let text = '';
+        if (state.isRawMode && state.rawEditor) {
+            text = state.rawEditor.value || '';
+        } else if (state.editor) {
+            text = state.editor.textContent || '';
+        }
+        const c = utils.countText(text);
+        wordCountStatusEl.textContent = `単語数: ${c.words} / 文字数: ${c.chars}`;
+    }
+
     /**
      * エディタの初期化
      */
@@ -35,6 +72,9 @@
 
         // エディタの変更を監視
         setupEditorInputEvent();
+
+        // タスクリストのチェックボックス操作を監視
+        setupTaskCheckboxEvent();
 
         // VS Codeからのメッセージを受信
         setupMessageListener();
@@ -60,6 +100,9 @@
         // コードブロック言語セレクタのイベント
         commands.setupCodeLangEvents();
 
+        // 単語数・文字数ステータスバーを生成
+        initWordCountStatus();
+
         console.log('[Editor] Initialized');
     }
 
@@ -68,6 +111,10 @@
      */
     function setupToolbarEvents() {
         document.querySelectorAll('.toolbar-btn').forEach(button => {
+            // クリックでエディタの選択範囲が失われないようフォーカス移動を抑止
+            if (button.hasAttribute('data-command')) {
+                button.addEventListener('mousedown', (e) => e.preventDefault());
+            }
             button.addEventListener('click', () => {
                 const command = button.getAttribute('data-command');
                 if (command) {
@@ -127,7 +174,37 @@
             // Mermaid図を更新
             mermaidModule.update();
 
+            // 単語数・文字数の表示を更新
+            updateWordCount();
+
             // 文書への書き戻し（変換コストが高いためデバウンス）
+            if (editSyncTimeout) {
+                clearTimeout(editSyncTimeout);
+            }
+            editSyncTimeout = setTimeout(syncEditorToDocument, 150);
+        });
+    }
+
+    /**
+     * タスクリストのチェックボックス操作の設定
+     * 再レンダリングで要素が作り直されるため、エディタへの委譲で監視する
+     */
+    function setupTaskCheckboxEvent() {
+        state.editor.addEventListener('change', (event) => {
+            const target = event.target;
+            if (!target || target.tagName !== 'INPUT' ||
+                !target.classList.contains('task-checkbox')) {
+                return;
+            }
+
+            // checked状態を属性へ反映（クローン・シリアライズ時に状態を保持するため）
+            if (target.checked) {
+                target.setAttribute('checked', '');
+            } else {
+                target.removeAttribute('checked');
+            }
+
+            // 文書への書き戻し（入力イベントと同じデバウンス経路）
             if (editSyncTimeout) {
                 clearTimeout(editSyncTimeout);
             }
@@ -170,6 +247,7 @@
                 state.isUpdating = false;
             }
             state.lastSentMarkdown = incoming;
+            updateWordCount();
             return;
         }
 
@@ -215,6 +293,9 @@
         state.lastSentMarkdown = incoming;
 
         state.isUpdating = false;
+
+        // 単語数・文字数の表示を更新
+        updateWordCount();
     }
 
     /**
@@ -267,6 +348,9 @@
                 content: normalized
             });
         }
+
+        // モード切り替え後の内容で単語数・文字数を更新
+        updateWordCount();
     }
 
     /**
@@ -284,6 +368,9 @@
                 type: 'edit',
                 content: md
             });
+
+            // 単語数・文字数の表示を更新
+            updateWordCount();
         });
     }
 
@@ -372,7 +459,18 @@
                 return;
             }
 
+            // 目次（TOC）の生成・挿入（Ctrl+Shift+O / Cmd+Shift+O）
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
+                e.preventDefault();
+                commands.executeCommand('toc');
+                return;
+            }
+
             if (commands.handleAutoBlock(e)) {
+                return;
+            }
+
+            if (commands.handleHorizontalRule(e)) {
                 return;
             }
 
@@ -382,6 +480,16 @@
 
             // 見出しの確定処理（Enterキー）
             if (commands.handleHeadingConfirm(e)) {
+                return;
+            }
+
+            // 引用ブロック内でのEnter / Shift+Enter処理
+            if (commands.handleBlockquoteEnter(e)) {
+                return;
+            }
+
+            // タスクリスト項目内でのEnter処理（次のタスク項目を作成）
+            if (commands.handleTaskListEnter(e)) {
                 return;
             }
 
@@ -423,6 +531,13 @@
                     case 'u':
                         e.preventDefault();
                         commands.executeCommand('underline');
+                        break;
+                    case 'x':
+                        // Ctrl+X（切り取り）と区別するためShift併用時のみ
+                        if (e.shiftKey) {
+                            e.preventDefault();
+                            commands.executeCommand('strikethrough');
+                        }
                         break;
                 }
             }

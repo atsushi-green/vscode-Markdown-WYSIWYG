@@ -43,7 +43,8 @@ const FIXTURE_HTML = `<!DOCTYPE html>
 </html>`;
 
 // Webviewと同じ読み込み順（依存関係があるため順序が重要）
-const MODULE_FILES = ['state.js', 'utils.js', 'markdown.js', 'table.js', 'search.js'];
+// mermaid.js は mermaid.min.js 本体に依存するため除外
+const MODULE_FILES = ['state.js', 'utils.js', 'markdown.js', 'table.js', 'search.js', 'commands.js'];
 
 export interface EditorEnv {
     /** jsdomのwindow（モジュールはここに登録される） */
@@ -59,6 +60,8 @@ export interface EditorEnv {
     table: any;
     /** window.SearchModule */
     search: any;
+    /** window.CommandsModule */
+    commands: any;
     /** #editor 要素 */
     editor: HTMLElement;
     /** vscode.postMessage されたメッセージの記録 */
@@ -119,6 +122,7 @@ export function createEditorEnv(): EditorEnv {
         markdown: window.MarkdownModule,
         table: window.TableModule,
         search: window.SearchModule,
+        commands: window.CommandsModule,
         editor: window.document.getElementById('editor'),
         posted,
         copiedTexts

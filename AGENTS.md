@@ -18,8 +18,15 @@
   - Excelからのデータ貼り付け（タブ区切りデータ対応）
   - テーブル全体のコピー（Excel等へ貼り付け可能）
   - Markdown形式との自動相互変換
-- **シンタックスハイライト**: コードブロック内のコードを自動的に色付け（Python、Bash、PowerShell、C、SQL対応）
+- **タスクリスト**: GFMのタスクリスト記法（`- [ ]` / `- [x]`）をチェックボックスとして表示し、クリックで完了/未完了を切り替え（Markdownソースへ即時反映）。入力中も `- [ ]` / `- []` / `-[]`（スペース有無を問わず）を打った時点でチェックボックスへライブ変換（`commands.js` の `convertTaskLists`）
+- **シンタックスハイライト**: コードブロック内のコードを自動的に色付け。`highlight.min.js`（highlight.js commonビルド）が JavaScript/TypeScript/JSON/YAML/Go/Rust を含む約36言語を登録済みで、加えて PowerShell を個別バンドルで追加。未登録・未指定の言語は自動判定
 - **リアルタイム同期**: WYSIWYGビューとMarkdownソースの双方向同期
+- **単語数・文字数表示**: エディタ右下に固定表示するステータスバーで単語数・文字数（空白除外・コードポイント単位）をリアルタイム更新（数え上げは `utils.js` の `countText`、UIは `editor.js` が動的生成。`markdownEditor.ts` のHTMLには手を入れない）
+- **目次(TOC)生成**: 見出し(h1〜h6)から目次を生成してキャレット位置へ挿入（`Ctrl+Shift+O` / `executeCommand('toc')`）。スラッグ生成 `markdown.slugify`・目次組み立て `markdown.buildTocMarkdown`（純粋関数）＋ `commands.insertToc`（DOM挿入）。重複見出しは `-1`/`-2` 付与、`> > text` 同様に往復変換で安定
+- **書式ツールバー**: 太字・斜体・下線・見出し・リスト・引用・リンク・コードブロックのボタン列（選択範囲を保持したまま適用）
+- **インラインライブ変換**: `**太字**` / `~~取り消し線~~` 等を入力中に即時変換（`commands.js` の `applyInlineFormatting`）。contenteditableが入力テキストを複数の隣接テキストノードに分割しても記法がマッチするよう、走査前に `editor.normalize()` でテキストノードを結合する（要素境界はまたがない）
+- **オートブロック変換**: 行頭の `- ` / `1. ` / `> ` をその場でリスト・引用へ変換（`commands.js` の `handleAutoBlock`）。引用ブロック内で `> ` を入力すると1段深いネスト引用を作る（`handleNestedQuote`。往復変換は `> > ` 形式）
+- **引用ブロックのEnter操作**: 引用の末尾で `Enter` は引用を抜けて後続段落へ、`Shift+Enter` は引用内改行（`<br>`）（`commands.js` の `handleBlockquoteEnter`。`editor.js` のkeydownでコードブロックEnter処理より前に配線）
 - **キーボードショートカット**: 一般的なショートカット（Ctrl+B、Ctrl+Iなど）をサポート
 - **テーマ対応**: VS Codeのカラーテーマに自動適応
 
@@ -122,8 +129,8 @@ npm run compile-tests
 ```
 
 - **ユニットテスト** (`src/test/unit/`): `media/modules/` のWebviewモジュール
-  （Markdown⇔HTML変換、テーブル編集、検索、ユーティリティ）をjsdomで構築した
-  Webview相当のDOM環境で検証する。`src/test/unit/helper.ts` が実際のWebviewと
+  （Markdown⇔HTML変換、テーブル編集、検索、コマンド・オートブロック変換、
+  ユーティリティ）をjsdomで構築したWebview相当のDOM環境で検証する。`src/test/unit/helper.ts` が実際のWebviewと
   同じ順序でモジュールを読み込み、`acquireVsCodeApi` をスタブする。
 - **統合テスト** (`src/test/extension.test.ts`): `@vscode/test-cli` でVS Code本体を
   起動し、コマンド登録、WYSIWYG⇔テキストエディタ切り替え、`updateTextDocument` の
@@ -149,8 +156,9 @@ npm run package
 ### 短期的な改善
 - 画像の挿入機能
 - より多くの言語のシンタックスハイライト対応
-- タスクリスト（チェックボックス）のサポート
 - テーブルのセル結合機能
+
+（機能バックログの詳細は `docs/ROADMAP.md` を参照）
 
 ### 長期的な改善
 - 脚注のサポート

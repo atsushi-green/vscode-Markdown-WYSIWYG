@@ -42,6 +42,11 @@ suite('MarkdownModule', () => {
             assert.ok(html.includes('<strong><em>強調</em></strong>'), html);
         });
 
+        test('取り消し線（~~text~~）をdelに変換する', () => {
+            const html = env.markdown.markdownToHtml('前 ~~取り消し~~ 後');
+            assert.ok(html.includes('<del>取り消し</del>'), html);
+        });
+
         test('連続行は1つの段落にまとめ、行間は<br>にする', () => {
             const html = env.markdown.markdownToHtml('1行目\n2行目');
             assert.strictEqual(html, '<p>1行目<br>2行目</p>');
@@ -85,9 +90,64 @@ suite('MarkdownModule', () => {
             assert.strictEqual(html, '<ol><li>一</li><li>二</li></ol>');
         });
 
+        test('タスクリスト（- [ ] / - [x]）をチェックボックス付きliに変換する', () => {
+            const html = env.markdown.markdownToHtml('- [ ] 未完了\n- [x] 完了');
+            assert.ok(html.includes('<li class="task-list-item">'), html);
+            assert.ok(
+                html.includes('<input type="checkbox" class="task-checkbox" contenteditable="false"> 未完了'),
+                html
+            );
+            assert.ok(
+                html.includes('<input type="checkbox" class="task-checkbox" contenteditable="false" checked> 完了'),
+                html
+            );
+        });
+
+        test('大文字X（- [X]）もチェック済みとして扱う', () => {
+            const html = env.markdown.markdownToHtml('- [X] 完了');
+            assert.ok(html.includes(' checked> 完了'), html);
+        });
+
+        test('タスクリストと通常リストの混在・ネストを変換する', () => {
+            const html = env.markdown.markdownToHtml('- [ ] 親タスク\n  - 通常ネスト\n- 通常項目');
+            assert.ok(html.includes('<li class="task-list-item">'), html);
+            assert.ok(html.includes('<ul><li>通常ネスト</li></ul>'), html);
+            assert.ok(html.includes('<li>通常項目</li>'), html);
+        });
+
+        test('タスク記法でない角括弧（リンク等）はチェックボックスにしない', () => {
+            const html = env.markdown.markdownToHtml('- [リンク](https://example.com)');
+            assert.ok(!html.includes('checkbox'), html);
+            assert.ok(html.includes('<a href="https://example.com">リンク</a>'), html);
+        });
+
         test('引用ブロック（複数行）を変換する', () => {
             const html = env.markdown.markdownToHtml('> 引用1\n> 引用2');
             assert.strictEqual(html, '<blockquote>引用1<br>引用2</blockquote>');
+        });
+
+        test('ネストした引用（> >）を入れ子のblockquoteに変換する', () => {
+            const html = env.markdown.markdownToHtml('> 引用1\n> > ネスト\n> 引用2');
+            assert.strictEqual(
+                html,
+                '<blockquote>引用1<blockquote>ネスト</blockquote>引用2</blockquote>'
+            );
+        });
+
+        test('スペースなしのネスト引用（>>）も1階層深い引用として扱う', () => {
+            const html = env.markdown.markdownToHtml('> 外側\n>> 内側');
+            assert.strictEqual(
+                html,
+                '<blockquote>外側<blockquote>内側</blockquote></blockquote>'
+            );
+        });
+
+        test('2階層以上飛んだネスト引用も安全に処理する', () => {
+            const html = env.markdown.markdownToHtml('> 外側\n> > > 深い');
+            assert.strictEqual(
+                html,
+                '<blockquote>外側<blockquote><blockquote>深い</blockquote></blockquote></blockquote>'
+            );
         });
 
         test('テーブルをthead/tbody付きで変換する', () => {
@@ -107,6 +167,23 @@ suite('MarkdownModule', () => {
             const md = '| A |\n| --- |\n| a\\|b |';
             const html = env.markdown.markdownToHtml(md);
             assert.ok(html.includes('<td>a|b</td>'), html);
+        });
+
+        test('水平線（--- / *** / ___）をhrに変換する', () => {
+            assert.strictEqual(env.markdown.markdownToHtml('---'), '<hr>');
+            assert.strictEqual(env.markdown.markdownToHtml('***'), '<hr>');
+            assert.strictEqual(env.markdown.markdownToHtml('___'), '<hr>');
+            assert.strictEqual(env.markdown.markdownToHtml('-----'), '<hr>');
+        });
+
+        test('2文字以下の --- もどきは水平線にしない', () => {
+            const html = env.markdown.markdownToHtml('--');
+            assert.strictEqual(html, '<p>--</p>');
+        });
+
+        test('段落の直後の水平線で段落を区切る', () => {
+            const html = env.markdown.markdownToHtml('段落\n---\n次の段落');
+            assert.strictEqual(html, '<p>段落</p><hr><p>次の段落</p>');
         });
 
         test('本文のHTML特殊文字をエスケープする（XSS防止）', () => {
@@ -141,6 +218,12 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md, '**太字** *斜体* ++下線++ `c` [リンク](https://example.com)\n');
         });
 
+        test('取り消し線（del/s/strike）を~~でシリアライズする', () => {
+            assert.strictEqual(env.markdown.htmlToMarkdown('<p><del>a</del></p>'), '~~a~~\n');
+            assert.strictEqual(env.markdown.htmlToMarkdown('<p><s>b</s></p>'), '~~b~~\n');
+            assert.strictEqual(env.markdown.htmlToMarkdown('<p><strike>c</strike></p>'), '~~c~~\n');
+        });
+
         test('ネストしたリストを2スペースインデントでシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown(
                 '<ul><li>項目1<ul><li>ネスト</li></ul></li><li>項目2</li></ul>'
@@ -151,6 +234,25 @@ suite('MarkdownModule', () => {
         test('番号付きリストを連番でシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown('<ol><li>一</li><li>二</li></ol>');
             assert.strictEqual(md, '1. 一\n2. 二\n');
+        });
+
+        test('タスクリストのチェックボックスを[ ]/[x]でシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<ul>' +
+                '<li class="task-list-item"><input type="checkbox" class="task-checkbox"> 未完了</li>' +
+                '<li class="task-list-item"><input type="checkbox" class="task-checkbox" checked> 完了</li>' +
+                '</ul>'
+            );
+            assert.strictEqual(md, '* [ ] 未完了\n* [x] 完了\n');
+        });
+
+        test('チェック状態はchecked属性から判定する（クリック後の状態を反映）', () => {
+            // change ハンドラが属性を付与した後のDOMを模擬
+            const md = env.markdown.htmlToMarkdown(
+                '<ul><li class="task-list-item">' +
+                '<input type="checkbox" class="task-checkbox" checked=""> タスク</li></ul>'
+            );
+            assert.strictEqual(md, '* [x] タスク\n');
         });
 
         test('コードブロックを言語付きフェンスでシリアライズする', () => {
@@ -172,6 +274,18 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md, '> 引用1\n> 引用2\n');
         });
 
+        test('ネストしたblockquoteを> > 形式でシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<blockquote>引用1<blockquote>ネスト</blockquote>引用2</blockquote>'
+            );
+            assert.strictEqual(md, '> 引用1\n> > ネスト\n> 引用2\n');
+        });
+
+        test('空のblockquoteは出力しない', () => {
+            const md = env.markdown.htmlToMarkdown('<blockquote></blockquote>');
+            assert.strictEqual(md, '');
+        });
+
         test('テーブルをセル内装飾を保持してシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown(
                 '<table><thead><tr><th>列A</th><th>列B</th></tr></thead>' +
@@ -189,6 +303,11 @@ suite('MarkdownModule', () => {
                 '<tbody><tr><td>a|b</td></tr></tbody></table>'
             );
             assert.ok(md.includes('| a\\|b |'), md);
+        });
+
+        test('hr要素を---でシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown('<p>前</p><hr><p>後</p>');
+            assert.strictEqual(md, '前\n\n---\n\n後\n');
         });
 
         test('contenteditableが生成する行単位のdivを1行として扱う', () => {
@@ -214,17 +333,23 @@ suite('MarkdownModule', () => {
                 '',
                 '## 見出し2',
                 '',
-                '段落テキスト **太字** *斜体* ++下線++ `コード` [リンク](https://example.com)',
+                '段落テキスト **太字** *斜体* ++下線++ ~~取り消し~~ `コード` [リンク](https://example.com)',
                 '',
                 '* 項目1',
                 '* 項目2',
                 '  * ネスト項目',
+                '',
+                '* [ ] 未完了タスク',
+                '* [x] 完了タスク',
                 '',
                 '1. 番号1',
                 '2. 番号2',
                 '',
                 '> 引用行1',
                 '> 引用行2',
+                '> > ネスト引用',
+                '',
+                '---',
                 '',
                 '```python',
                 'print("hello")',
@@ -299,6 +424,77 @@ suite('MarkdownModule', () => {
                 '<tbody><tr><td>a</td><td>b</td></tr></tbody>'
             );
             assert.strictEqual(md, '| H1 | H2 |\n| --- | --- |\n| a | b |\n\n');
+        });
+    });
+
+    suite('slugify', () => {
+        test('英字は小文字化し空白をハイフンにする', () => {
+            assert.strictEqual(env.markdown.slugify('Hello World'), 'hello-world');
+        });
+
+        test('記号を除去する', () => {
+            assert.strictEqual(env.markdown.slugify('Foo: Bar! (baz)?'), 'foo-bar-baz');
+        });
+
+        test('日本語はそのまま残す', () => {
+            assert.strictEqual(env.markdown.slugify('第1章 はじめに'), '第1章-はじめに');
+        });
+
+        test('アンダースコアとハイフンは保持する', () => {
+            assert.strictEqual(env.markdown.slugify('a_b-c'), 'a_b-c');
+        });
+    });
+
+    suite('buildTocMarkdown', () => {
+        test('見出しレベルに応じてネストした箇条書きを作る', () => {
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 1, text: 'Title' },
+                { level: 2, text: 'Section A' },
+                { level: 3, text: 'Detail' },
+                { level: 2, text: 'Section B' }
+            ]);
+            assert.strictEqual(
+                toc,
+                '* [Title](#title)\n' +
+                '  * [Section A](#section-a)\n' +
+                '    * [Detail](#detail)\n' +
+                '  * [Section B](#section-b)\n'
+            );
+        });
+
+        test('最も浅い見出しをインデント0段に相対化する', () => {
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 2, text: 'A' },
+                { level: 3, text: 'B' }
+            ]);
+            assert.strictEqual(toc, '* [A](#a)\n  * [B](#b)\n');
+        });
+
+        test('重複する見出しには -1, -2 を付与する', () => {
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 1, text: 'Intro' },
+                { level: 1, text: 'Intro' },
+                { level: 1, text: 'Intro' }
+            ]);
+            assert.strictEqual(
+                toc,
+                '* [Intro](#intro)\n* [Intro](#intro-1)\n* [Intro](#intro-2)\n'
+            );
+        });
+
+        test('見出しが空なら空文字を返す', () => {
+            assert.strictEqual(env.markdown.buildTocMarkdown([]), '');
+        });
+
+        test('生成したTOCは markdownToHtml→htmlToMarkdown で往復しても保たれる', () => {
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 1, text: 'Title' },
+                { level: 2, text: 'Section A' },
+                { level: 2, text: 'Section B' }
+            ]);
+            const html = env.markdown.markdownToHtml(toc);
+            const md = env.markdown.htmlToMarkdown(html);
+            assert.strictEqual(md.trim(), toc.trim());
         });
     });
 });
