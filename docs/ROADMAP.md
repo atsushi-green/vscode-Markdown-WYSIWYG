@@ -65,7 +65,7 @@
 | 2026-07-15 | 引用内での `> ` 入力によるネスト引用の作成（`handleNestedQuote`） | `19ff5cc` |
 | 2026-07-15 | 引用ブロックのEnter（引用を抜ける）/Shift+Enter（引用内改行）対応（`handleBlockquoteEnter`） | `cc7a1d6` |
 | 2026-07-15 | JS/TS/JSON/YAML/Go/Rust のシンタックスハイライト対応の明文化（commonビルドに既存・回帰テスト追加） | `9db72a8` |
-| 2026-07-15 | 単語数・文字数のステータス表示（右下バー・`utils.countText`） | `_______` |
+| 2026-07-15 | 単語数・文字数のステータス表示（右下バー・`utils.countText`） | `4b86e1c` |
 
 ## 見送り (blocked)
 
