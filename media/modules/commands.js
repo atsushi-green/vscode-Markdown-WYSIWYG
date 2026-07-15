@@ -634,7 +634,60 @@ window.CommandsModule = (function() {
     }
 
     /**
-     * 先頭プレフィックス入力でブロックを変換
+     * ノードがキャレット位置より前にあるかを判定する
+     */
+    function isNodeBeforeCaret(node, range) {
+        const idx = Array.prototype.indexOf.call(node.parentNode.childNodes, node);
+        // (parent, idx + 1) = node の直後の位置。それがキャレット以前ならnodeは前にある
+        return range.comparePoint(node.parentNode, idx + 1) <= 0;
+    }
+
+    /**
+     * ブロック内でキャレットの属する行を区切る<br>を探す。
+     * dir='before': キャレット直前の<br>（無ければnull＝行はブロック先頭から）
+     * dir='after' : キャレット直後の<br>（無ければnull＝行はブロック末尾まで）
+     */
+    function findLineBr(block, range, dir) {
+        const brs = block.querySelectorAll('br');
+        let before = null;
+        for (let i = 0; i < brs.length; i++) {
+            if (isNodeBeforeCaret(brs[i], range)) {
+                before = brs[i];
+            } else if (dir === 'after') {
+                return brs[i];
+            }
+        }
+        return dir === 'before' ? before : null;
+    }
+
+    /**
+     * エディタ直下に直接入力された裸テキスト（ブロック未生成）を
+     * ブロック変換のプレフィックスらしい場合だけ<p>で包んで返す。
+     * 空ドキュメントに「> 」等を入力したケースで発生する。
+     */
+    function wrapBareTextAtRoot(range) {
+        const node = range.startContainer;
+        if (node.nodeType !== Node.TEXT_NODE || node.parentNode !== state.editor) {
+            return null;
+        }
+        const prefix = node.textContent.slice(0, range.startOffset).trim();
+        if (!/^([-*]|\d+\.|>)$/.test(prefix)) {
+            return null;
+        }
+        const offset = range.startOffset;
+        const p = document.createElement('p');
+        state.editor.insertBefore(p, node);
+        p.appendChild(node);
+        // ノード移動でrangeが無効化されるため張り直す
+        range.setStart(node, offset);
+        range.collapse(true);
+        return p;
+    }
+
+    /**
+     * 先頭プレフィックス入力でブロックを変換。
+     * 複数行ブロック（Shift+Enter改行や複数行Markdown段落由来）では
+     * <br>区切りの「現在行」を対象に判定・変換する。
      */
     function handleAutoBlock(event) {
         if (event.key !== ' ' || event.ctrlKey || event.metaKey || event.altKey) {
@@ -647,16 +700,30 @@ window.CommandsModule = (function() {
         }
 
         const range = selection.getRangeAt(0);
-        const block = utils.findBlockAncestor(range.startContainer);
+        let block = utils.findBlockAncestor(range.startContainer);
         if (!block) {
             // 引用ブロック内で「> 」を入力した場合はネストした引用を作る
             // （findBlockAncestor は BLOCKQUOTE を返さないためここで専用処理する）
-            return handleNestedQuote(event, range);
+            if (handleNestedQuote(event, range)) {
+                return true;
+            }
+            // 空ドキュメント等でエディタ直下に直接入力されたケース
+            block = wrapBareTextAtRoot(range);
+            if (!block) {
+                return false;
+            }
         }
 
-        const textBefore = utils.getTextBeforeCaret(block, range);
-        const remaining = block.textContent.slice(textBefore.length).replace(/^\s+/, '');
-        const trimmed = textBefore.trim();
+        // 現在行（直前の<br>から）のテキストで判定する
+        const brBefore = findLineBr(block, range, 'before');
+        const lineStart = document.createRange();
+        if (brBefore) {
+            lineStart.setStartAfter(brBefore);
+        } else {
+            lineStart.setStart(block, 0);
+        }
+        lineStart.setEnd(range.startContainer, range.startOffset);
+        const trimmed = lineStart.toString().trim();
 
         const unordered = /^[-*]$/.test(trimmed);
         const ordered = /^\d+\.$/.test(trimmed);
@@ -666,27 +733,83 @@ window.CommandsModule = (function() {
             return false;
         }
 
+        // remaining: キャレットから行末（次の<br>またはブロック末尾）まで
+        const brAfter = findLineBr(block, range, 'after');
+        const lineEnd = document.createRange();
+        lineEnd.setStart(range.startContainer, range.startOffset);
+        if (brAfter) {
+            lineEnd.setEndBefore(brAfter);
+        } else {
+            lineEnd.setEnd(block, block.childNodes.length);
+        }
+        const remaining = lineEnd.toString().replace(/^\s+/, '');
+
         event.preventDefault();
 
+        let newBlock;
+        let caretTarget;
         if (unordered || ordered) {
-            const list = document.createElement(ordered ? 'ol' : 'ul');
+            newBlock = document.createElement(ordered ? 'ol' : 'ul');
             const li = document.createElement('li');
-            li.textContent = remaining;
-            list.appendChild(li);
-            block.replaceWith(list);
-            utils.placeCaretAt(li, 0);
-            return true;
+            newBlock.appendChild(li);
+            caretTarget = li;
+        } else {
+            newBlock = document.createElement('blockquote');
+            caretTarget = newBlock;
+        }
+        if (remaining) {
+            caretTarget.textContent = remaining;
+        } else {
+            // 空ブロックは高さゼロで描画されない（blockquoteの左ボーダーも
+            // 見えずキャレットも失われる）ため、プレースホルダの<br>で
+            // 1行分の高さを確保する
+            caretTarget.appendChild(document.createElement('br'));
         }
 
-        if (quote) {
-            const bq = document.createElement('blockquote');
-            bq.textContent = remaining;
-            block.replaceWith(bq);
-            utils.placeCaretAt(bq, 0);
-            return true;
+        if (!brBefore && !brAfter) {
+            // 単一行ブロック: そのまま置き換え
+            block.replaceWith(newBlock);
+        } else {
+            // 複数行ブロック: 現在行だけを変換し、前後の行は残す
+            if (brAfter) {
+                const tail = document.createRange();
+                tail.setStartAfter(brAfter);
+                tail.setEnd(block, block.childNodes.length);
+                const tailFrag = tail.extractContents();
+                // 内容のない後続行（末尾のプレースホルダ<br>のみ等）は残さない
+                if (tailFrag.textContent || tailFrag.querySelector('br,img')) {
+                    const tailBlock = document.createElement('p');
+                    tailBlock.appendChild(tailFrag);
+                    block.after(tailBlock);
+                }
+            }
+            const line = document.createRange();
+            if (brBefore) {
+                line.setStartBefore(brBefore);
+            } else {
+                line.setStart(block, 0);
+            }
+            line.setEnd(block, block.childNodes.length);
+            line.deleteContents();
+            block.after(newBlock);
+            if (!brBefore || (!block.textContent && !block.querySelector('br,img'))) {
+                block.remove();
+            }
         }
 
-        return false;
+        if (remaining) {
+            utils.placeCaretAt(caretTarget, 0);
+        } else {
+            // placeCaretAtは空テキストノードを作ってしまうため、
+            // プレースホルダ<br>の前（要素先頭）に直接キャレットを置く
+            const caretRange = document.createRange();
+            caretRange.setStart(caretTarget, 0);
+            caretRange.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(caretRange);
+            state.editor.focus();
+        }
+        return true;
     }
 
     /**
@@ -764,6 +887,16 @@ window.CommandsModule = (function() {
             const br = document.createElement('br');
             range.deleteContents();
             range.insertNode(br);
+            // 挿入した<br>の後ろに内容が無い場合、末尾の<br>は描画上の改行として
+            // 見えない（1回のShift+Enterでキャレットが進まない）ため、
+            // プレースホルダの<br>を補う。シリアライズ時は末尾の空行として除去される。
+            const rest = document.createRange();
+            rest.setStartAfter(br);
+            rest.setEnd(bq, bq.childNodes.length);
+            if (rest.toString().length === 0 &&
+                !rest.cloneContents().querySelector('br')) {
+                br.after(document.createElement('br'));
+            }
             range.setStartAfter(br);
             range.collapse(true);
             selection.removeAllRanges();

@@ -282,6 +282,109 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('handleAutoBlock（引用・リストのプレフィックス変換）', () => {
+        /** 指定テキストノードの指定オフセットにキャレットを置く */
+        function caretAt(node: Node, offset: number): void {
+            const range = env.document.createRange();
+            range.setStart(node, offset);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('エディタ直下の裸テキスト「>」でも引用に変換される（空ドキュメント入力）', () => {
+            const t = env.document.createTextNode('>');
+            env.editor.appendChild(t);
+            caretAt(t, 1);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('blockquote'), env.editor.innerHTML);
+        });
+
+        test('空の引用にはプレースホルダ<br>が入る（高さゼロで不可視になるのを防ぐ）', () => {
+            env.editor.innerHTML = '<p>></p>';
+            caretAt(env.editor.querySelector('p')!.firstChild as Text, 1);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const bq = env.editor.querySelector('blockquote');
+            assert.ok(bq, env.editor.innerHTML);
+            assert.ok(bq!.querySelector('br'), env.editor.innerHTML);
+        });
+
+        test('本文が続く「> text」の変換ではプレースホルダを入れずtextを保持する', () => {
+            env.editor.innerHTML = '<p>>テキスト</p>';
+            caretAt(env.editor.querySelector('p')!.firstChild as Text, 1);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const bq = env.editor.querySelector('blockquote');
+            assert.strictEqual(bq?.textContent, 'テキスト', env.editor.innerHTML);
+            assert.strictEqual(bq?.querySelector('br'), null, env.editor.innerHTML);
+        });
+
+        test('空のリスト項目にもプレースホルダ<br>が入る', () => {
+            env.editor.innerHTML = '<p>-</p>';
+            caretAt(env.editor.querySelector('p')!.firstChild as Text, 1);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const li = env.editor.querySelector('ul > li');
+            assert.ok(li?.querySelector('br'), env.editor.innerHTML);
+        });
+
+        test('エディタ直下の裸テキストでもプレフィックス以外では発火しない', () => {
+            const t = env.document.createTextNode('こんにちは');
+            env.editor.appendChild(t);
+            caretAt(t, 5);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, false);
+            // 副作用（P化）も起きない
+            assert.strictEqual(env.editor.querySelector('p'), null, env.editor.innerHTML);
+        });
+
+        test('複数行段落の2行目の「>」が引用に変換される', () => {
+            env.editor.innerHTML = '<p>line1<br>></p>';
+            const t = env.editor.querySelector('p')!.lastChild as Text;
+            caretAt(t, 1);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const bq = env.editor.querySelector('blockquote');
+            assert.ok(bq, env.editor.innerHTML);
+            // 1行目は段落として残る
+            const p = env.editor.querySelector('p');
+            assert.strictEqual(p?.textContent, 'line1', env.editor.innerHTML);
+        });
+
+        test('複数行段落の中間行の「>」は前後の行を残して引用に変換される', () => {
+            env.editor.innerHTML = '<p>line1<br>><br>line3</p>';
+            const t = env.editor.querySelector('p')!.childNodes[2] as Text;
+            caretAt(t, 1);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const children = Array.from(env.editor.children).map(el => el.tagName);
+            assert.deepStrictEqual(children, ['P', 'BLOCKQUOTE', 'P'], env.editor.innerHTML);
+            assert.strictEqual(env.editor.children[0].textContent, 'line1');
+            assert.strictEqual(env.editor.children[2].textContent, 'line3');
+        });
+
+        test('複数行段落の2行目の「-」はリストに変換される', () => {
+            env.editor.innerHTML = '<p>line1<br>-</p>';
+            const t = env.editor.querySelector('p')!.lastChild as Text;
+            caretAt(t, 1);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('ul > li'), env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('p')?.textContent, 'line1');
+        });
+
+        test('2行目の途中（行頭以外）では発火しない', () => {
+            env.editor.innerHTML = '<p>line1<br>text></p>';
+            const t = env.editor.querySelector('p')!.lastChild as Text;
+            caretAt(t, 5);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, false);
+        });
+    });
+
     suite('handleBlockquoteEnter（引用内のEnter/Shift+Enter）', () => {
         /** 指定要素の先頭テキストノードの指定オフセットにキャレットを置く */
         function placeCaretAt(node: Node, offset: number): void {
@@ -306,6 +409,37 @@ suite('CommandsModule', () => {
             const handled = env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter', { shiftKey: true }));
             assert.strictEqual(handled, true, env.editor.innerHTML);
             assert.ok(bq.querySelector('br'), env.editor.innerHTML);
+        });
+
+        test('引用末尾のShift+Enter 1回でプレースホルダ<br>が補われ改行が見える', () => {
+            env.editor.innerHTML = '<blockquote>行1</blockquote>';
+            const bq = env.editor.querySelector('blockquote') as HTMLElement;
+            placeCaretAtEnd(bq);
+            env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            // 末尾の<br>1つだけでは描画上改行が見えないため、2つ必要
+            assert.strictEqual(bq.querySelectorAll('br').length, 2, env.editor.innerHTML);
+            // キャレットは1つ目と2つ目の<br>の間（新しい行の先頭）
+            const sel = env.window.getSelection();
+            const range = sel.getRangeAt(0);
+            const brs = bq.querySelectorAll('br');
+            assert.strictEqual(range.comparePoint(bq, Array.from(bq.childNodes).indexOf(brs[1])), 0, env.editor.innerHTML);
+        });
+
+        test('プレースホルダ<br>はMarkdownへ余分な行を出力しない', () => {
+            env.editor.innerHTML = '<blockquote>行1</blockquote>';
+            const bq = env.editor.querySelector('blockquote') as HTMLElement;
+            placeCaretAtEnd(bq);
+            env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML).trim();
+            assert.strictEqual(md, '> 行1', JSON.stringify(md));
+        });
+
+        test('引用の途中のShift+Enterではプレースホルダを補わない', () => {
+            env.editor.innerHTML = '<blockquote>行1</blockquote>';
+            const bq = env.editor.querySelector('blockquote') as HTMLElement;
+            placeCaretAt(bq, 1); // 「行」と「1」の間
+            env.commands.handleBlockquoteEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            assert.strictEqual(bq.querySelectorAll('br').length, 1, env.editor.innerHTML);
         });
 
         test('Shift+Enterの改行は htmlToMarkdown で2つの `> ` 行へ往復する', () => {
