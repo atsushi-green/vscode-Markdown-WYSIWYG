@@ -24,7 +24,7 @@
 | 2026-07-15 | `cc7a1d6` feat: 引用ブロックのEnter/Shift+Enter対応 | 引用ブロックの末尾で `Enter` を押すと引用を抜けて後続の段落へ移り、`Shift+Enter` では引用内で改行（`<br>`）して引用を継続するように。`commands.js` に `handleBlockquoteEnter` を追加し、`editor.js` のkeydown処理（コードブロックEnter処理の前）に配線。`<br>` は `> 行1` / `> 行2` として往復変換される。 |
 | 2026-07-15 | `9db72a8` docs+test: JS/TS/JSON/YAML/Go/Rust のシンタックスハイライト対応を明文化 | 同梱の `highlight.min.js` は highlight.js の commonビルドで、これら6言語（と `js`/`ts`/`yml`/`golang`/`rs` 別名）を含む約36言語を登録済みであることを確認。個別バンドルの追加は不要だった。回帰テスト `syntax-highlight.test.ts` を追加し、README/AGENTS/features のハイライト対応言語の記述を実態（旧: Python/Bash/PowerShell/C/SQLのみ）に合わせて更新。 |
 | 2026-07-15 | `4b86e1c` feat: 単語数・文字数のステータス表示 | エディタ右下に固定表示するステータスバーで、単語数と文字数（空白除外・Unicodeコードポイント単位）をリアルタイム表示。数え上げは純粋関数 `utils.countText` として実装しユニットテストを追加、UIは `editor.js` が動的生成（`markdownEditor.ts` は変更しない）。通常/Rawモード両方に対応。 |
-| 2026-07-15 | `_______` feat: 見出しから目次(TOC)を生成・挿入するコマンド | `Ctrl+Shift+O`（Mac: `Cmd+Shift+O`）で見出し(h1〜h6)からGitHub風アンカーリンク付きの目次を生成し、キャレット位置へ挿入。`markdown.slugify`/`markdown.buildTocMarkdown`（純粋関数）＋ `commands.insertToc`（DOM挿入）を追加。重複見出しは `-1`/`-2` 付与、往復変換で安定。ツールバーボタンは未設置（キーボードショートカットのみ）。 |
+| 2026-07-15 | `83433dc` feat: 見出しから目次(TOC)を生成・挿入するコマンド | `Ctrl+Shift+O`（Mac: `Cmd+Shift+O`）で見出し(h1〜h6)からGitHub風アンカーリンク付きの目次を生成し、キャレット位置へ挿入。`markdown.slugify`/`markdown.buildTocMarkdown`（純粋関数）＋ `commands.insertToc`（DOM挿入）を追加。重複見出しは `-1`/`-2` 付与、往復変換で安定。ツールバーボタンは未設置（キーボードショートカットのみ）。 |
 
 ## 作業中（未コミット）の変更
 
