@@ -20,7 +20,7 @@
 | 2026-07-15 | `4cfbb21` feat: 取り消し線（~~text~~）の追加 | GFMの取り消し線を双方向変換・ライブ変換に対応（`<del>`/`<s>`/`<strike>` からの復元も可）。Ctrl+Shift+Xショートカットとツールバーボタンを追加。 |
 | 2026-07-15 | `9246e08` feat: タスクリストのライブ入力対応 | エディタ上で `- [ ]` / `- []` / `-[]`（スペース有無を問わず）を入力した時点でチェックボックスGUIへ即時変換するように。従来はファイル読込時のパーサでしか解釈されず入力中はテキストのまま残っていた。`commands.js` に `convertTaskLists` を追加し、入力イベントの整形フローへ組み込み。 |
 | 2026-07-15 | `67080b7` fix: 太字・取り消し線のライブ変換が実機で効かない問題を修正 | contenteditableが入力中のテキストを複数の隣接テキストノードに分割するため、`**` や `~~` の開始と終了が別ノードに割れて `convertInlineText` の正規表現にマッチしないことがあった。`applyInlineFormatting` で走査前に `editor.normalize()` して隣接テキストノードを結合（要素境界はまたがない）することで解消。分割ノード相当のユニットテストを追加。 |
-| 2026-07-15 | `_______` feat: 引用内での「> 」入力によるネスト引用の作成 | 引用ブロック内の行頭で `> ` を入力すると1段深いネスト引用（`> > `）が作られるように。従来は `findBlockAncestor` が BLOCKQUOTE を返さず `handleAutoBlock` が発火しなかった。`commands.js` に `handleNestedQuote` を追加。ネスト構造は既存の `buildQuoteHtml`/`serializeBlockquoteLines` が往復対応済み。引用UX改善（Enterで抜ける等）の残タスクはROADMAPに分割。 |
+| 2026-07-15 | `19ff5cc` feat: 引用内での「> 」入力によるネスト引用の作成 | 引用ブロック内の行頭で `> ` を入力すると1段深いネスト引用（`> > `）が作られるように。従来は `findBlockAncestor` が BLOCKQUOTE を返さず `handleAutoBlock` が発火しなかった。`commands.js` に `handleNestedQuote` を追加。ネスト構造は既存の `buildQuoteHtml`/`serializeBlockquoteLines` が往復対応済み。引用UX改善（Enterで抜ける等）の残タスクはROADMAPに分割。 |
 
 ## 作業中（未コミット）の変更
 
