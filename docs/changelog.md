@@ -21,7 +21,7 @@
 | 2026-07-15 | `9246e08` feat: タスクリストのライブ入力対応 | エディタ上で `- [ ]` / `- []` / `-[]`（スペース有無を問わず）を入力した時点でチェックボックスGUIへ即時変換するように。従来はファイル読込時のパーサでしか解釈されず入力中はテキストのまま残っていた。`commands.js` に `convertTaskLists` を追加し、入力イベントの整形フローへ組み込み。 |
 | 2026-07-15 | `67080b7` fix: 太字・取り消し線のライブ変換が実機で効かない問題を修正 | contenteditableが入力中のテキストを複数の隣接テキストノードに分割するため、`**` や `~~` の開始と終了が別ノードに割れて `convertInlineText` の正規表現にマッチしないことがあった。`applyInlineFormatting` で走査前に `editor.normalize()` して隣接テキストノードを結合（要素境界はまたがない）することで解消。分割ノード相当のユニットテストを追加。 |
 | 2026-07-15 | `19ff5cc` feat: 引用内での「> 」入力によるネスト引用の作成 | 引用ブロック内の行頭で `> ` を入力すると1段深いネスト引用（`> > `）が作られるように。従来は `findBlockAncestor` が BLOCKQUOTE を返さず `handleAutoBlock` が発火しなかった。`commands.js` に `handleNestedQuote` を追加。ネスト構造は既存の `buildQuoteHtml`/`serializeBlockquoteLines` が往復対応済み。引用UX改善（Enterで抜ける等）の残タスクはROADMAPに分割。 |
-| 2026-07-15 | `_______` feat: 引用ブロックのEnter/Shift+Enter対応 | 引用ブロックの末尾で `Enter` を押すと引用を抜けて後続の段落へ移り、`Shift+Enter` では引用内で改行（`<br>`）して引用を継続するように。`commands.js` に `handleBlockquoteEnter` を追加し、`editor.js` のkeydown処理（コードブロックEnter処理の前）に配線。`<br>` は `> 行1` / `> 行2` として往復変換される。 |
+| 2026-07-15 | `cc7a1d6` feat: 引用ブロックのEnter/Shift+Enter対応 | 引用ブロックの末尾で `Enter` を押すと引用を抜けて後続の段落へ移り、`Shift+Enter` では引用内で改行（`<br>`）して引用を継続するように。`commands.js` に `handleBlockquoteEnter` を追加し、`editor.js` のkeydown処理（コードブロックEnter処理の前）に配線。`<br>` は `> 行1` / `> 行2` として往復変換される。 |
 
 ## 作業中（未コミット）の変更
 
