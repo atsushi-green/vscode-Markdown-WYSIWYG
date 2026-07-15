@@ -232,4 +232,52 @@ suite('CommandsModule', () => {
             assert.ok(/\[x\] 完了/.test(md), md);
         });
     });
+
+    suite('handleAutoBlock（ネスト引用の入力）', () => {
+        /** 指定ノードの先頭テキストノード末尾にキャレットを置く */
+        function placeCaretAtEnd(node: Node): void {
+            const text = (node.firstChild ?? node) as Text;
+            const range = env.document.createRange();
+            range.setStart(text, text.textContent!.length);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('引用ブロック内で「> 」を入力するとネスト引用ができる', () => {
+            env.editor.innerHTML = '<blockquote>&gt;</blockquote>';
+            placeCaretAtEnd(env.editor.querySelector('blockquote') as HTMLElement);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('blockquote > blockquote'), env.editor.innerHTML);
+        });
+
+        test('ネストした引用は htmlToMarkdown で `> > text` へ往復する', () => {
+            env.editor.innerHTML = '<blockquote>&gt;</blockquote>';
+            placeCaretAtEnd(env.editor.querySelector('blockquote') as HTMLElement);
+            env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            const nested = env.editor.querySelector('blockquote > blockquote') as HTMLElement;
+            nested.textContent = 'ネスト';
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/^> > ネスト$/m.test(md), JSON.stringify(md));
+        });
+
+        test('行頭が「>」だけでない（既存テキストあり）場合はネストしない', () => {
+            env.editor.innerHTML = '<blockquote>既存 &gt;</blockquote>';
+            placeCaretAtEnd(env.editor.querySelector('blockquote') as HTMLElement);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, false);
+            assert.strictEqual(env.editor.querySelector('blockquote > blockquote'), null);
+        });
+
+        test('通常段落の「> 」は従来どおり単一の引用になる（ネストしない・回帰確認）', () => {
+            env.editor.innerHTML = '<p>&gt;</p>';
+            placeCaretAtEnd(env.editor.querySelector('p') as HTMLElement);
+            const handled = env.commands.handleAutoBlock(fakeKeyEvent(' '));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('blockquote'), env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('blockquote > blockquote'), null);
+        });
+    });
 });

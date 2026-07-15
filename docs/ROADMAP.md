@@ -21,7 +21,8 @@
 
 | 状態 | 内容 | サイズ | 所感（原因の見立てと修正方針） |
 |------|------|--------|------|
-| todo | 引用の入力UX改善: `> ` でネスト引用が作れる／Enterで引用から抜ける／Shift+Enterで引用内改行 | M | ネストが効かないのは `handleAutoBlock` が使う `findBlockAncestor` が P/DIV/LI しか返さず、**blockquote内ではnullになり自動変換が発火しない**ため（utils.js）。Enter/Shift+Enterはコードブロック内Enter処理と同様のkeydownハンドラをblockquote用に追加する。`> ` 直後の入力挙動が変なのは、textContent直書きで生成したblockquoteとライブ整形・キャレット処理の干渉が疑われる（実機での再現確認から始める） |
+| todo | 引用の入力UX改善（残り）: Enterで引用から抜ける／Shift+Enterで引用内改行 | S | ネスト引用の作成（`> ` の入力）は `handleNestedQuote` で対応済み（`67080b7`）。残るはEnter/Shift+Enterのkeydownハンドラ。コードブロック内Enter処理と同様のハンドラをblockquote用に追加する（空行でEnter→引用を抜けて段落へ、Shift+Enter→blockquote内に`<br>`）。実機での挙動確認が必要 |
+| todo | 引用ブロックの `> ` 直後の入力挙動の実機確認・修正 | S | textContent直書きで生成したblockquoteと、ライブ整形（`applyInlineFormatting`/`normalize`）・キャレット処理の干渉が疑われる。実機（VS Code）での再現確認から始める |
 
 ## 優先度: 高
 
@@ -63,6 +64,7 @@
 | 2026-07-15 | 取り消し線（`~~text~~`、Ctrl+Shift+X、ツールバーボタン） | `4cfbb21` |
 | 2026-07-15 | タスクリストのライブ入力対応（`- [ ]` / `- []` / `-[]` を入力した時点でチェックボックス化） | `9246e08` |
 | 2026-07-15 | 太字・取り消し線のライブ変換が分割テキストノードでマッチしない問題の修正（走査前に `normalize()`） | `67080b7` |
+| 2026-07-15 | 引用内での `> ` 入力によるネスト引用の作成（`handleNestedQuote`） | `_______` |
 
 ## 見送り (blocked)
 

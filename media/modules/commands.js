@@ -572,7 +572,9 @@ window.CommandsModule = (function() {
         const range = selection.getRangeAt(0);
         const block = utils.findBlockAncestor(range.startContainer);
         if (!block) {
-            return false;
+            // 引用ブロック内で「> 」を入力した場合はネストした引用を作る
+            // （findBlockAncestor は BLOCKQUOTE を返さないためここで専用処理する）
+            return handleNestedQuote(event, range);
         }
 
         const textBefore = utils.getTextBeforeCaret(block, range);
@@ -608,6 +610,36 @@ window.CommandsModule = (function() {
         }
 
         return false;
+    }
+
+    /**
+     * 引用ブロック内の行頭で「> 」を入力したとき、1段深いネスト引用を作る。
+     * 対象行が「>」のみ（フレッシュな行頭）のときだけ発火する安全側の実装。
+     * ネスト構造は buildQuoteHtml / serializeBlockquoteLines が
+     * `> > text` として往復変換に対応済み。
+     */
+    function handleNestedQuote(event, range) {
+        const bq = utils.findAncestor(range.startContainer, function(el) {
+            return el.tagName === 'BLOCKQUOTE';
+        });
+        if (!bq) {
+            return false;
+        }
+
+        const textBefore = utils.getTextBeforeCaret(bq, range);
+        if (textBefore.trim() !== '>') {
+            return false;
+        }
+        const remaining = bq.textContent.slice(textBefore.length).replace(/^\s+/, '');
+
+        event.preventDefault();
+
+        const nested = document.createElement('blockquote');
+        nested.textContent = remaining;
+        bq.textContent = '';
+        bq.appendChild(nested);
+        utils.placeCaretAt(nested, 0);
+        return true;
     }
 
     /**
