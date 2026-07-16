@@ -27,7 +27,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 目次(TOC)生成をツールバーボタンからも実行できるようにする | S | `executeCommand('toc')` は実装済み。現状キーボードショートカット（`Ctrl+Shift+O`）のみ。ツールバーへのボタン追加は `src/markdownEditor.ts` のHTMLテンプレート変更が必要で統合テスト（`npm test`）を伴う |
 | todo | リンクの挿入・編集ダイアログ（Ctrl+K） | M | 選択テキストをリンク化 |
 | todo | 検索に加えて「置換」機能を追加 | M | media/modules/search.js を拡張 |
 | todo | 右クリックメニューから表を挿入（行数・列数を入力して空の表を作成） | M | 現状 `table.js` は既存表のレンダリングのみで、新規表を作る手段（`insertTable`相当）が無い。UIはMermaidのコンテキストメニュー（`mermaidContextMenu` / `mermaid.js`の`showContextMenu`/`hideContextMenu`）と同じ仕組みを流用できる。エディタ本体への汎用右クリックメニュー自体も未実装のため、「エディタの空欄で右クリック→メニュー表示→行数・列数入力→空のMarkdownテーブルをカーソル位置に挿入→table.jsのrenderで即インタラクティブ化」という流れになる見込み |
@@ -51,6 +50,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
+| 2026-07-16 | 目次(TOC)生成をツールバーの 📑 ボタンからも実行できるように（`data-command="toc"`） | `______` |
 | 2026-07-16 | GitHubアラート記法（`> [!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]`）の表示・双方向変換対応 | `31dcbe8` |
 | 2026-07-16 | 冗長な個別ハイライトバンドル（python/bash/c/sql）の読み込み・ファイル削除（commonビルドに既存・PowerShellのみ残す） | `38d686e` |
 | 2026-07-16 | 下端スクロールでツールバーが画面外に消える問題の修正（`#editor`/`#rawEditor` の `min-height` を `100%`→`0`） | `c7b2f9f` |

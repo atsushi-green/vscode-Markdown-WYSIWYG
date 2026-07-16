@@ -179,6 +179,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                     <span class="toolbar-separator"></span>
                     <button class="toolbar-btn" data-command="link" title="リンク挿入">&#128279;</button>
                     <button class="toolbar-btn" data-command="code" title="コードブロック">&lt;/&gt;</button>
+                    <span class="toolbar-separator"></span>
+                    <button class="toolbar-btn" data-command="toc" title="目次(TOC)を挿入 (Ctrl+Shift+O)">&#128209;</button>
                     <div class="toolbar-spacer"></div>
                     <button class="toolbar-btn toggle-btn" id="toggleView" title="生マークダウン表示切替 (Ctrl+/)">
                         📄 Raw
