@@ -48,6 +48,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
+| 2026-07-17 | リンクのクリック挙動を Ctrl/Cmd+クリックでの遷移へ変更（通常クリックはキャレット設置のみ。`handleLinkClick`＋拡張機能側 `openLink`／`vscode.env.openExternal`。ユーザー要望・実機確認済み） | `PENDING2` |
 | 2026-07-17 | リンク上にカーソルがある間、生Markdownを薄く表示（`syncRawMarkdownToCaret`・`selectionchange`監視・`span.raw-markdown`へ展開／復帰。実機確認済み） | `PENDING` |
 | 2026-07-17 | アラートbox本文内のEnter操作（末尾でboxを抜けて段落へ／途中とShift+Enterは`<br>`改行。`handleAlertEnter`・共通ヘルパ`insertLineBreak`） | `318194a` |
 | 2026-07-16 | 検索ウィジェットが Cmd+F で開かない問題の修正（macOSの `metaKey` 対応・`Ctrl/Cmd+F/G//`。ユーザー報告バグ） | `123edab` |

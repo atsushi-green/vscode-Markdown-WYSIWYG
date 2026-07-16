@@ -509,6 +509,144 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('handleLinkClick（リンクのクリック挙動）', () => {
+        /** クリックイベントの代用オブジェクト（target は指定要素） */
+        function fakeClick(target: unknown, modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean }> = {}) {
+            return {
+                target,
+                ctrlKey: false,
+                metaKey: false,
+                ...modifiers,
+                defaultPrevented: false,
+                preventDefault() { this.defaultPrevented = true; },
+                stopPropagation() { /* noop */ }
+            };
+        }
+        /** エディタ内の唯一のリンク要素 */
+        function link(): HTMLElement {
+            return env.editor.querySelector('a') as HTMLElement;
+        }
+        /**
+         * openLink メッセージが1件だけpostされたことを検証する。
+         * postされるオブジェクトはjsdom側のrealmで生成されるため、
+         * deepStrictEqual（プロトタイプ検査）ではなくフィールドで比較する。
+         */
+        function assertPostedOpenLink(href: string): void {
+            assert.strictEqual(env.posted.length, 1, JSON.stringify(env.posted));
+            assert.strictEqual(env.posted[0].type, 'openLink');
+            assert.strictEqual(env.posted[0].href, href);
+        }
+
+        test('通常クリックでは外部リンクへ飛ばない', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const e = fakeClick(link());
+            assert.strictEqual(env.commands.handleLinkClick(e), false);
+            assert.deepStrictEqual(env.posted, []);
+        });
+
+        test('通常クリックでは既定動作を抑止しない（キャレット設置を妨げない）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const e = fakeClick(link());
+            env.commands.handleLinkClick(e);
+            assert.strictEqual(e.defaultPrevented, false, 'preventDefaultするとキャレットが動かなくなる');
+        });
+
+        test('Ctrl+クリックではキャレットを動かさない（既定動作を抑止する）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const e = fakeClick(link(), { ctrlKey: true });
+            env.commands.handleLinkClick(e);
+            assert.strictEqual(e.defaultPrevented, true, env.editor.innerHTML);
+        });
+
+        test('生Markdown展開中のリンクもCmd+クリックで開ける（キャレットが既にリンク内にある場合）', () => {
+            // クリックでキャレットが入ると <a> は span.raw-markdown へ置き換わるため、
+            // その状態からの修飾キー+クリックでも遷移できる必要がある
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const range = env.document.createRange();
+            range.setStart(link().firstChild as Text, 1);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            env.commands.syncRawMarkdownToCaret();
+            const span = env.editor.querySelector('span.raw-markdown') as HTMLElement;
+            assert.ok(span, '前提: リンクが展開されている');
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(span, { metaKey: true })), true);
+            assertPostedOpenLink('https://example.com');
+        });
+
+        test('生Markdown展開中でも記法が壊れていれば開かない', () => {
+            env.editor.innerHTML = '<p><span class="raw-markdown">[サイト](https://example.com</span></p>';
+            const span = env.editor.querySelector('span.raw-markdown') as HTMLElement;
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(span, { metaKey: true })), false);
+            assert.deepStrictEqual(env.posted, []);
+        });
+
+        test('Ctrl+クリックで外部リンクを開くよう拡張機能へ通知する', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const e = fakeClick(link(), { ctrlKey: true });
+            assert.strictEqual(env.commands.handleLinkClick(e), true);
+            assertPostedOpenLink('https://example.com');
+        });
+
+        test('Cmd+クリック（macOS）でも外部リンクを開く', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { metaKey: true })), true);
+            assertPostedOpenLink('https://example.com');
+        });
+
+        test('通常クリックではページ内アンカーへスクロールしない', () => {
+            env.editor.innerHTML = '<h2 id="見出し">見出し</h2><p><a href="#見出し">目次リンク</a></p>';
+            const heading = env.editor.querySelector('h2') as HTMLElement;
+            let scrolled = false;
+            (heading as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { scrolled = true; };
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link())), false);
+            assert.strictEqual(scrolled, false, '通常クリックでスクロールしている');
+        });
+
+        test('Ctrl+クリックでページ内アンカーの見出しへスクロールする', () => {
+            env.editor.innerHTML = '<h2 id="見出し">見出し</h2><p><a href="#見出し">目次リンク</a></p>';
+            const heading = env.editor.querySelector('h2') as HTMLElement;
+            let scrolled = false;
+            (heading as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { scrolled = true; };
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { ctrlKey: true })), true);
+            assert.strictEqual(scrolled, true, 'アンカー先へスクロールしていない');
+            assert.deepStrictEqual(env.posted, [], 'アンカーは外部リンクとして開かない');
+        });
+
+        test('javascript: など許可外のスキームはCtrl+クリックでも開かない', () => {
+            env.editor.innerHTML = '<p><a href="javascript:alert(1)">あやしいリンク</a></p>';
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { ctrlKey: true })), false);
+            assert.deepStrictEqual(env.posted, []);
+        });
+
+        test('相対パスのリンクはCtrl+クリックでも何もしない（キャレット設置のみ）', () => {
+            env.editor.innerHTML = '<p><a href="./other.md">別のファイル</a></p>';
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { ctrlKey: true })), false);
+            assert.deepStrictEqual(env.posted, []);
+        });
+
+        test('mailto: リンクはCtrl+クリックで開く', () => {
+            env.editor.innerHTML = '<p><a href="mailto:a@example.com">メール</a></p>';
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { ctrlKey: true })), true);
+            assertPostedOpenLink('mailto:a@example.com');
+        });
+
+        test('リンク以外のCtrl+クリックでは何もしない（false）', () => {
+            env.editor.innerHTML = '<p>ふつうの段落</p>';
+            const e = fakeClick(env.editor.querySelector('p'), { ctrlKey: true });
+            assert.strictEqual(env.commands.handleLinkClick(e), false);
+            assert.strictEqual(e.defaultPrevented, false, 'リンク以外で既定動作を抑止している');
+        });
+
+        test('リンク内の装飾要素をクリックしてもリンクとして扱う', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com"><strong>太字リンク</strong></a></p>';
+            const strong = env.editor.querySelector('strong') as HTMLElement;
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(strong, { ctrlKey: true })), true);
+            assertPostedOpenLink('https://example.com');
+        });
+    });
+
     suite('syncRawMarkdownToCaret（リンク上の生Markdown表示）', () => {
         /** 指定ノードの指定オフセットにキャレットを置く */
         function caretIn(node: Node, offset: number): void {

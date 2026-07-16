@@ -380,16 +380,81 @@ window.CommandsModule = (function() {
                 copyCodeBlock(copyBtn);
                 return;
             }
-            // ページ内アンカーリンク（TOCの [text](#slug) など）のクリックで
-            // 該当id要素へスクロールする。contentEditable内ではリンクの既定遷移が
-            // 効かない（キャレット設置になる）ため、明示的に処理する。
-            const anchor = target.closest('a[href^="#"]');
-            if (anchor) {
-                scrollToAnchor(anchor.getAttribute('href'));
+            // 通常クリックでリンク先へ飛ばないよう既定遷移を抑止する
+            // （キャレット設置はmousedownで済んでいるため影響しない）。
+            if (target.closest('a[href]')) {
                 e.preventDefault();
-                e.stopPropagation();
             }
         });
+
+        // Ctrl/Cmd+クリックでの遷移はmousedownで処理する。
+        // clickの時点ではキャレット設置→selectionchange→syncRawMarkdownToCaret により
+        // リンクが span.raw-markdown へ置き換わっており、<a> を辿れないため。
+        state.editor.addEventListener('mousedown', (e) => {
+            handleLinkClick(e);
+        });
+    }
+
+    /**
+     * エディタ外部で開くことを許可するURLスキーム。
+     * `javascript:` 等を踏ませないようホワイトリストで判定する（拡張機能側でも再検証する）。
+     */
+    const EXTERNAL_LINK_SCHEME = /^(https?|mailto):/i;
+
+    /**
+     * `Ctrl`（Mac: `Cmd`）+クリックでのリンク遷移を処理する（`mousedown` から呼ぶ）。
+     * 編集中の誤遷移を防ぐため、通常クリックではリンクへ飛ばずキャレットを合わせるだけとし
+     * （既定挙動に任せる＝ここでは何もしない）、修飾キー付きのときだけ遷移する。
+     * VS Codeエディタ本体のリンクと同じ操作感。
+     * - ページ内アンカー（TOCの `[text](#slug)` など）: 該当id要素へスクロール
+     * - 外部リンク（http/https/mailto）: 拡張機能側へ通知しブラウザ等で開く
+     *   （contentEditable内ではリンクの既定遷移が効かないため明示的に処理する）
+     * 生Markdown表示中（キャレットが既にリンク内にあり `[text](url)` へ展開済み）のspanも
+     * 対象にする。この状態のリンクを続けて修飾キー+クリックする流れが自然なため。
+     * 戻り値: リンク先へ移動した場合 true
+     */
+    function handleLinkClick(event) {
+        const target = event.target;
+        if (!target || typeof target.closest !== 'function') {
+            return false;
+        }
+
+        // 修飾キー無しのクリックはキャレット設置に任せる（preventDefaultするとキャレットが動かない）
+        if (!event.ctrlKey && !event.metaKey) {
+            return false;
+        }
+
+        const anchor = target.closest('a[href]');
+        const raw = target.closest('span.' + RAW_MARKDOWN_CLASS);
+        if (!anchor && !raw) {
+            return false;
+        }
+
+        let href;
+        if (anchor) {
+            href = anchor.getAttribute('href') || '';
+        } else {
+            const parsed = parseRawLink(raw.textContent);
+            if (!parsed) {
+                return false;
+            }
+            href = parsed.href;
+        }
+
+        if (href.charAt(0) === '#') {
+            scrollToAnchor(href);
+        } else if (EXTERNAL_LINK_SCHEME.test(href)) {
+            state.vscode.postMessage({ type: 'openLink', href: href });
+        } else {
+            // 相対パス等、扱いを決めていないリンクは何もしない（キャレット設置のみ）
+            return false;
+        }
+
+        // キャレット設置（＝生Markdownへの展開）を抑止する。VS Code本体と同様、
+        // Ctrl/Cmd+クリックではキャレットを動かさずに遷移だけ行う。
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
     }
 
     /**
@@ -911,6 +976,15 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 生Markdownのリンク記法（`[text](url)`）をパースする。
+     * 記法として成立していなければ null。
+     */
+    function parseRawLink(text) {
+        const m = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(text);
+        return m ? { text: m[1], href: m[2] } : null;
+    }
+
+    /**
      * リンク（<a>）を生Markdown記法 `[text](url)` のテキストへ展開し、そのspanを返す。
      */
     function expandLinkToRaw(link) {
@@ -928,11 +1002,11 @@ window.CommandsModule = (function() {
      */
     function collapseRawMarkdown(span) {
         const text = span.textContent;
-        const link = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(text);
+        const link = parseRawLink(text);
         if (link) {
             const a = document.createElement('a');
-            a.setAttribute('href', link[2]);
-            a.textContent = link[1];
+            a.setAttribute('href', link.href);
+            a.textContent = link.text;
             span.parentNode.replaceChild(a, span);
             return;
         }
@@ -1689,6 +1763,7 @@ window.CommandsModule = (function() {
         handleBlockquoteEnter: handleBlockquoteEnter,
         handleAlertEnter: handleAlertEnter,
         syncRawMarkdownToCaret: syncRawMarkdownToCaret,
+        handleLinkClick: handleLinkClick,
         handleTaskListEnter: handleTaskListEnter,
         applyInlineFormatting: applyInlineFormatting,
         convertTaskLists: convertTaskLists,

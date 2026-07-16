@@ -82,6 +82,9 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 case 'saveMermaidPng':
                     await this.saveMermaidPng(e.pngBase64, e.filename);
                     return;
+                case 'openLink':
+                    await this.openLink(e.href);
+                    return;
             }
         });
 
@@ -279,6 +282,22 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         );
 
         return vscode.workspace.applyEdit(edit);
+    }
+
+    /**
+     * リンク先を外部（既定のブラウザ・メールクライアント等）で開く。
+     * Webview側（commands.handleLinkClick）でもスキームを絞っているが、
+     * Webviewからのメッセージは信頼せず拡張機能側でも同じ検証を行う。
+     */
+    private async openLink(href: unknown): Promise<void> {
+        if (typeof href !== 'string' || !/^(https?|mailto):/i.test(href)) {
+            return;
+        }
+        try {
+            await vscode.env.openExternal(vscode.Uri.parse(href, true));
+        } catch (error) {
+            vscode.window.showErrorMessage(`リンクを開けませんでした: ${error}`);
+        }
     }
 
     /**

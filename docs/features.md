@@ -55,6 +55,7 @@
 - 引用ブロックの末尾で `Enter` を押すと引用を抜けて後続の段落へ移り、`Shift+Enter` では引用内で改行（`<br>`）して引用を継続する。
 - アラートbox（`.markdown-alert`）の本文でも同じ方針でEnterを扱う（`commands.js` の `handleAlertEnter`）。本文末尾での `Enter` はboxを抜けて後続の段落へ移り、本文の途中での `Enter` と `Shift+Enter` は本文内で改行（`<br>`）してboxを継続する。ブラウザ既定のEnterは本文div（`.markdown-alert-body`）を分割してbox構造を壊すため、本文内では常に自前で処理する。`<br>` 挿入と末尾のプレースホルダ補完は引用ブロックと共通のヘルパ（`insertLineBreak`）を使う。
 - **リンクの生Markdown表示**: カーソルがリンク（`<a>`）の内側のどこかにある間ずっと、レンダリング表示ではなく生のMarkdown記法（`[text](url)`）を薄く（等幅・`--vscode-descriptionForeground`）表示し、URLやリンクテキストを直接修正できる（`commands.js` の `syncRawMarkdownToCaret`）。`selectionchange`（documentにしか発火しないためdocumentで監視）でキャレットの所属要素を判定し、対象リンクだけを `<span class="raw-markdown">` の生テキストへ展開する。カーソルが外れた時点でレンダリング表示へ復帰し、編集内容（URL・リンクテキスト）が反映される。記法が壊れている場合はプレーンテキストとして残す。展開中のテキストは `utils.shouldSkipInline` により `walkInline` の再変換対象から外れる（編集中に装飾へ戻らない）。spanの中身は生Markdownそのもので `serializeInline` のSPAN分岐がテキストをそのまま出力するため、展開中でもMarkdownは展開前と同一（往復に非影響）。切り替え自体がDOM・選択を変更して `selectionchange` を再発火させるため、`editor.js` 側で再入を抑止している。
+- **リンクのクリック挙動**: 編集中の誤遷移を防ぐため、通常クリックではリンク先へ移動せずキャレットを合わせるだけ（`cursor: text` でテキストカーソルを出す）。`Ctrl`（Mac: `Cmd`）+クリックのときだけリンク先へ移動する（VS Codeエディタ本体と同じ操作感）。`commands.js` の `handleLinkClick` が処理し、ページ内アンカー（`#slug`）は `scrollToAnchor` でスクロール、外部リンクは `openLink` メッセージで拡張機能側（`markdownEditor.ts` の `openLink`）へ渡して `vscode.env.openExternal` で開く（contentEditable内ではリンクの既定遷移が効かないため明示的に処理）。**`click` ではなく `mousedown` で処理する**: クリックするとキャレット設置→`selectionchange`→`syncRawMarkdownToCaret` の順で `<a>` が `span.raw-markdown` へ置き換わるため、`click` の時点では `<a>` を辿れない。あわせて、既にキャレットがリンク内にあり生Markdownへ展開済みのspanも遷移の対象とする（クリックでキャレットを入れてから修飾キー+クリックする流れが自然なため）。修飾キー付きのときは `preventDefault` でキャレット移動自体も抑止する（VS Code本体と同様）。通常クリック時は `preventDefault` してはいけない（キャレットが動かなくなる）ため、既定遷移の抑止は `click` 側で行う。開けるスキームは http/https/mailto のホワイトリストに限定し、`javascript:` 等は無視する。Webviewからのメッセージは信頼せず拡張機能側でも同じ検証を行う。相対パス等は現状なにもしない（キャレット設置のみ）。
 - `---` / `***` / `___` のみの行でEnterを押すと、その場で水平線に自動変換（リスト項目内では無効）。
 - 見出し記法（`# `〜`###### `）を入力した行でEnterキーを押すと、見出し要素として確定し、次の段落へキャレットを移動。
 - コードフェンス（` ``` `または` ```lang `）のみの行でEnterを押すと、その場でコードブロック（`<pre><code>`）に変換し、言語クラス・`data-lang`属性を設定してキャレットをコード内へ移動。
@@ -150,7 +151,7 @@
   - `markdown.buildTocMarkdown(headings)`: 最も浅い見出しをインデント0段に相対化し、重複スラッグには `-1` / `-2` … を付与（GitHubのアンカー生成と同じ規則）。純粋関数で `src/test/unit/markdown.test.ts` にて往復含めて検証。
   - `commands.insertToc()`: 見出し収集（`heading-hash` スパンの `#` は除外）→ 目次Markdown生成 → HTML化 → DOM挿入。
 - 生成した目次は `markdownToHtml` ⇔ `htmlToMarkdown` の往復で保持される（リストマーカーはシリアライザに合わせ `* `）。
-- **目次リンクの遷移**: `markdownToHtml` は見出し要素へ `buildTocMarkdown` と同一のスラッグ生成・重複連番（`-1`/`-2` …）で `id` を付与する。目次のアンカーリンク（`[見出し](#slug)`）をクリックすると `commands.scrollToAnchor` が対応する `id` の見出しへスクロールする（contentEditable内ではアンカーの既定遷移が効かないため明示的に処理）。付与した `id` は `htmlToMarkdown` では出力されず往復に影響しない。
+- **目次リンクの遷移**: `markdownToHtml` は見出し要素へ `buildTocMarkdown` と同一のスラッグ生成・重複連番（`-1`/`-2` …）で `id` を付与する。目次のアンカーリンク（`[見出し](#slug)`）を `Ctrl`（Mac: `Cmd`）+クリックすると `commands.scrollToAnchor` が対応する `id` の見出しへスクロールする（後述のリンククリック挙動を参照）。付与した `id` は `htmlToMarkdown` では出力されず往復に影響しない。
 
 ## 10. キーボードショートカット（書式設定）
 

@@ -209,9 +209,12 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     font-style: italic;
 }
 
+/* 通常クリックはキャレット設置のため、テキストカーソルを出す。
+   リンク先へ移動するのは Ctrl（Mac: Cmd）+クリックのみ（VS Codeエディタ本体と同じ操作感）。 */
 #editor a {
     color: var(--vscode-textLink-foreground);
     text-decoration: none;
+    cursor: text;
 }
 
 #editor a:hover {
