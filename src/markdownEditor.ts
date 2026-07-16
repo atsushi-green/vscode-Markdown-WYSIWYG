@@ -128,23 +128,13 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         );
 
         // highlight.js関連のURI
+        // highlight.min.js は commonビルドで python/bash/c/sql を含む約36言語を登録済み。
+        // commonビルド外の powershell のみ個別バンドルを追加で読み込む。
         const hljsUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'highlight.min.js')
         );
-        const hljsPythonUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-python.min.js')
-        );
-        const hljsBashUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-bash.min.js')
-        );
         const hljsPowershellUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-powershell.min.js')
-        );
-        const hljsCUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-c.min.js')
-        );
-        const hljsSqlUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-sql.min.js')
         );
 
         // Mermaid.js関連のURI
@@ -219,11 +209,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 <div id="editor" contenteditable="true" spellcheck="false"></div>
                 <textarea id="rawEditor" spellcheck="false" style="display: none;"></textarea>
                 <script nonce="${nonce}" src="${hljsUri}"></script>
-                <script nonce="${nonce}" src="${hljsPythonUri}"></script>
-                <script nonce="${nonce}" src="${hljsBashUri}"></script>
                 <script nonce="${nonce}" src="${hljsPowershellUri}"></script>
-                <script nonce="${nonce}" src="${hljsCUri}"></script>
-                <script nonce="${nonce}" src="${hljsSqlUri}"></script>
                 <script nonce="${nonce}" src="${html2canvasUri}"></script>
                 <script nonce="${nonce}" src="${mermaidUri}"></script>
                 <!-- Editor modules (order matters due to dependencies) -->
