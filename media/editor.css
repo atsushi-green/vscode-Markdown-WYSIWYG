@@ -175,7 +175,18 @@ body {
 }
 
 #editor strong {
-    font-weight: 600;
+    /* 600（セミボールド）は通常文字とウェイト差が小さく、特にダークテーマでは
+       アンチエイリアスの効き方の違いから太字だと気づきにくい。700（ボールド）へ
+       引き上げてどのテーマでも判別しやすくする。 */
+    font-weight: 700;
+}
+
+/* ダークテーマ・ダーク系ハイコントラストでは、暗い背景に明るい文字だと
+   同一ウェイトでも太字が沈みやすいため、さらに強いウェイトで明確に差をつける。
+   （高コントラスト"light"は明るいテーマ側なので除外。mermaid.js の判定と同じ規則） */
+body.vscode-dark #editor strong,
+body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
+    font-weight: 800;
 }
 
 #editor em {
