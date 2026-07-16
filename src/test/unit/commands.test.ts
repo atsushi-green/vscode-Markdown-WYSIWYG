@@ -98,6 +98,26 @@ suite('CommandsModule', () => {
             assert.strictEqual(env.editor.querySelectorAll('strong').length, 1);
             assert.ok(env.editor.querySelector('em'), env.editor.innerHTML);
         });
+
+        test('インラインコード内の記法はライブ変換で装飾されずcodeに保持される', () => {
+            env.editor.innerHTML = '<p>`**太字**` 後続</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const code = env.editor.querySelector('code');
+            assert.ok(code, env.editor.innerHTML);
+            // コード内はstrong化されず、記法文字がそのまま残る
+            assert.strictEqual(code!.textContent, '**太字**');
+            assert.strictEqual(code!.querySelector('strong'), null, env.editor.innerHTML);
+        });
+
+        test('インラインコードの外側の記法はライブ変換で装飾される', () => {
+            env.editor.innerHTML = '<p>`code` と **太字**</p>';
+            env.commands.applyInlineFormatting();
+            assert.ok(env.editor.querySelector('code'), env.editor.innerHTML);
+            const strong = env.editor.querySelector('strong');
+            assert.ok(strong, env.editor.innerHTML);
+            assert.strictEqual(strong!.textContent, '太字');
+        });
     });
 
     suite('handleHorizontalRule', () => {
@@ -632,6 +652,122 @@ suite('CommandsModule', () => {
             const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
             assert.ok(/\* \[Title\]\(#title\)/.test(md), md);
             assert.ok(/ {2}\* \[Sub\]\(#sub\)/.test(md), md);
+        });
+    });
+
+    suite('convertAlerts（GitHubアラートのライブ変換）', () => {
+        test('マーカーのみのblockquoteをアラートboxへ変換する', () => {
+            env.editor.innerHTML = '<blockquote>[!NOTE]</blockquote>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const alert = env.editor.querySelector('.markdown-alert');
+            assert.ok(alert, env.editor.innerHTML);
+            assert.strictEqual(alert!.getAttribute('data-alert-type'), 'NOTE');
+            // 空の本文にはキャレット用のゼロ幅文字が入る
+            const body = alert!.querySelector('.markdown-alert-body');
+            assert.ok(body, env.editor.innerHTML);
+            assert.strictEqual(body!.textContent, env.state.ZERO_WIDTH);
+        });
+
+        test('マーカー+本文のblockquoteは本文を保持して変換する', () => {
+            env.editor.innerHTML = '<blockquote>[!WARNING]<br>注意1<br>注意2</blockquote>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const body = env.editor.querySelector('.markdown-alert-body');
+            assert.ok(body, env.editor.innerHTML);
+            assert.ok(body!.innerHTML.includes('注意1<br>注意2'), body!.innerHTML);
+        });
+
+        test('スペース無しの平文（>[!NOTE]）も変換する', () => {
+            env.editor.innerHTML = '<p>&gt;[!NOTE]</p>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('.markdown-alert-note'), env.editor.innerHTML);
+        });
+
+        test('マーカー行に余分なテキストがある場合は変換しない', () => {
+            env.editor.innerHTML = '<blockquote>[!NOTE] 余分</blockquote>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('blockquote'), env.editor.innerHTML);
+        });
+
+        test('マーカーが不完全な入力途中は変換しない', () => {
+            env.editor.innerHTML = '<blockquote>[!NOT</blockquote>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+        });
+
+        test('本文中に[!NOTE]を含む通常段落は変換しない', () => {
+            env.editor.innerHTML = '<p>引用の先頭行に [!NOTE] などのマーカーを書く</p>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+        });
+
+        test('変換済みのアラートは再変換しない', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('> [!TIP]\n> 本文');
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('.markdown-alert').length, 1);
+        });
+
+        test('キャレットが対象内にあれば本文末尾へ移動する', () => {
+            env.editor.innerHTML = '<blockquote>[!NOTE]</blockquote>';
+            const quote = env.editor.querySelector('blockquote')!;
+            placeCaretIn(quote);
+            const { caretHandled } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(caretHandled, true);
+            const sel = env.window.getSelection();
+            const body = env.editor.querySelector('.markdown-alert-body')!;
+            assert.ok(body.contains(sel.anchorNode), 'キャレットが本文内にない');
+        });
+
+        test('変換後のアラートは往復で > [!TYPE] 形式に保存される', () => {
+            env.editor.innerHTML = '<blockquote>[!IMPORTANT]<br>重要</blockquote>';
+            env.commands.convertAlerts(env.editor);
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(md, '> [!IMPORTANT]\n> 重要\n');
+        });
+
+        test('applyInlineFormatting経由でも変換される（入力イベントの統合経路）', () => {
+            env.editor.innerHTML = '<blockquote>[!CAUTION]</blockquote>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('.markdown-alert-caution'), env.editor.innerHTML);
+        });
+    });
+
+    suite('scrollToAnchor（TOCアンカーの遷移）', () => {
+        test('#slug に対応するid要素へscrollIntoViewする', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# Title\n\n## Section A');
+            const targetId = env.markdown.slugify('Section A'); // 'section-a'
+            const target = env.editor.querySelector('[id="' + targetId + '"]') as HTMLElement;
+            assert.ok(target, env.editor.innerHTML);
+            let scrolled = false;
+            target.scrollIntoView = function () { scrolled = true; };
+            env.commands.scrollToAnchor('#' + targetId);
+            assert.ok(scrolled, 'scrollIntoView が呼ばれていない');
+        });
+
+        test('日本語のパーセントエンコードされたアンカーもデコードして遷移する', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# 日本語見出し');
+            const slug = env.markdown.slugify('日本語見出し');
+            const target = env.editor.querySelector('[id="' + slug + '"]') as HTMLElement;
+            assert.ok(target, env.editor.innerHTML);
+            let scrolled = false;
+            target.scrollIntoView = function () { scrolled = true; };
+            env.commands.scrollToAnchor('#' + encodeURIComponent(slug));
+            assert.ok(scrolled, 'エンコードされたアンカーで遷移できていない');
+        });
+
+        test('該当id要素が無ければ何もしない（例外を投げない）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# Title');
+            assert.doesNotThrow(() => env.commands.scrollToAnchor('#does-not-exist'));
+        });
+
+        test('#で始まらないhrefは無視する', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# Title');
+            assert.doesNotThrow(() => env.commands.scrollToAnchor('https://example.com'));
         });
     });
 });

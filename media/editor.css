@@ -72,7 +72,12 @@ body {
     padding: 20px;
     overflow-y: auto;
     outline: none;
-    min-height: 100%;
+    /* flexの子に min-height:100% を与えると、ツールバー分を無視して
+       ビューポート全高まで伸び、body側がはみ出してツールバーごと
+       スクロールしてしまう。min-height:0 にして残り領域内に収め、
+       スクロールを #rawEditor 内部（overflow-y:auto）へ閉じ込める。
+       flex:1 により短い内容でも領域は満たされる。 */
+    min-height: 0;
     box-sizing: border-box;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
@@ -95,7 +100,10 @@ body {
     padding: 20px;
     overflow-y: auto;
     outline: none;
-    min-height: 100%;
+    /* min-height:100% だとツールバー分を無視して伸び、body側がスクロールして
+       ツールバーが画面外へ消える。min-height:0 で残り領域内に収め、スクロールを
+       #editor 内部へ閉じ込める（flex:1 で短い内容でも領域は満たされる）。 */
+    min-height: 0;
     box-sizing: border-box;
 }
 
@@ -175,7 +183,18 @@ body {
 }
 
 #editor strong {
-    font-weight: 600;
+    /* 600（セミボールド）は通常文字とウェイト差が小さく、特にダークテーマでは
+       アンチエイリアスの効き方の違いから太字だと気づきにくい。700（ボールド）へ
+       引き上げてどのテーマでも判別しやすくする。 */
+    font-weight: 700;
+}
+
+/* ダークテーマ・ダーク系ハイコントラストでは、暗い背景に明るい文字だと
+   同一ウェイトでも太字が沈みやすいため、さらに強いウェイトで明確に差をつける。
+   （高コントラスト"light"は明るいテーマ側なので除外。mermaid.js の判定と同じ規則） */
+body.vscode-dark #editor strong,
+body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
+    font-weight: 800;
 }
 
 #editor em {
@@ -425,6 +444,46 @@ body {
     color: var(--vscode-descriptionForeground);
 }
 
+/* GitHubアラート（> [!NOTE] など）。タイプごとにアクセント色を変える。
+   色はVS Codeのテーマ変数を参照し、ライト/ダークいずれにも追従する。 */
+#editor .markdown-alert {
+    margin: 1em 0;
+    padding: 0.6em 1em;
+    border-left: 4px solid var(--alert-accent, var(--vscode-editorGroup-border));
+    border-radius: 3px;
+    background-color: var(--vscode-textBlockQuote-background, transparent);
+}
+
+#editor .markdown-alert-title {
+    margin: 0 0 0.3em 0;
+    font-weight: 700;
+    color: var(--alert-accent, var(--vscode-foreground));
+}
+
+#editor .markdown-alert-body {
+    color: var(--vscode-editor-foreground);
+}
+
+#editor .markdown-alert-note {
+    --alert-accent: var(--vscode-editorInfo-foreground, var(--vscode-charts-blue));
+}
+
+#editor .markdown-alert-tip {
+    --alert-accent: var(--vscode-charts-green, var(--vscode-editorInfo-foreground));
+}
+
+#editor .markdown-alert-important {
+    --alert-accent: var(--vscode-charts-purple, var(--vscode-textLink-foreground));
+}
+
+#editor .markdown-alert-warning {
+    --alert-accent: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+}
+
+#editor .markdown-alert-caution {
+    --alert-accent: var(--vscode-editorError-foreground, var(--vscode-charts-red));
+}
+
 #editor ul,
 #editor ol {
     margin: 1em 0;
@@ -515,13 +574,22 @@ body {
     right: 20px;
     z-index: 1000;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     gap: 4px;
     padding: 6px 8px;
     background-color: var(--vscode-editorWidget-background, #252526);
     border: 1px solid var(--vscode-editorWidget-border, #454545);
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* 検索行・置換行（それぞれ横並び） */
+.find-row,
+.replace-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .find-input-container {
@@ -604,6 +672,25 @@ body {
 }
 
 .find-action-btn:hover {
+    background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+    opacity: 1;
+}
+
+/* 置換ボタン（テキストラベルのため可変幅） */
+.replace-action-btn {
+    height: 24px;
+    padding: 0 8px;
+    background-color: transparent;
+    color: var(--vscode-foreground, #cccccc);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0.8;
+    white-space: nowrap;
+}
+
+.replace-action-btn:hover {
     background-color: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
     opacity: 1;
 }

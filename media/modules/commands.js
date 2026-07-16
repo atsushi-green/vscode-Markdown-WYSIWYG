@@ -374,13 +374,52 @@ window.CommandsModule = (function() {
                 return;
             }
             const copyBtn = target.closest('.code-copy-btn');
-            if (!copyBtn) {
+            if (copyBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                copyCodeBlock(copyBtn);
                 return;
             }
-            e.preventDefault();
-            e.stopPropagation();
-            copyCodeBlock(copyBtn);
+            // ページ内アンカーリンク（TOCの [text](#slug) など）のクリックで
+            // 該当id要素へスクロールする。contentEditable内ではリンクの既定遷移が
+            // 効かない（キャレット設置になる）ため、明示的に処理する。
+            const anchor = target.closest('a[href^="#"]');
+            if (anchor) {
+                scrollToAnchor(anchor.getAttribute('href'));
+                e.preventDefault();
+                e.stopPropagation();
+            }
         });
+    }
+
+    /**
+     * ページ内アンカー（`#slug`）に対応するid要素へスクロールする。
+     * 見出しレンダリング（markdownToHtml）がslugifyと同じ規則で付与したidと突き合わせる。
+     */
+    function scrollToAnchor(href) {
+        if (!href || href.charAt(0) !== '#') {
+            return;
+        }
+        let id = href.slice(1);
+        try {
+            id = decodeURIComponent(id);
+        } catch (_e) {
+            // 不正なエスケープはそのまま扱う
+        }
+        if (!id) {
+            return;
+        }
+        let el = null;
+        // idにCSSセレクタで扱いにくい文字（日本語等）が含まれてもよいよう属性で探す。
+        const escaped = id.replace(/["\\]/g, '\\$&');
+        try {
+            el = state.editor.querySelector('[id="' + escaped + '"]');
+        } catch (_e) {
+            el = null;
+        }
+        if (el && typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
     }
 
     /**
@@ -1195,10 +1234,11 @@ window.CommandsModule = (function() {
         // ことがある。隣接テキストノードを結合してから走査する（要素境界はまたがない）。
         state.editor.normalize();
         const taskResult = convertTaskLists(state.editor);
+        const alertResult = convertAlerts(state.editor);
         const inlineResult = walkInline(state.editor);
         return {
-            didFormat: taskResult.didFormat || inlineResult.didFormat,
-            caretHandled: taskResult.caretHandled || inlineResult.caretHandled
+            didFormat: taskResult.didFormat || alertResult.didFormat || inlineResult.didFormat,
+            caretHandled: taskResult.caretHandled || alertResult.caretHandled || inlineResult.caretHandled
         };
     }
 
@@ -1325,6 +1365,78 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * GitHubアラート（`> [!NOTE]` 等）をライブでアラートboxへ変換する。
+     * ファイル読込時のパーサ（markdownToHtml）でしか解釈されず、手入力・ペーストでは
+     * Raw切替や再読込までGUIに反映されない問題を補う（タスクリストのライブ変換と同じ方針）。
+     *
+     * 対象はエディタ直下のブロック（blockquote / p / div）。要素を一度Markdownへ
+     * シリアライズして markdownToHtml に通し、「単一のアラートdiv」になった場合のみ
+     * 置き換える。判定・生成をファイル読込時と同一のコード（tryBuildAlertHtml）に
+     * 委ねるため、ライブ変換と読込時で挙動が食い違わない。
+     * - `> [!NOTE]` → handleAutoBlock でblockquote化済みのケース
+     * - `>[!NOTE]`（スペース無し）→ blockquote化されず平文段落のままのケース
+     * キャレットが変換対象内にあった場合は本文（.markdown-alert-body）末尾へ移動する。
+     */
+    function convertAlerts(root) {
+        let didFormat = false;
+        let caretHandled = false;
+
+        const selection = window.getSelection();
+        const anchor = selection && selection.rangeCount > 0
+            ? selection.getRangeAt(0).startContainer
+            : null;
+
+        const blocks = Array.prototype.slice.call(root.children);
+        blocks.forEach(function(block) {
+            const tag = block.tagName;
+            if (tag !== 'BLOCKQUOTE' && tag !== 'P' && tag !== 'DIV') {
+                return;
+            }
+            // 変換済みアラートやテーブル・Mermaid等のUIコンテナ（class付きdiv）は対象外
+            if (tag === 'DIV' && block.classList.length > 0) {
+                return;
+            }
+            // 安価な事前判定: マーカー文字列を含まないブロックはスキップ
+            if (block.textContent.indexOf('[!') === -1) {
+                return;
+            }
+
+            // 要素をMarkdown化→再パース。アラート成立条件（先頭行がマーカーのみ・
+            // 全行レベル1）を満たす場合だけ単一の .markdown-alert div が返る
+            const md = markdown.htmlToMarkdown(block.outerHTML);
+            const temp = document.createElement('div');
+            temp.innerHTML = markdown.markdownToHtml(md);
+            if (temp.children.length !== 1 ||
+                !temp.firstElementChild.classList.contains('markdown-alert')) {
+                return;
+            }
+
+            const alertEl = temp.firstElementChild;
+            const body = alertEl.querySelector('.markdown-alert-body');
+            // 本文が空でもキャレットを置けるようゼロ幅文字を入れる
+            // （シリアライズ時は stripZeroWidth で除去されるため保存内容には影響しない）
+            if (body && body.childNodes.length === 0) {
+                body.appendChild(document.createTextNode(state.ZERO_WIDTH));
+            }
+
+            const hadCaret = anchor !== null && block.contains(anchor);
+            block.replaceWith(alertEl);
+            didFormat = true;
+
+            if (hadCaret && body && selection) {
+                const range = document.createRange();
+                range.selectNodeContents(body);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                caretHandled = true;
+            }
+        });
+
+        return { didFormat: didFormat, caretHandled: caretHandled };
+    }
+
+    /**
      * インラインフォーマットを適用
      */
     function walkInline(root) {
@@ -1377,13 +1489,18 @@ window.CommandsModule = (function() {
      * インラインテキストを変換
      */
     function convertInlineText(text) {
-        let html = text;
+        // インラインコードを先にプレースホルダ（NUL文字＋通し番号）へ退避し、
+        // コード内の文字列に他のインライン整形（リンク・強調・取り消し線など）が
+        // 適用されて `**太字**` 等が装飾に化けるのを防ぐ。整形後に復元する。
+        // markdown.js の convertInline と同じ保護方針。
+        const codeSpans = [];
+        let html = text.replace(/`([^`]+)`/g, function (_m, p1) {
+            codeSpans.push(p1);
+            return '\u0000' + (codeSpans.length - 1) + '\u0000';
+        });
 
         // リンク
         html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2">$1</a>');
-
-        // インラインコード
-        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
@@ -1397,6 +1514,11 @@ window.CommandsModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避したインラインコードを <code> として復元（中身は整形しない）
+        html = html.replace(/\u0000(\d+)\u0000/g, function (_m, i) {
+            return '<code>' + codeSpans[Number(i)] + '</code>';
+        });
 
         return html;
     }
@@ -1413,6 +1535,7 @@ window.CommandsModule = (function() {
         insertCodeBlock: insertCodeBlock,
         insertBlockquote: insertBlockquote,
         insertToc: insertToc,
+        scrollToAnchor: scrollToAnchor,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,
         handleHorizontalRule: handleHorizontalRule,
@@ -1421,6 +1544,7 @@ window.CommandsModule = (function() {
         handleBlockquoteEnter: handleBlockquoteEnter,
         handleTaskListEnter: handleTaskListEnter,
         applyInlineFormatting: applyInlineFormatting,
-        convertTaskLists: convertTaskLists
+        convertTaskLists: convertTaskLists,
+        convertAlerts: convertAlerts
     };
 })();

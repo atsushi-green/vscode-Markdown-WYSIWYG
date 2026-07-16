@@ -12,17 +12,17 @@ suite('MarkdownModule', () => {
     });
 
     suite('markdownToHtml', () => {
-        test('見出し（h1〜h6）をheading-hashスパン付きで変換する', () => {
+        test('見出し（h1〜h6）をheading-hashスパン付き・idアンカー付きで変換する', () => {
             const html = env.markdown.markdownToHtml('# タイトル');
             assert.strictEqual(
                 html,
-                '<h1><span class="heading-hash"># </span>タイトル</h1>'
+                '<h1 id="タイトル"><span class="heading-hash"># </span>タイトル</h1>'
             );
 
             const html3 = env.markdown.markdownToHtml('### 小見出し');
             assert.strictEqual(
                 html3,
-                '<h3><span class="heading-hash">### </span>小見出し</h3>'
+                '<h3 id="小見出し"><span class="heading-hash">### </span>小見出し</h3>'
             );
         });
 
@@ -35,6 +35,42 @@ suite('MarkdownModule', () => {
             assert.ok(html.includes('<u>下線</u>'), `u: ${html}`);
             assert.ok(html.includes('<code>code</code>'), `code: ${html}`);
             assert.ok(html.includes('<a href="https://example.com">リンク</a>'), `a: ${html}`);
+        });
+
+        test('インラインコード内の記法は装飾せずそのまま保持する', () => {
+            assert.strictEqual(
+                env.markdown.markdownToHtml('`**太字**`'),
+                '<p><code>**太字**</code></p>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('`~~消~~`'),
+                '<p><code>~~消~~</code></p>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('`[text](url)`'),
+                '<p><code>[text](url)</code></p>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('`a_b_c`'),
+                '<p><code>a_b_c</code></p>'
+            );
+        });
+
+        test('インラインコードの外側の記法は通常どおり装飾する', () => {
+            const html = env.markdown.markdownToHtml('前 `**x**` 後 **太字**');
+            assert.strictEqual(
+                html,
+                '<p>前 <code>**x**</code> 後 <strong>太字</strong></p>'
+            );
+        });
+
+        test('インラインコード内の記法はWYSIWYG往復で失われない', () => {
+            ['`**太字**`', '文中の `[a](b)` と **強調**', '`~~x~~` と `code2`'].forEach(src => {
+                const rt = env.markdown.htmlToMarkdown(
+                    env.markdown.markdownToHtml(src)
+                );
+                assert.strictEqual(rt.trim(), src, `roundtrip: ${src}`);
+            });
         });
 
         test('太字斜体（***text***）を変換する', () => {
@@ -148,6 +184,60 @@ suite('MarkdownModule', () => {
                 html,
                 '<blockquote>外側<blockquote><blockquote>深い</blockquote></blockquote></blockquote>'
             );
+        });
+
+        test('GitHubアラート（> [!NOTE]）をアラートdivに変換する', () => {
+            const html = env.markdown.markdownToHtml('> [!NOTE]\n> 補足です');
+            assert.strictEqual(
+                html,
+                '<div class="markdown-alert markdown-alert-note" data-alert-type="NOTE">' +
+                '<p class="markdown-alert-title" contenteditable="false">Note</p>' +
+                '<div class="markdown-alert-body">補足です</div></div>'
+            );
+        });
+
+        test('5種類のアラートタイプすべてを認識する', () => {
+            const cases: [string, string, string][] = [
+                ['NOTE', 'note', 'Note'],
+                ['TIP', 'tip', 'Tip'],
+                ['IMPORTANT', 'important', 'Important'],
+                ['WARNING', 'warning', 'Warning'],
+                ['CAUTION', 'caution', 'Caution']
+            ];
+            cases.forEach(([type, cls, title]) => {
+                const html = env.markdown.markdownToHtml(`> [!${type}]\n> 本文`);
+                assert.ok(html.includes(`markdown-alert-${cls}`), html);
+                assert.ok(html.includes(`data-alert-type="${type}"`), html);
+                assert.ok(html.includes(`>${title}</p>`), html);
+            });
+        });
+
+        test('複数行の本文は<br>で連結する', () => {
+            const html = env.markdown.markdownToHtml('> [!WARNING]\n> 注意1\n> 注意2');
+            assert.ok(html.includes('<div class="markdown-alert-body">注意1<br>注意2</div>'), html);
+        });
+
+        test('本文なしのアラートも変換できる', () => {
+            const html = env.markdown.markdownToHtml('> [!TIP]');
+            assert.ok(html.includes('markdown-alert-tip'), html);
+            assert.ok(html.includes('<div class="markdown-alert-body"></div>'), html);
+        });
+
+        test('小文字マーカーやマーカー以外を含む行は通常の引用にする', () => {
+            assert.strictEqual(
+                env.markdown.markdownToHtml('> [!note] 小文字'),
+                '<blockquote>[!note] 小文字</blockquote>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('> [!IMPORTANT] 余分なテキスト'),
+                '<blockquote>[!IMPORTANT] 余分なテキスト</blockquote>'
+            );
+        });
+
+        test('アラート本文のインライン記法（太字・リンク）を変換する', () => {
+            const html = env.markdown.markdownToHtml('> [!NOTE]\n> **重要** な [リンク](https://example.com)');
+            assert.ok(html.includes('<strong>重要</strong>'), html);
+            assert.ok(html.includes('<a href="https://example.com">リンク</a>'), html);
         });
 
         test('テーブルをthead/tbody付きで変換する', () => {
@@ -286,6 +376,24 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md, '');
         });
 
+        test('アラートdivを > [!TYPE] 形式へシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<div class="markdown-alert markdown-alert-note" data-alert-type="NOTE">' +
+                '<p class="markdown-alert-title" contenteditable="false">Note</p>' +
+                '<div class="markdown-alert-body">補足1<br>補足2</div></div>'
+            );
+            assert.strictEqual(md, '> [!NOTE]\n> 補足1\n> 補足2\n');
+        });
+
+        test('本文なしのアラートは > [!TYPE] のみへシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<div class="markdown-alert markdown-alert-tip" data-alert-type="TIP">' +
+                '<p class="markdown-alert-title" contenteditable="false">Tip</p>' +
+                '<div class="markdown-alert-body"></div></div>'
+            );
+            assert.strictEqual(md, '> [!TIP]\n');
+        });
+
         test('テーブルをセル内装飾を保持してシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown(
                 '<table><thead><tr><th>列A</th><th>列B</th></tr></thead>' +
@@ -371,6 +479,20 @@ suite('MarkdownModule', () => {
             const once = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
             const twice = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(once));
             assert.strictEqual(twice, once);
+        });
+
+        test('GitHubアラートが変換往復で保存される', () => {
+            [
+                '> [!NOTE]\n> 補足です\n',
+                '> [!WARNING]\n> 注意1\n> 注意2\n',
+                '> [!TIP]\n',
+                '> [!IMPORTANT]\n> **太字** と [リンク](https://example.com)\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(
+                    env.markdown.markdownToHtml(original)
+                );
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
         });
     });
 
@@ -495,6 +617,55 @@ suite('MarkdownModule', () => {
             const html = env.markdown.markdownToHtml(toc);
             const md = env.markdown.htmlToMarkdown(html);
             assert.strictEqual(md.trim(), toc.trim());
+        });
+    });
+
+    suite('見出しidアンカー（TOC遷移）', () => {
+        test('見出しにslugifyと同じidを付与する', () => {
+            const html = env.markdown.markdownToHtml('## Section A');
+            assert.ok(html.includes('<h2 id="section-a">'), html);
+        });
+
+        test('日本語見出しにもidを付与する', () => {
+            const html = env.markdown.markdownToHtml('# 第1章 はじめに');
+            assert.ok(html.includes('<h1 id="第1章-はじめに">'), html);
+        });
+
+        test('重複見出しには -1, -2 を付与する（TOCと同じ規則）', () => {
+            const html = env.markdown.markdownToHtml('# Intro\n\n# Intro\n\n# Intro');
+            assert.ok(html.includes('<h1 id="intro">'), html);
+            assert.ok(html.includes('<h1 id="intro-1">'), html);
+            assert.ok(html.includes('<h1 id="intro-2">'), html);
+        });
+
+        test('インライン記法を含む見出しでも可視テキストからidを作る', () => {
+            const html = env.markdown.markdownToHtml('## **Bold** Heading');
+            // 装飾記号(**)を除いた可視テキスト "Bold Heading" のスラッグと一致する
+            assert.ok(html.includes('id="bold-heading"'), html);
+        });
+
+        test('TOCのアンカー(#slug)と見出しidが一致し遷移先が存在する', () => {
+            const md = '# Title\n\n## Section A\n\n## Section A';
+            const toc = env.markdown.buildTocMarkdown([
+                { level: 1, text: 'Title' },
+                { level: 2, text: 'Section A' },
+                { level: 2, text: 'Section A' }
+            ]);
+            const html = env.markdown.markdownToHtml(md);
+            // TOCが指す各アンカー(#slug)に対応するid属性が本文側に存在すること
+            const anchors: string[] = (toc.match(/\(#([^)]+)\)/g) || [])
+                .map((a: string) => a.slice(2, -1));
+            anchors.forEach((slug: string) => {
+                assert.ok(html.includes(`id="${slug}"`), `missing id=${slug}: ${html}`);
+            });
+        });
+
+        test('id付き見出しを htmlToMarkdown で往復してもidは残らず内容が保たれる', () => {
+            const original = '# タイトル\n\n## Section A\n';
+            const roundTripped = env.markdown.htmlToMarkdown(
+                env.markdown.markdownToHtml(original)
+            );
+            assert.strictEqual(roundTripped.trim(), original.trim());
         });
     });
 });

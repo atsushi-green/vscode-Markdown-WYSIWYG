@@ -128,23 +128,13 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         );
 
         // highlight.js関連のURI
+        // highlight.min.js は commonビルドで python/bash/c/sql を含む約36言語を登録済み。
+        // commonビルド外の powershell のみ個別バンドルを追加で読み込む。
         const hljsUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'highlight.min.js')
         );
-        const hljsPythonUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-python.min.js')
-        );
-        const hljsBashUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-bash.min.js')
-        );
         const hljsPowershellUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-powershell.min.js')
-        );
-        const hljsCUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-c.min.js')
-        );
-        const hljsSqlUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-sql.min.js')
         );
 
         // Mermaid.js関連のURI
@@ -189,6 +179,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                     <span class="toolbar-separator"></span>
                     <button class="toolbar-btn" data-command="link" title="リンク挿入">&#128279;</button>
                     <button class="toolbar-btn" data-command="code" title="コードブロック">&lt;/&gt;</button>
+                    <span class="toolbar-separator"></span>
+                    <button class="toolbar-btn" data-command="toc" title="目次(TOC)を挿入 (Ctrl+Shift+O)">&#128209;</button>
                     <div class="toolbar-spacer"></div>
                     <button class="toolbar-btn toggle-btn" id="toggleView" title="生マークダウン表示切替 (Ctrl+/)">
                         📄 Raw
@@ -196,19 +188,30 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 </div>
                 <!-- 検索ウィジェット -->
                 <div id="findWidget" class="find-widget" style="display: none;">
-                    <div class="find-input-container">
-                        <input type="text" id="findInput" class="find-input" placeholder="検索..." />
-                        <span id="findCount" class="find-count"></span>
+                    <div class="find-row">
+                        <div class="find-input-container">
+                            <input type="text" id="findInput" class="find-input" placeholder="検索..." />
+                            <span id="findCount" class="find-count"></span>
+                        </div>
+                        <div class="find-options">
+                            <button id="findOptionCase" class="find-option-btn" title="大文字と小文字を区別 (Alt+C)">Aa</button>
+                            <button id="findOptionWord" class="find-option-btn" title="単語単位で検索 (Alt+W)">ab</button>
+                            <button id="findOptionRegex" class="find-option-btn" title="正規表現を使用 (Alt+R)">.*</button>
+                        </div>
+                        <div class="find-actions">
+                            <button id="findPrev" class="find-action-btn" title="前を検索 (Shift+Enter)">↑</button>
+                            <button id="findNext" class="find-action-btn" title="次を検索 (Enter)">↓</button>
+                            <button id="findClose" class="find-action-btn" title="閉じる (Escape)">✕</button>
+                        </div>
                     </div>
-                    <div class="find-options">
-                        <button id="findOptionCase" class="find-option-btn" title="大文字と小文字を区別 (Alt+C)">Aa</button>
-                        <button id="findOptionWord" class="find-option-btn" title="単語単位で検索 (Alt+W)">ab</button>
-                        <button id="findOptionRegex" class="find-option-btn" title="正規表現を使用 (Alt+R)">.*</button>
-                    </div>
-                    <div class="find-actions">
-                        <button id="findPrev" class="find-action-btn" title="前を検索 (Shift+Enter)">↑</button>
-                        <button id="findNext" class="find-action-btn" title="次を検索 (Enter)">↓</button>
-                        <button id="findClose" class="find-action-btn" title="閉じる (Escape)">✕</button>
+                    <div class="replace-row">
+                        <div class="find-input-container">
+                            <input type="text" id="replaceInput" class="find-input" placeholder="置換..." />
+                        </div>
+                        <div class="find-actions">
+                            <button id="replaceBtn" class="replace-action-btn" title="現在のマッチを置換 (Enter)">置換</button>
+                            <button id="replaceAllBtn" class="replace-action-btn" title="すべて置換">全置換</button>
+                        </div>
                     </div>
                 </div>
                 <!-- Mermaidコンテキストメニュー -->
@@ -219,11 +222,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 <div id="editor" contenteditable="true" spellcheck="false"></div>
                 <textarea id="rawEditor" spellcheck="false" style="display: none;"></textarea>
                 <script nonce="${nonce}" src="${hljsUri}"></script>
-                <script nonce="${nonce}" src="${hljsPythonUri}"></script>
-                <script nonce="${nonce}" src="${hljsBashUri}"></script>
                 <script nonce="${nonce}" src="${hljsPowershellUri}"></script>
-                <script nonce="${nonce}" src="${hljsCUri}"></script>
-                <script nonce="${nonce}" src="${hljsSqlUri}"></script>
                 <script nonce="${nonce}" src="${html2canvasUri}"></script>
                 <script nonce="${nonce}" src="${mermaidUri}"></script>
                 <!-- Editor modules (order matters due to dependencies) -->

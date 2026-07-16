@@ -46,13 +46,19 @@ window.MarkdownModule = (function() {
      * commands.jsのライブ変換（convertInlineText）と同じ記法をサポートする
      */
     function convertInline(escapedText) {
-        let html = escapedText;
+        // インラインコードを最初にプレースホルダ（NUL文字で囲んだ通し番号）へ退避し、
+        // コード内の文字列に他のインライン整形（リンク・強調・取り消し線など）が
+        // 適用されて `<code>**太字**</code>` が `<code><strong>太字</strong></code>`
+        // へ化けるのを防ぐ。整形完了後に復元する。NUL文字と数字だけのプレースホルダは
+        // 記法文字（*, _, ~, +, [）を含まないため後続の置換に一切マッチしない。
+        const codeSpans = [];
+        let html = escapedText.replace(/`([^`]+)`/g, function (_m, p1) {
+            codeSpans.push(p1);
+            return '\u0000' + (codeSpans.length - 1) + '\u0000';
+        });
 
         // リンク
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
-
-        // インラインコード
-        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
@@ -71,6 +77,11 @@ window.MarkdownModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避したインラインコードを <code> として復元（中身は整形しない）
+        html = html.replace(/\u0000(\d+)\u0000/g, function (_m, i) {
+            return '<code>' + codeSpans[Number(i)] + '</code>';
+        });
 
         return html;
     }
@@ -195,6 +206,38 @@ window.MarkdownModule = (function() {
         return items.length ? build(items[0].level) : '';
     }
 
+    // GitHubアラートのタイプ→表示タイトル
+    const ALERT_TITLES = {
+        NOTE: 'Note', TIP: 'Tip', IMPORTANT: 'Important',
+        WARNING: 'Warning', CAUTION: 'Caution'
+    };
+
+    /**
+     * GitHubアラート（`> [!NOTE]` など）の判定とHTML生成。
+     * 引用行アイテムが「全行レベル1」かつ「先頭行が `[!TYPE]` マーカーのみ」の場合だけ
+     * アラート用のdivを返し、それ以外は null（通常の引用として描画させる）。
+     * 対応タイプ: NOTE / TIP / IMPORTANT / WARNING / CAUTION。
+     * data-alert-type にタイプを保持し、htmlToMarkdown 側で `> [!TYPE]` へ復元する。
+     */
+    function tryBuildAlertHtml(items) {
+        if (!items.length || items[0].level !== 1) {
+            return null;
+        }
+        const marker = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/.exec(items[0].text.trim());
+        if (!marker || items.some(it => it.level !== 1)) {
+            return null;
+        }
+        const type = marker[1];
+        const bodyHtml = items.slice(1)
+            .map(it => convertInline(escapeHtml(it.text)))
+            .join('<br>');
+        return '<div class="markdown-alert markdown-alert-' + type.toLowerCase() +
+            '" data-alert-type="' + type + '">' +
+            '<p class="markdown-alert-title" contenteditable="false">' + ALERT_TITLES[type] + '</p>' +
+            '<div class="markdown-alert-body">' + bodyHtml + '</div>' +
+            '</div>';
+    }
+
     /**
      * 見出しテキストをアンカー用スラッグへ変換する（GitHub風）。
      * 小文字化し、文字・数字・アンダースコア・ハイフン・空白以外の記号を除去、
@@ -206,6 +249,22 @@ window.MarkdownModule = (function() {
             .toLowerCase()
             .replace(/[^\p{L}\p{N}_\s-]/gu, '')
             .replace(/\s+/g, '-');
+    }
+
+    /**
+     * 見出しの生Markdownテキストから、表示される可視テキストを取り出す。
+     * インライン記法をHTMLへ変換してからタグを除去し、escapeHtmlで導入した
+     * 実体参照を元に戻すことで、レンダリング後のheading要素のtextContent
+     * （commands.jsのheadingTextが返す値）と一致させる。
+     * これにより見出しに付与するidスラッグをTOCのアンカーと確実に揃える。
+     */
+    function headingPlainText(rawText) {
+        return convertInline(escapeHtml(rawText))
+            .replace(/<[^>]*>/g, '')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&')
+            .trim();
     }
 
     /**
@@ -244,6 +303,8 @@ window.MarkdownModule = (function() {
         const lines = src.split('\n');
         const out = [];
         let i = 0;
+        // 見出しidの重複を連番（-1, -2 ...）で解消する。buildTocMarkdownと同じ規則。
+        const seenSlugs = {};
 
         while (i < lines.length) {
             const line = lines[i];
@@ -284,8 +345,17 @@ window.MarkdownModule = (function() {
             const h = /^(#{1,6}) (.*)$/.exec(line);
             if (h) {
                 const level = h[1].length;
+                // TOC（buildTocMarkdown）と同一のスラッグ生成・重複連番規則でidを付与し、
+                // 目次のアンカーリンク（[text](#slug)）から該当見出しへ遷移できるようにする。
+                let slug = slugify(headingPlainText(h[2])) || 'section';
+                if (seenSlugs[slug] === undefined) {
+                    seenSlugs[slug] = 0;
+                } else {
+                    seenSlugs[slug] += 1;
+                    slug = slug + '-' + seenSlugs[slug];
+                }
                 out.push(
-                    `<h${level}><span class="heading-hash">${h[1]} </span>` +
+                    `<h${level} id="${slug}"><span class="heading-hash">${h[1]} </span>` +
                     `${convertInline(escapeHtml(h[2]))}</h${level}>`
                 );
                 i++;
@@ -333,7 +403,10 @@ window.MarkdownModule = (function() {
                     });
                     i++;
                 }
-                out.push(buildQuoteHtml(quoteItems));
+                // GitHubアラート（`> [!NOTE]` 等）に該当すればアラートdivを、
+                // そうでなければ通常のblockquoteを生成する。
+                const alertHtml = tryBuildAlertHtml(quoteItems);
+                out.push(alertHtml !== null ? alertHtml : buildQuoteHtml(quoteItems));
                 continue;
             }
 
@@ -542,6 +615,27 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * GitHubアラートのdiv（.markdown-alert）を `> [!TYPE]` 形式の引用へ直列化する。
+     * data-alert-type からタイプを取り、本文（.markdown-alert-body）の各行を
+     * `> ` プレフィックスで連ねる。空行は落とす（buildQuoteHtml/serializeBlockquoteLines
+     * と同じ扱い）。これにより `> [!NOTE]\n> 本文` へ往復する。
+     */
+    function serializeAlert(el) {
+        const type = (el.getAttribute('data-alert-type') || 'NOTE').toUpperCase();
+        const lines = ['> [!' + type + ']'];
+        const body = el.querySelector('.markdown-alert-body');
+        if (body) {
+            serializeInlineChildren(body).split('\n').forEach(l => {
+                const t = l.trim();
+                if (t) {
+                    lines.push('> ' + t);
+                }
+            });
+        }
+        return lines.join('\n') + '\n\n';
+    }
+
+    /**
      * table要素をMarkdownテーブルへ直列化
      * セル内のインライン装飾（太字・リンク等）も保持する
      */
@@ -611,6 +705,10 @@ window.MarkdownModule = (function() {
                 return inner.trim() ? inner + '\n\n' : '\n';
             }
             case 'DIV': {
+                // GitHubアラートのdivは `> [!TYPE]` 形式の引用へ復元
+                if (el.classList && el.classList.contains('markdown-alert')) {
+                    return serializeAlert(el);
+                }
                 // ブロック子要素を含む場合はコンテナとして再帰
                 const hasBlockChild = Array.from(el.children).some(c => BLOCK_TAGS.has(c.tagName));
                 if (hasBlockChild) {
