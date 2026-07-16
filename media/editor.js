@@ -19,6 +19,7 @@
     const utils = window.EditorUtils;
     const markdown = window.MarkdownModule;
     const mermaidModule = window.MermaidModule;
+    const mathModule = window.MathModule;
     const tableModule = window.TableModule;
     const searchModule = window.SearchModule;
     const commands = window.CommandsModule;
@@ -180,6 +181,9 @@
             // Mermaid図を更新
             mermaidModule.update();
 
+            // 追加・変更された数式（KaTeX）をレンダリング
+            mathModule.render(state.editor);
+
             // 単語数・文字数の表示を更新
             updateWordCount();
 
@@ -336,6 +340,9 @@
         // Mermaid図をレンダリング
         mermaidModule.render();
 
+        // 数式（KaTeX）をレンダリング
+        mathModule.render(state.editor);
+
         // テーブルをレンダリング
         tableModule.render();
 
@@ -390,6 +397,7 @@
             commands.applySyntaxHighlighting();
             commands.decorateCodeBlocks();
             mermaidModule.render();
+            mathModule.render(state.editor);
             tableModule.render();
             state.rawEditor.style.display = 'none';
             state.editor.style.display = 'block';

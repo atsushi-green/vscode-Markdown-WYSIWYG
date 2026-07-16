@@ -218,6 +218,24 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     font-style: italic;
 }
 
+/* 数式（KaTeX）。ブロック数式は中央寄せ、横に長い式は内部でスクロールさせて
+   本文が横に広がらないようにする（テーブル等と同じ方針）。 */
+#editor .math-block {
+    margin: 1em 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    text-align: center;
+}
+
+/* レンダリング前（KaTeXの読み込み前・失敗時）に式が消えて見えないよう、
+   data-math の中身を代わりに表示する。レンダリング後は :not() で無効になる。 */
+#editor .math-inline:not([data-math-rendered])::before,
+#editor .math-block:not([data-math-rendered])::before {
+    content: attr(data-math);
+    font-family: var(--vscode-editor-font-family, monospace);
+    color: var(--vscode-descriptionForeground);
+}
+
 /* 通常クリックはキャレット設置のため、テキストカーソルを出す。
    リンク先へ移動するのは Ctrl（Mac: Cmd）+クリックのみ（VS Codeエディタ本体と同じ操作感）。 */
 #editor a {

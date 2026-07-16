@@ -124,6 +124,7 @@
     "typescript-eslint": "^8.52.0"
   },
   "dependencies": {
-    "highlight.js": "^11.11.1"
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.11"
   }
 }

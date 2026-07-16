@@ -126,6 +126,9 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         const commandsModuleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'commands.js')
         );
+        const mathModuleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'math.js')
+        );
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'editor.js')
         );
@@ -138,6 +141,17 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         );
         const hljsPowershellUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-powershell.min.js')
+        );
+
+        // KaTeX関連のURI（数式レンダリング）
+        // WebviewはCSPで外部CDNを読めないため media/katex/ へ同梱している。
+        // katex.min.css がフォントを `fonts/*.woff2` の相対パスで参照するため、
+        // フォントは katex.min.css と同じ階層の fonts/ に置く必要がある（CSPは font-src で許可済み）。
+        const katexUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'katex', 'katex.min.js')
+        );
+        const katexStyleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'katex', 'katex.min.css')
         );
 
         // Mermaid.js関連のURI
@@ -162,6 +176,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                                img-src ${webview.cspSource} data: blob:;
                                font-src ${webview.cspSource};">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <link href="${katexStyleUri}" rel="stylesheet">
                 <link href="${styleUri}" rel="stylesheet">
                 <title>Markdown WYSIWYG Editor</title>
             </head>
@@ -244,6 +259,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 <textarea id="rawEditor" spellcheck="false" style="display: none;"></textarea>
                 <script nonce="${nonce}" src="${hljsUri}"></script>
                 <script nonce="${nonce}" src="${hljsPowershellUri}"></script>
+                <script nonce="${nonce}" src="${katexUri}"></script>
                 <script nonce="${nonce}" src="${html2canvasUri}"></script>
                 <script nonce="${nonce}" src="${mermaidUri}"></script>
                 <!-- Editor modules (order matters due to dependencies) -->
@@ -254,6 +270,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 <script nonce="${nonce}" src="${tableModuleUri}"></script>
                 <script nonce="${nonce}" src="${searchModuleUri}"></script>
                 <script nonce="${nonce}" src="${commandsModuleUri}"></script>
+                <script nonce="${nonce}" src="${mathModuleUri}"></script>
                 <script nonce="${nonce}" src="${scriptUri}"></script>
             </body>
             </html>
