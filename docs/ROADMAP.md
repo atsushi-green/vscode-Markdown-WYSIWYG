@@ -49,7 +49,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
-| 2026-07-16 | 検索ウィジェットに置換機能（`replaceCurrent`/`replaceAll`・WYSIWYG/RAW両対応・リテラル置換） | `______` |
+| 2026-07-16 | 検索ウィジェットに置換機能（`replaceCurrent`/`replaceAll`・WYSIWYG/RAW両対応・リテラル置換） | `d304706` |
 | 2026-07-16 | 目次(TOC)生成をツールバーの 📑 ボタンからも実行できるように（`data-command="toc"`） | `297c41a` |
 | 2026-07-16 | GitHubアラート記法（`> [!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]`）の表示・双方向変換対応 | `31dcbe8` |
 | 2026-07-16 | 冗長な個別ハイライトバンドル（python/bash/c/sql）の読み込み・ファイル削除（commonビルドに既存・PowerShellのみ残す） | `38d686e` |
