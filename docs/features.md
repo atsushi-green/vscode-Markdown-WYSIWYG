@@ -21,7 +21,7 @@
 | `markdown-wysiwyg-editor.newMarkdownFile` | Markdown: 新しいWYSIWYGドキュメントを作成 | 新規Markdownファイルを作成しWYSIWYGエディタで開く |
 
 - `openEditor` / `openAsText` / `toggleEditor` は `resourceLangId == markdown` のときのみコマンドパレットに表示。
-- `editor/title` メニューにも `openEditor` を配置（Markdownファイルを開いている時にタイトルバーへアイコン表示）。
+- `editor/title` メニュー（エディタ右上のタイトルバーのボタン）には**何も配置しない**。以前は `openEditor` を置いていたが、`customEditors` の `priority: "default"` により `.md` は既定でWYSIWYGエディタで開くため不要であり、ユーザー要望で削除した。WYSIWYGで開き直したい場合はコマンドパレットの `openEditor`、または `Ctrl+Shift+M` / `Cmd+Shift+M`（`toggleEditor`）を使う。
 - `toggleEditor` にはキーボードショートカット `Ctrl+Shift+M`（Mac: `Cmd+Shift+M`）を割当。
 
 ## 3. Markdown ⇔ HTML 相互変換

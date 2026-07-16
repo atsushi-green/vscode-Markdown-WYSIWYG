@@ -129,9 +129,8 @@ code .
 
 ### 既存のMarkdownファイルを開く
 
-1. Markdownファイル（`.md`）を開く
-2. エディタタイトルバーのアイコンをクリック、または
-3. ファイルを右クリック →「エディターの再オープン...」→「Markdown WYSIWYG Editor」を選択
+1. Markdownファイル（`.md`）を開く（既定でWYSIWYGエディタで開きます）
+2. テキストエディタで開いている場合にWYSIWYGへ切り替えるには、`Ctrl+Shift+M`（Mac: `Cmd+Shift+M`）、コマンドパレット（`Ctrl+Shift+P`）から「Markdown: WYSIWYGエディタで開く」、またはファイルを右クリック →「エディターの再オープン...」→「Markdown WYSIWYG Editor」
 
 ### 新しいMarkdownファイルを作成
 

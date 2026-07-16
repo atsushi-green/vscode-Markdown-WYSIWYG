@@ -73,13 +73,6 @@
       }
     ],
     "menus": {
-      "editor/title": [
-        {
-          "when": "resourceLangId == markdown",
-          "command": "markdown-wysiwyg-editor.openEditor",
-          "group": "navigation"
-        }
-      ],
       "commandPalette": [
         {
           "command": "markdown-wysiwyg-editor.openEditor",

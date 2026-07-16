@@ -20,7 +20,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | エディタ右上の「Markdown: WYSIWYGエディタで開く」ボタンを削除する | S | ユーザー要望: 不要なため消す。`package.json` の `contributes.menus` → `editor/title` にある `markdown-wysiwyg-editor.openEditor` のエントリ（`"group": "navigation"` がタイトルバーのボタンとして出る）を削除するだけでよい。**コマンド自体（`contributes.commands` と `menus.commandPalette` のエントリ）は残す**（コマンドパレットからは引き続き開けるようにする）。統合テスト（`npm test`）の「すべてのコマンドが登録されている」が通ることを確認する |
 | todo | 数式のレンダリング（インライン `$...$` / ブロック `$$...$$`）と双方向変換 | M | ユーザー要望。`$\alpha$` のようなインライン数式と、`$$` で囲うブロック数式の両方に対応する。レンダリングにはライブラリが必要（**WebviewはCSPで外部CDNを読めないため `media/` へvendorして同梱する**。既存の mermaid/highlight.js/html2canvas と同じ方式で `markdownEditor.ts` から読み込む）。候補: KaTeX（軽量・同期レンダリング。CSSとフォントの同梱も必要）／MathJax（重いがSVG出力が得られる）。往復変換は元の式をそのまま保持することが最重要で、`data-math` 等の属性に生の式を持たせて `htmlToMarkdown` で復元する方式が有力（Mermaidの `data-*` 保持と同じ考え方）。**インラインコード内の `$` は数式化しない**こと（`convertInline`/`convertInlineText` のコード退避と同じ扱い）。**エスケープの仕様は確定（ユーザー指定）**: 通常の `$`（`$100` のような金額表記）を書きたい場合は `\$100` のようにバックスラッシュでエスケープするスタイルを採用する。つまり素の `$` は数式の開始として扱ってよく、`$100` を金額として書きたければ `\$` と書かせる（GitHub/Pandocと同じ流儀・曖昧さが無く実装も単純になる）。`\$` はリテラルの `$` としてレンダリングし、`htmlToMarkdown` では `\$` へ戻すこと（往復でエスケープが消えたり `\\$` に増えたりしないようテストする）。既存の `escapeHtml`/インライン整形との適用順にも注意（エスケープ済みの `\$` を先に退避してから数式判定するのが安全） |
 | todo | 数式の内側にカーソルがある間、生Markdownを表示する | M | ユーザー要望: レンダリング済みの数式にカーソルを持っていくと生のMarkdown（`$...$` / `$$...$$`）が表示され、その場で編集できるようにする。上の数式レンダリングの実装が前提。リンクで実装済みの `commands.syncRawMarkdownToCaret`（`selectionchange` 監視・`span.raw-markdown` への展開／復帰・`utils.shouldSkipInline` による再変換抑止）を**汎用化して共有する**のが本命。ブロック数式は複数行になるため、インライン（span）と同じ展開／復帰でよいかは要検討。強調記法の項目とも仕組みを共有できる見込み。実機での見た目・カーソル挙動の確認が必要なため対話セッション向き |
 | todo | ブロック数式を右クリックでPNGとしてクリップボードにコピーする | M | ユーザー要望。UI・処理とも Mermaid図の既存実装（`media/modules/mermaid.js` の `showContextMenu`/`hideContextMenu`/`copyToClipboard`、`mermaidContextMenu` のHTML）をほぼ流用できる。**注意**: mermaidは `svgToPngBlob`（SVG→canvas）だが、KaTeXの出力はSVGではなくHTML+CSSのため同じ経路は使えない。同梱済みの `html2canvas.min.js`（Mermaid PNG保存で実績あり）でHTML→canvas→PNG Blob→`navigator.clipboard.write(ClipboardItem)` とするか、MathJaxのSVG出力を選んで `svgToPngBlob` を流用するかは、上の数式レンダリングでどちらのライブラリを選ぶかと合わせて決める |
@@ -52,6 +51,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
+| 2026-07-17 | エディタ右上の「Markdown: WYSIWYGエディタで開く」ボタンの削除（`menus.editor/title` のエントリを削除。コマンド定義とコマンドパレットは維持。ユーザー要望） | `PENDING` |
 | 2026-07-17 | ダークモードで太字がまだ視認しにくい問題の改善（ウェイトに加え `font-size: 1.05em` へ拡大・全テーマ共通。`line-height: calc(1.6 / 1.05)` で行高を据え置き。ユーザー再報告） | `0306fcf` |
 | 2026-07-17 | リンクの挿入・編集ダイアログ（`Ctrl+K`・選択テキストのリンク化／既存リンクの編集・解除。自前ダイアログ＝Webviewでは `prompt()` が使えないため） | `c7b61b4` |
 | 2026-07-17 | リンクのクリック挙動を Ctrl/Cmd+クリックでの遷移へ変更（通常クリックはキャレット設置のみ。`handleLinkClick`＋拡張機能側 `openLink`／`vscode.env.openExternal`。ユーザー要望・実機確認済み） | `528cbfb` |

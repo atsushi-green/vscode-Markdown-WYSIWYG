@@ -4,7 +4,7 @@
 
 | コマンドID | タイトル | 表示条件 |
 |---|---|---|
-| `markdown-wysiwyg-editor.openEditor` | Markdown: WYSIWYGエディタで開く | `resourceLangId == markdown`（コマンドパレット・`editor/title`メニュー） |
+| `markdown-wysiwyg-editor.openEditor` | Markdown: WYSIWYGエディタで開く | `resourceLangId == markdown`（コマンドパレットのみ。タイトルバーのボタンは廃止） |
 | `markdown-wysiwyg-editor.openAsText` | Markdown: テキストエディタで開く | `resourceLangId == markdown`（コマンドパレット） |
 | `markdown-wysiwyg-editor.toggleEditor` | Markdown: エディタ切り替え (WYSIWYG/テキスト) | `resourceLangId == markdown`（コマンドパレット） |
 | `markdown-wysiwyg-editor.newMarkdownFile` | Markdown: 新しいWYSIWYGドキュメントを作成 | 常に表示 |
