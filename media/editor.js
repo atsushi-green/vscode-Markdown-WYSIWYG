@@ -388,15 +388,18 @@
      */
     function setupGlobalKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            // Ctrl+/ でRAW/プレビューモード切り替え
-            if (e.ctrlKey && e.key === '/') {
+            // 修飾キーはWin/Linuxの Ctrl と macOS の Cmd(⌘) の両方を受け付ける
+            const mod = e.ctrlKey || e.metaKey;
+
+            // Ctrl+/ (Cmd+/) でRAW/プレビューモード切り替え
+            if (mod && e.key === '/') {
                 e.preventDefault();
                 toggleRawMode();
                 return;
             }
 
-            // Ctrl+F で検索ウィジェットを開く
-            if (e.ctrlKey && e.key === 'f') {
+            // Ctrl+F (Cmd+F) で検索ウィジェットを開く
+            if (mod && e.key.toLowerCase() === 'f') {
                 e.preventDefault();
                 searchModule.open();
                 return;
@@ -430,8 +433,8 @@
                 return;
             }
 
-            // F3 または Ctrl+G で次を検索
-            if (e.key === 'F3' || (e.ctrlKey && e.key === 'g')) {
+            // F3 または Ctrl+G (Cmd+G) で次を検索
+            if (e.key === 'F3' || (mod && e.key.toLowerCase() === 'g')) {
                 e.preventDefault();
                 if (e.shiftKey) {
                     searchModule.findPrev();
