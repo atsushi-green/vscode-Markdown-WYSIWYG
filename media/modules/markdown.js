@@ -206,6 +206,38 @@ window.MarkdownModule = (function() {
         return items.length ? build(items[0].level) : '';
     }
 
+    // GitHubアラートのタイプ→表示タイトル
+    const ALERT_TITLES = {
+        NOTE: 'Note', TIP: 'Tip', IMPORTANT: 'Important',
+        WARNING: 'Warning', CAUTION: 'Caution'
+    };
+
+    /**
+     * GitHubアラート（`> [!NOTE]` など）の判定とHTML生成。
+     * 引用行アイテムが「全行レベル1」かつ「先頭行が `[!TYPE]` マーカーのみ」の場合だけ
+     * アラート用のdivを返し、それ以外は null（通常の引用として描画させる）。
+     * 対応タイプ: NOTE / TIP / IMPORTANT / WARNING / CAUTION。
+     * data-alert-type にタイプを保持し、htmlToMarkdown 側で `> [!TYPE]` へ復元する。
+     */
+    function tryBuildAlertHtml(items) {
+        if (!items.length || items[0].level !== 1) {
+            return null;
+        }
+        const marker = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/.exec(items[0].text.trim());
+        if (!marker || items.some(it => it.level !== 1)) {
+            return null;
+        }
+        const type = marker[1];
+        const bodyHtml = items.slice(1)
+            .map(it => convertInline(escapeHtml(it.text)))
+            .join('<br>');
+        return '<div class="markdown-alert markdown-alert-' + type.toLowerCase() +
+            '" data-alert-type="' + type + '">' +
+            '<p class="markdown-alert-title" contenteditable="false">' + ALERT_TITLES[type] + '</p>' +
+            '<div class="markdown-alert-body">' + bodyHtml + '</div>' +
+            '</div>';
+    }
+
     /**
      * 見出しテキストをアンカー用スラッグへ変換する（GitHub風）。
      * 小文字化し、文字・数字・アンダースコア・ハイフン・空白以外の記号を除去、
@@ -371,7 +403,10 @@ window.MarkdownModule = (function() {
                     });
                     i++;
                 }
-                out.push(buildQuoteHtml(quoteItems));
+                // GitHubアラート（`> [!NOTE]` 等）に該当すればアラートdivを、
+                // そうでなければ通常のblockquoteを生成する。
+                const alertHtml = tryBuildAlertHtml(quoteItems);
+                out.push(alertHtml !== null ? alertHtml : buildQuoteHtml(quoteItems));
                 continue;
             }
 
@@ -580,6 +615,27 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * GitHubアラートのdiv（.markdown-alert）を `> [!TYPE]` 形式の引用へ直列化する。
+     * data-alert-type からタイプを取り、本文（.markdown-alert-body）の各行を
+     * `> ` プレフィックスで連ねる。空行は落とす（buildQuoteHtml/serializeBlockquoteLines
+     * と同じ扱い）。これにより `> [!NOTE]\n> 本文` へ往復する。
+     */
+    function serializeAlert(el) {
+        const type = (el.getAttribute('data-alert-type') || 'NOTE').toUpperCase();
+        const lines = ['> [!' + type + ']'];
+        const body = el.querySelector('.markdown-alert-body');
+        if (body) {
+            serializeInlineChildren(body).split('\n').forEach(l => {
+                const t = l.trim();
+                if (t) {
+                    lines.push('> ' + t);
+                }
+            });
+        }
+        return lines.join('\n') + '\n\n';
+    }
+
+    /**
      * table要素をMarkdownテーブルへ直列化
      * セル内のインライン装飾（太字・リンク等）も保持する
      */
@@ -649,6 +705,10 @@ window.MarkdownModule = (function() {
                 return inner.trim() ? inner + '\n\n' : '\n';
             }
             case 'DIV': {
+                // GitHubアラートのdivは `> [!TYPE]` 形式の引用へ復元
+                if (el.classList && el.classList.contains('markdown-alert')) {
+                    return serializeAlert(el);
+                }
                 // ブロック子要素を含む場合はコンテナとして再帰
                 const hasBlockChild = Array.from(el.children).some(c => BLOCK_TAGS.has(c.tagName));
                 if (hasBlockChild) {

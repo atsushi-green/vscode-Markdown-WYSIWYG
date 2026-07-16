@@ -186,6 +186,60 @@ suite('MarkdownModule', () => {
             );
         });
 
+        test('GitHubアラート（> [!NOTE]）をアラートdivに変換する', () => {
+            const html = env.markdown.markdownToHtml('> [!NOTE]\n> 補足です');
+            assert.strictEqual(
+                html,
+                '<div class="markdown-alert markdown-alert-note" data-alert-type="NOTE">' +
+                '<p class="markdown-alert-title" contenteditable="false">Note</p>' +
+                '<div class="markdown-alert-body">補足です</div></div>'
+            );
+        });
+
+        test('5種類のアラートタイプすべてを認識する', () => {
+            const cases: [string, string, string][] = [
+                ['NOTE', 'note', 'Note'],
+                ['TIP', 'tip', 'Tip'],
+                ['IMPORTANT', 'important', 'Important'],
+                ['WARNING', 'warning', 'Warning'],
+                ['CAUTION', 'caution', 'Caution']
+            ];
+            cases.forEach(([type, cls, title]) => {
+                const html = env.markdown.markdownToHtml(`> [!${type}]\n> 本文`);
+                assert.ok(html.includes(`markdown-alert-${cls}`), html);
+                assert.ok(html.includes(`data-alert-type="${type}"`), html);
+                assert.ok(html.includes(`>${title}</p>`), html);
+            });
+        });
+
+        test('複数行の本文は<br>で連結する', () => {
+            const html = env.markdown.markdownToHtml('> [!WARNING]\n> 注意1\n> 注意2');
+            assert.ok(html.includes('<div class="markdown-alert-body">注意1<br>注意2</div>'), html);
+        });
+
+        test('本文なしのアラートも変換できる', () => {
+            const html = env.markdown.markdownToHtml('> [!TIP]');
+            assert.ok(html.includes('markdown-alert-tip'), html);
+            assert.ok(html.includes('<div class="markdown-alert-body"></div>'), html);
+        });
+
+        test('小文字マーカーやマーカー以外を含む行は通常の引用にする', () => {
+            assert.strictEqual(
+                env.markdown.markdownToHtml('> [!note] 小文字'),
+                '<blockquote>[!note] 小文字</blockquote>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('> [!IMPORTANT] 余分なテキスト'),
+                '<blockquote>[!IMPORTANT] 余分なテキスト</blockquote>'
+            );
+        });
+
+        test('アラート本文のインライン記法（太字・リンク）を変換する', () => {
+            const html = env.markdown.markdownToHtml('> [!NOTE]\n> **重要** な [リンク](https://example.com)');
+            assert.ok(html.includes('<strong>重要</strong>'), html);
+            assert.ok(html.includes('<a href="https://example.com">リンク</a>'), html);
+        });
+
         test('テーブルをthead/tbody付きで変換する', () => {
             const md = '| 列A | 列B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |';
             const html = env.markdown.markdownToHtml(md);
@@ -322,6 +376,24 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md, '');
         });
 
+        test('アラートdivを > [!TYPE] 形式へシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<div class="markdown-alert markdown-alert-note" data-alert-type="NOTE">' +
+                '<p class="markdown-alert-title" contenteditable="false">Note</p>' +
+                '<div class="markdown-alert-body">補足1<br>補足2</div></div>'
+            );
+            assert.strictEqual(md, '> [!NOTE]\n> 補足1\n> 補足2\n');
+        });
+
+        test('本文なしのアラートは > [!TYPE] のみへシリアライズする', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<div class="markdown-alert markdown-alert-tip" data-alert-type="TIP">' +
+                '<p class="markdown-alert-title" contenteditable="false">Tip</p>' +
+                '<div class="markdown-alert-body"></div></div>'
+            );
+            assert.strictEqual(md, '> [!TIP]\n');
+        });
+
         test('テーブルをセル内装飾を保持してシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown(
                 '<table><thead><tr><th>列A</th><th>列B</th></tr></thead>' +
@@ -407,6 +479,20 @@ suite('MarkdownModule', () => {
             const once = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
             const twice = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(once));
             assert.strictEqual(twice, once);
+        });
+
+        test('GitHubアラートが変換往復で保存される', () => {
+            [
+                '> [!NOTE]\n> 補足です\n',
+                '> [!WARNING]\n> 注意1\n> 注意2\n',
+                '> [!TIP]\n',
+                '> [!IMPORTANT]\n> **太字** と [リンク](https://example.com)\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(
+                    env.markdown.markdownToHtml(original)
+                );
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
         });
     });
 

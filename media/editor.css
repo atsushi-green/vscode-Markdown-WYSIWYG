@@ -444,6 +444,46 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     color: var(--vscode-descriptionForeground);
 }
 
+/* GitHubアラート（> [!NOTE] など）。タイプごとにアクセント色を変える。
+   色はVS Codeのテーマ変数を参照し、ライト/ダークいずれにも追従する。 */
+#editor .markdown-alert {
+    margin: 1em 0;
+    padding: 0.6em 1em;
+    border-left: 4px solid var(--alert-accent, var(--vscode-editorGroup-border));
+    border-radius: 3px;
+    background-color: var(--vscode-textBlockQuote-background, transparent);
+}
+
+#editor .markdown-alert-title {
+    margin: 0 0 0.3em 0;
+    font-weight: 700;
+    color: var(--alert-accent, var(--vscode-foreground));
+}
+
+#editor .markdown-alert-body {
+    color: var(--vscode-editor-foreground);
+}
+
+#editor .markdown-alert-note {
+    --alert-accent: var(--vscode-editorInfo-foreground, var(--vscode-charts-blue));
+}
+
+#editor .markdown-alert-tip {
+    --alert-accent: var(--vscode-charts-green, var(--vscode-editorInfo-foreground));
+}
+
+#editor .markdown-alert-important {
+    --alert-accent: var(--vscode-charts-purple, var(--vscode-textLink-foreground));
+}
+
+#editor .markdown-alert-warning {
+    --alert-accent: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+}
+
+#editor .markdown-alert-caution {
+    --alert-accent: var(--vscode-editorError-foreground, var(--vscode-charts-red));
+}
+
 #editor ul,
 #editor ol {
     margin: 1em 0;
