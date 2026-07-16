@@ -30,7 +30,7 @@
 | 2026-07-16 | `fd898ed` fix: ダークモードで太字が視認しにくい問題の改善 | `#editor strong` のウェイトを 600 から 700 へ引き上げ、ダークテーマ・ダーク系ハイコントラストでは 800 へさらに強調するテーマ別ルールを `media/editor.css` に追加。テーマ判定は body の `vscode-dark`/`vscode-high-contrast(-light)` クラス（`mermaid.js` の判定と同規則）を利用。 |
 | 2026-07-16 | `c7b2f9f` fix: 下端スクロールでツールバーが画面外に消える問題の修正 | `#editor`/`#rawEditor` の `min-height` を `100%` から `0` へ変更。flexの子に `min-height:100%` があるとツールバー分を無視して伸び、body側がはみ出してツールバーごとスクロールしていた。`min-height:0` で残り領域内に収め、スクロールを本文領域内部（`overflow-y:auto`）へ閉じ込めることで、ツールバーが常時上部固定されるように修正。 |
 | 2026-07-16 | `38d686e` refactor: 冗長な個別ハイライトバンドルの読み込み整理 | commonビルド `highlight.min.js` に既に含まれる `hljs-python`/`hljs-bash`/`hljs-c`/`hljs-sql` の個別読み込み（`src/markdownEditor.ts`）と同梱ファイルを削除。commonビルド外の PowerShell のみ個別バンドルを残す。対応言語は変わらず（`syntax-highlight.test.ts` で回帰確認済み）、拡張機能サイズを約15KB削減。統合テスト（`npm test`）8件で拡張機能のアクティベート・コマンド登録・エディタ起動を確認。 |
-| 2026-07-16 | `______` feat: GitHubアラート記法（`> [!NOTE]` など）の表示対応 | 引用の先頭行が `[!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]` のみの場合、タイプ別に色分けしたアラートボックスへ変換（`markdown.js` の `tryBuildAlertHtml`/`serializeAlert`）。`data-alert-type` を保持し `> [!TYPE]\n> 本文` へ双方向変換（往復テスト済み）。マーカー大文字必須・行内に余分なテキストがあると通常引用（GitHub準拠）。色はVS Codeテーマ変数を参照。ユニットテスト9件を追加。 |
+| 2026-07-16 | `31dcbe8` feat: GitHubアラート記法（`> [!NOTE]` など）の表示対応 | 引用の先頭行が `[!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]` のみの場合、タイプ別に色分けしたアラートボックスへ変換（`markdown.js` の `tryBuildAlertHtml`/`serializeAlert`）。`data-alert-type` を保持し `> [!TYPE]\n> 本文` へ双方向変換（往復テスト済み）。マーカー大文字必須・行内に余分なテキストがあると通常引用（GitHub準拠）。色はVS Codeテーマ変数を参照。ユニットテスト9件を追加。 |
 
 ## 作業中（未コミット）の変更
 
