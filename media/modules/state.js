@@ -27,6 +27,9 @@ window.EditorState = (function() {
         findPrev: null,
         findNext: null,
         findClose: null,
+        replaceInput: null,
+        replaceBtn: null,
+        replaceAllBtn: null,
 
         // エディタ状態フラグ
         isUpdating: false,
@@ -79,6 +82,9 @@ window.EditorState = (function() {
         state.findPrev = document.getElementById('findPrev');
         state.findNext = document.getElementById('findNext');
         state.findClose = document.getElementById('findClose');
+        state.replaceInput = document.getElementById('replaceInput');
+        state.replaceBtn = document.getElementById('replaceBtn');
+        state.replaceAllBtn = document.getElementById('replaceAllBtn');
     }
 
     /**
@@ -114,6 +120,9 @@ window.EditorState = (function() {
         get findPrev() { return state.findPrev; },
         get findNext() { return state.findNext; },
         get findClose() { return state.findClose; },
+        get replaceInput() { return state.replaceInput; },
+        get replaceBtn() { return state.replaceBtn; },
+        get replaceAllBtn() { return state.replaceAllBtn; },
 
         // フラグのゲッター/セッター
         get isUpdating() { return state.isUpdating; },

@@ -207,4 +207,83 @@ suite('SearchModule', () => {
             assert.ok(!env.state.findOptionCase.classList.contains('active'));
         });
     });
+
+    suite('置換（replace）', () => {
+        function setReplace(text: string): void {
+            (env.state.replaceInput as HTMLInputElement).value = text;
+        }
+
+        suite('WYSIWYGモード', () => {
+            test('replaceCurrentで現在のマッチだけを置換し再検索する', () => {
+                find('hello');
+                assert.strictEqual(env.state.findMatches.length, 4);
+                setReplace('HI');
+                env.search.replaceCurrent();
+                // 先頭の1件が置換され、残りは3件
+                assert.strictEqual(env.state.findMatches.length, 3);
+                assert.ok((env.editor.textContent || '').includes('HI'), env.editor.innerHTML);
+            });
+
+            test('replaceAllで全マッチを置換する', () => {
+                find('hello');
+                setReplace('X');
+                env.search.replaceAll();
+                assert.strictEqual(env.state.findMatches.length, 0);
+                assert.ok(!/hello/i.test(env.editor.textContent || ''), env.editor.textContent || '');
+                assert.strictEqual(((env.editor.textContent || '').match(/X/g) || []).length, 4);
+            });
+
+            test('空文字で置換するとマッチを削除できる', () => {
+                find('hello');
+                setReplace('');
+                env.search.replaceAll();
+                assert.ok(!/hello/i.test(env.editor.textContent || ''), env.editor.textContent || '');
+            });
+
+            test('マッチが無ければ何もしない（例外を投げない）', () => {
+                find('存在しない語XYZ');
+                setReplace('X');
+                assert.doesNotThrow(() => env.search.replaceCurrent());
+                assert.doesNotThrow(() => env.search.replaceAll());
+            });
+        });
+
+        suite('RAWモード', () => {
+            setup(() => {
+                env.state.isRawMode = true;
+                (env.state.rawEditor as HTMLTextAreaElement).value = 'foo bar\nfoo baz foo';
+            });
+
+            test('replaceCurrentで現在のマッチだけ置換する', () => {
+                find('foo');
+                setReplace('qux');
+                env.search.replaceCurrent();
+                assert.strictEqual(
+                    (env.state.rawEditor as HTMLTextAreaElement).value,
+                    'qux bar\nfoo baz foo'
+                );
+            });
+
+            test('replaceAllで全マッチを置換する', () => {
+                find('foo');
+                setReplace('qux');
+                env.search.replaceAll();
+                assert.strictEqual(
+                    (env.state.rawEditor as HTMLTextAreaElement).value,
+                    'qux bar\nqux baz qux'
+                );
+            });
+
+            test('置換文字列はリテラル扱い（$&などを展開しない）', () => {
+                (env.state.rawEditor as HTMLTextAreaElement).value = 'a foo b';
+                find('foo');
+                setReplace('$&x');
+                env.search.replaceAll();
+                assert.strictEqual(
+                    (env.state.rawEditor as HTMLTextAreaElement).value,
+                    'a $&x b'
+                );
+            });
+        });
+    });
 });

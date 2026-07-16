@@ -21,19 +21,30 @@ const FIXTURE_HTML = `<!DOCTYPE html>
         <button class="toolbar-btn toggle-btn" id="toggleView">📄 Raw</button>
     </div>
     <div id="findWidget" class="find-widget" style="display: none;">
-        <div class="find-input-container">
-            <input type="text" id="findInput" class="find-input" />
-            <span id="findCount" class="find-count"></span>
+        <div class="find-row">
+            <div class="find-input-container">
+                <input type="text" id="findInput" class="find-input" />
+                <span id="findCount" class="find-count"></span>
+            </div>
+            <div class="find-options">
+                <button id="findOptionCase" class="find-option-btn">Aa</button>
+                <button id="findOptionWord" class="find-option-btn">ab</button>
+                <button id="findOptionRegex" class="find-option-btn">.*</button>
+            </div>
+            <div class="find-actions">
+                <button id="findPrev" class="find-action-btn">↑</button>
+                <button id="findNext" class="find-action-btn">↓</button>
+                <button id="findClose" class="find-action-btn">✕</button>
+            </div>
         </div>
-        <div class="find-options">
-            <button id="findOptionCase" class="find-option-btn">Aa</button>
-            <button id="findOptionWord" class="find-option-btn">ab</button>
-            <button id="findOptionRegex" class="find-option-btn">.*</button>
-        </div>
-        <div class="find-actions">
-            <button id="findPrev" class="find-action-btn">↑</button>
-            <button id="findNext" class="find-action-btn">↓</button>
-            <button id="findClose" class="find-action-btn">✕</button>
+        <div class="replace-row">
+            <div class="find-input-container">
+                <input type="text" id="replaceInput" class="find-input" />
+            </div>
+            <div class="find-actions">
+                <button id="replaceBtn" class="replace-action-btn">置換</button>
+                <button id="replaceAllBtn" class="replace-action-btn">全置換</button>
+            </div>
         </div>
     </div>
     <div id="mermaidContextMenu" class="mermaid-context-menu" style="display: none;"></div>

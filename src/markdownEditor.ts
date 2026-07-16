@@ -188,19 +188,30 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 </div>
                 <!-- 検索ウィジェット -->
                 <div id="findWidget" class="find-widget" style="display: none;">
-                    <div class="find-input-container">
-                        <input type="text" id="findInput" class="find-input" placeholder="検索..." />
-                        <span id="findCount" class="find-count"></span>
+                    <div class="find-row">
+                        <div class="find-input-container">
+                            <input type="text" id="findInput" class="find-input" placeholder="検索..." />
+                            <span id="findCount" class="find-count"></span>
+                        </div>
+                        <div class="find-options">
+                            <button id="findOptionCase" class="find-option-btn" title="大文字と小文字を区別 (Alt+C)">Aa</button>
+                            <button id="findOptionWord" class="find-option-btn" title="単語単位で検索 (Alt+W)">ab</button>
+                            <button id="findOptionRegex" class="find-option-btn" title="正規表現を使用 (Alt+R)">.*</button>
+                        </div>
+                        <div class="find-actions">
+                            <button id="findPrev" class="find-action-btn" title="前を検索 (Shift+Enter)">↑</button>
+                            <button id="findNext" class="find-action-btn" title="次を検索 (Enter)">↓</button>
+                            <button id="findClose" class="find-action-btn" title="閉じる (Escape)">✕</button>
+                        </div>
                     </div>
-                    <div class="find-options">
-                        <button id="findOptionCase" class="find-option-btn" title="大文字と小文字を区別 (Alt+C)">Aa</button>
-                        <button id="findOptionWord" class="find-option-btn" title="単語単位で検索 (Alt+W)">ab</button>
-                        <button id="findOptionRegex" class="find-option-btn" title="正規表現を使用 (Alt+R)">.*</button>
-                    </div>
-                    <div class="find-actions">
-                        <button id="findPrev" class="find-action-btn" title="前を検索 (Shift+Enter)">↑</button>
-                        <button id="findNext" class="find-action-btn" title="次を検索 (Enter)">↓</button>
-                        <button id="findClose" class="find-action-btn" title="閉じる (Escape)">✕</button>
+                    <div class="replace-row">
+                        <div class="find-input-container">
+                            <input type="text" id="replaceInput" class="find-input" placeholder="置換..." />
+                        </div>
+                        <div class="find-actions">
+                            <button id="replaceBtn" class="replace-action-btn" title="現在のマッチを置換 (Enter)">置換</button>
+                            <button id="replaceAllBtn" class="replace-action-btn" title="すべて置換">全置換</button>
+                        </div>
                     </div>
                 </div>
                 <!-- Mermaidコンテキストメニュー -->

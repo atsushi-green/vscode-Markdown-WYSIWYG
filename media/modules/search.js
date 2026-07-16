@@ -235,6 +235,79 @@ window.SearchModule = (function() {
     }
 
     /**
+     * 置換後にエディタ内容の変更を編集フローへ通知する。
+     * editor.js の input リスナーが文書への書き戻し・再整形を行う（このモジュールは
+     * 直接同期しない）。ユニットテストでは editor.js 未ロードのため副作用は無い。
+     */
+    function notifyEdited(target) {
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    /**
+     * 現在のマッチを置換文字列（置換なら空文字も可）で置き換える。
+     * 置換は常にリテラル（置換入力の文字列そのまま）。置換後は再検索して
+     * ハイライトを更新し、残りの先頭マッチへ移動する。
+     */
+    function replaceCurrent() {
+        if (state.findMatches.length === 0 || state.currentMatchIndex < 0) {
+            return;
+        }
+        const replacement = state.replaceInput ? state.replaceInput.value : '';
+
+        if (state.isRawMode) {
+            const match = state.findMatches[state.currentMatchIndex];
+            const value = state.rawEditor.value;
+            state.rawEditor.value =
+                value.slice(0, match.start) + replacement + value.slice(match.end);
+            notifyEdited(state.rawEditor);
+        } else {
+            const el = state.findMatches[state.currentMatchIndex];
+            const parent = el.parentNode;
+            if (!parent) {
+                return;
+            }
+            parent.replaceChild(document.createTextNode(replacement), el);
+            parent.normalize();
+            notifyEdited(state.editor);
+        }
+
+        performFind();
+    }
+
+    /**
+     * すべてのマッチをまとめて置換する。
+     * WYSIWYGモードは検出済みハイライト要素を、RAWモードは検索正規表現（グローバル）を
+     * 用いて一括置換する。置換文字列はリテラル。
+     */
+    function replaceAll() {
+        if (state.findMatches.length === 0) {
+            return;
+        }
+        const replacement = state.replaceInput ? state.replaceInput.value : '';
+
+        if (state.isRawMode) {
+            const regex = buildSearchRegex(state.findInput.value);
+            if (!regex) {
+                return;
+            }
+            // リテラル置換にするため置換関数で固定文字列を返す（$&等を無効化）
+            state.rawEditor.value = state.rawEditor.value.replace(regex, () => replacement);
+            notifyEdited(state.rawEditor);
+        } else {
+            state.findMatches.forEach(el => {
+                const parent = el.parentNode;
+                if (parent) {
+                    parent.replaceChild(document.createTextNode(replacement), el);
+                }
+            });
+            state.editor.normalize();
+            notifyEdited(state.editor);
+        }
+
+        performFind();
+    }
+
+    /**
      * オプションボタンのトグル
      */
     function toggleOption(option, button) {
@@ -276,6 +349,25 @@ window.SearchModule = (function() {
         state.findPrev.addEventListener('click', findPrev);
         state.findNext.addEventListener('click', findNext);
         state.findClose.addEventListener('click', close);
+
+        // 置換入力・ボタン
+        if (state.replaceInput) {
+            state.replaceInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    replaceCurrent();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    close();
+                }
+            });
+        }
+        if (state.replaceBtn) {
+            state.replaceBtn.addEventListener('click', replaceCurrent);
+        }
+        if (state.replaceAllBtn) {
+            state.replaceAllBtn.addEventListener('click', replaceAll);
+        }
     }
 
     // 公開API
@@ -286,6 +378,8 @@ window.SearchModule = (function() {
         performFind: performFind,
         findNext: findNext,
         findPrev: findPrev,
+        replaceCurrent: replaceCurrent,
+        replaceAll: replaceAll,
         toggleOption: toggleOption,
         setupEventListeners: setupEventListeners
     };
