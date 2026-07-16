@@ -72,7 +72,12 @@ body {
     padding: 20px;
     overflow-y: auto;
     outline: none;
-    min-height: 100%;
+    /* flexの子に min-height:100% を与えると、ツールバー分を無視して
+       ビューポート全高まで伸び、body側がはみ出してツールバーごと
+       スクロールしてしまう。min-height:0 にして残り領域内に収め、
+       スクロールを #rawEditor 内部（overflow-y:auto）へ閉じ込める。
+       flex:1 により短い内容でも領域は満たされる。 */
+    min-height: 0;
     box-sizing: border-box;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
@@ -95,7 +100,10 @@ body {
     padding: 20px;
     overflow-y: auto;
     outline: none;
-    min-height: 100%;
+    /* min-height:100% だとツールバー分を無視して伸び、body側がスクロールして
+       ツールバーが画面外へ消える。min-height:0 で残り領域内に収め、スクロールを
+       #editor 内部へ閉じ込める（flex:1 で短い内容でも領域は満たされる）。 */
+    min-height: 0;
     box-sizing: border-box;
 }
 
