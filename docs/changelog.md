@@ -31,7 +31,7 @@
 | 2026-07-16 | `c7b2f9f` fix: 下端スクロールでツールバーが画面外に消える問題の修正 | `#editor`/`#rawEditor` の `min-height` を `100%` から `0` へ変更。flexの子に `min-height:100%` があるとツールバー分を無視して伸び、body側がはみ出してツールバーごとスクロールしていた。`min-height:0` で残り領域内に収め、スクロールを本文領域内部（`overflow-y:auto`）へ閉じ込めることで、ツールバーが常時上部固定されるように修正。 |
 | 2026-07-16 | `38d686e` refactor: 冗長な個別ハイライトバンドルの読み込み整理 | commonビルド `highlight.min.js` に既に含まれる `hljs-python`/`hljs-bash`/`hljs-c`/`hljs-sql` の個別読み込み（`src/markdownEditor.ts`）と同梱ファイルを削除。commonビルド外の PowerShell のみ個別バンドルを残す。対応言語は変わらず（`syntax-highlight.test.ts` で回帰確認済み）、拡張機能サイズを約15KB削減。統合テスト（`npm test`）8件で拡張機能のアクティベート・コマンド登録・エディタ起動を確認。 |
 | 2026-07-16 | `31dcbe8` feat: GitHubアラート記法（`> [!NOTE]` など）の表示対応 | 引用の先頭行が `[!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]` のみの場合、タイプ別に色分けしたアラートボックスへ変換（`markdown.js` の `tryBuildAlertHtml`/`serializeAlert`）。`data-alert-type` を保持し `> [!TYPE]\n> 本文` へ双方向変換（往復テスト済み）。マーカー大文字必須・行内に余分なテキストがあると通常引用（GitHub準拠）。色はVS Codeテーマ変数を参照。ユニットテスト9件を追加。 |
-| 2026-07-16 | `______` feat: 目次(TOC)生成をツールバーボタンに追加 | 書式ツールバーに 📑 ボタン（`data-command="toc"`）を追加し、キーボードショートカット `Ctrl+Shift+O` に加えてクリックからも目次を挿入可能に。ボタンの配線は既存の汎用ハンドラ（`data-command`→`executeCommand`）で自動的に有効化。`src/markdownEditor.ts` のツールバーHTMLへの追加のため統合テスト（`npm test`）8件で拡張機能のアクティベート等を確認。 |
+| 2026-07-16 | `297c41a` feat: 目次(TOC)生成をツールバーボタンに追加 | 書式ツールバーに 📑 ボタン（`data-command="toc"`）を追加し、キーボードショートカット `Ctrl+Shift+O` に加えてクリックからも目次を挿入可能に。ボタンの配線は既存の汎用ハンドラ（`data-command`→`executeCommand`）で自動的に有効化。`src/markdownEditor.ts` のツールバーHTMLへの追加のため統合テスト（`npm test`）8件で拡張機能のアクティベート等を確認。 |
 
 ## 作業中（未コミット）の変更
 
