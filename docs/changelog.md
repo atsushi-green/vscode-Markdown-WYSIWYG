@@ -29,7 +29,7 @@
 | 2026-07-16 | `482e72d` fix: インラインコード内の記法が往復で欠損するバグを修正 | `` `**太字**` `` のようにインラインコード内へ書いた `**`/`~~`/`++`/`[]()` が装飾として解釈され `<code><strong>太字</strong></code>` に化け、WYSIWYG往復で記法が失われていた問題を修正。`convertInline`（`markdown.js`）と `convertInlineText`（`commands.js`）でインラインコードを先にプレースホルダ（NUL文字＋通し番号）へ退避し、他のインライン整形適用後に `<code>` として復元することでコード内を保護。ユニットテスト（往復含む5件）を追加。 |
 | 2026-07-16 | `fd898ed` fix: ダークモードで太字が視認しにくい問題の改善 | `#editor strong` のウェイトを 600 から 700 へ引き上げ、ダークテーマ・ダーク系ハイコントラストでは 800 へさらに強調するテーマ別ルールを `media/editor.css` に追加。テーマ判定は body の `vscode-dark`/`vscode-high-contrast(-light)` クラス（`mermaid.js` の判定と同規則）を利用。 |
 | 2026-07-16 | `c7b2f9f` fix: 下端スクロールでツールバーが画面外に消える問題の修正 | `#editor`/`#rawEditor` の `min-height` を `100%` から `0` へ変更。flexの子に `min-height:100%` があるとツールバー分を無視して伸び、body側がはみ出してツールバーごとスクロールしていた。`min-height:0` で残り領域内に収め、スクロールを本文領域内部（`overflow-y:auto`）へ閉じ込めることで、ツールバーが常時上部固定されるように修正。 |
-| 2026-07-16 | `______` refactor: 冗長な個別ハイライトバンドルの読み込み整理 | commonビルド `highlight.min.js` に既に含まれる `hljs-python`/`hljs-bash`/`hljs-c`/`hljs-sql` の個別読み込み（`src/markdownEditor.ts`）と同梱ファイルを削除。commonビルド外の PowerShell のみ個別バンドルを残す。対応言語は変わらず（`syntax-highlight.test.ts` で回帰確認済み）、拡張機能サイズを約15KB削減。統合テスト（`npm test`）8件で拡張機能のアクティベート・コマンド登録・エディタ起動を確認。 |
+| 2026-07-16 | `38d686e` refactor: 冗長な個別ハイライトバンドルの読み込み整理 | commonビルド `highlight.min.js` に既に含まれる `hljs-python`/`hljs-bash`/`hljs-c`/`hljs-sql` の個別読み込み（`src/markdownEditor.ts`）と同梱ファイルを削除。commonビルド外の PowerShell のみ個別バンドルを残す。対応言語は変わらず（`syntax-highlight.test.ts` で回帰確認済み）、拡張機能サイズを約15KB削減。統合テスト（`npm test`）8件で拡張機能のアクティベート・コマンド登録・エディタ起動を確認。 |
 
 ## 作業中（未コミット）の変更
 
