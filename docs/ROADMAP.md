@@ -47,7 +47,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
-| 2026-07-17 | リンクの挿入・編集ダイアログ（`Ctrl+K`・選択テキストのリンク化／既存リンクの編集・解除。自前ダイアログ＝Webviewでは `prompt()` が使えないため） | `PENDING` |
+| 2026-07-17 | リンクの挿入・編集ダイアログ（`Ctrl+K`・選択テキストのリンク化／既存リンクの編集・解除。自前ダイアログ＝Webviewでは `prompt()` が使えないため） | `c7b61b4` |
 | 2026-07-17 | リンクのクリック挙動を Ctrl/Cmd+クリックでの遷移へ変更（通常クリックはキャレット設置のみ。`handleLinkClick`＋拡張機能側 `openLink`／`vscode.env.openExternal`。ユーザー要望・実機確認済み） | `528cbfb` |
 | 2026-07-17 | リンク上にカーソルがある間、生Markdownを薄く表示（`syncRawMarkdownToCaret`・`selectionchange`監視・`span.raw-markdown`へ展開／復帰。実機確認済み） | `407a321` |
 | 2026-07-17 | アラートbox本文内のEnter操作（末尾でboxを抜けて段落へ／途中とShift+Enterは`<br>`改行。`handleAlertEnter`・共通ヘルパ`insertLineBreak`） | `318194a` |
