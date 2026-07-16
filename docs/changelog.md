@@ -33,6 +33,7 @@
 | 2026-07-16 | `31dcbe8` feat: GitHubアラート記法（`> [!NOTE]` など）の表示対応 | 引用の先頭行が `[!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]` のみの場合、タイプ別に色分けしたアラートボックスへ変換（`markdown.js` の `tryBuildAlertHtml`/`serializeAlert`）。`data-alert-type` を保持し `> [!TYPE]\n> 本文` へ双方向変換（往復テスト済み）。マーカー大文字必須・行内に余分なテキストがあると通常引用（GitHub準拠）。色はVS Codeテーマ変数を参照。ユニットテスト9件を追加。 |
 | 2026-07-16 | `297c41a` feat: 目次(TOC)生成をツールバーボタンに追加 | 書式ツールバーに 📑 ボタン（`data-command="toc"`）を追加し、キーボードショートカット `Ctrl+Shift+O` に加えてクリックからも目次を挿入可能に。ボタンの配線は既存の汎用ハンドラ（`data-command`→`executeCommand`）で自動的に有効化。`src/markdownEditor.ts` のツールバーHTMLへの追加のため統合テスト（`npm test`）8件で拡張機能のアクティベート等を確認。 |
 | 2026-07-16 | `d304706` feat: 検索ウィジェットに置換機能を追加 | 検索欄の下に置換欄・「置換」「全置換」ボタンを追加。`search.js` に `replaceCurrent`（現在のマッチ）/`replaceAll`（全マッチ）を実装し、WYSIWYG（ハイライト要素をテキストへ置換）・RAW（検索正規表現で一括置換）の両モードに対応。置換はリテラル（`$&` 等を展開しない）。置換後は `input` イベントで書き戻し・再検索を実行。find widgetを検索行/置換行の2段構成へ再構成（`src/markdownEditor.ts`・`media/editor.css`）。ユニットテスト7件＋統合テスト8件で確認。 |
+| 2026-07-16 | `______` fix: GitHubアラートのライブ変換対応（手入力・ペーストで即時反映） | ユーザー報告: アラート記法を手入力・ペーストしてもレンダリングされず、Raw切替や再読込までアラートboxにならなかった（読込時パーサ `markdownToHtml` のみ対応でライブ変換が無かった）。`commands.js` に `convertAlerts` を追加し `applyInlineFormatting`（入力イベント）へ配線: 対象ブロック（blockquote / 平文の `>[!NOTE]`）をシリアライズ→再パースし「単一のアラートdiv」になる場合のみ置換するため判定は読込時と常に一致。変換後キャレットは本文へ移動（空本文はゼロ幅文字で受け）。ユニットテスト10件を追加。 |
 
 ## 作業中（未コミット）の変更
 

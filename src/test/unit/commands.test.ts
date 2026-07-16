@@ -655,6 +655,88 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('convertAlerts（GitHubアラートのライブ変換）', () => {
+        test('マーカーのみのblockquoteをアラートboxへ変換する', () => {
+            env.editor.innerHTML = '<blockquote>[!NOTE]</blockquote>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const alert = env.editor.querySelector('.markdown-alert');
+            assert.ok(alert, env.editor.innerHTML);
+            assert.strictEqual(alert!.getAttribute('data-alert-type'), 'NOTE');
+            // 空の本文にはキャレット用のゼロ幅文字が入る
+            const body = alert!.querySelector('.markdown-alert-body');
+            assert.ok(body, env.editor.innerHTML);
+            assert.strictEqual(body!.textContent, env.state.ZERO_WIDTH);
+        });
+
+        test('マーカー+本文のblockquoteは本文を保持して変換する', () => {
+            env.editor.innerHTML = '<blockquote>[!WARNING]<br>注意1<br>注意2</blockquote>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const body = env.editor.querySelector('.markdown-alert-body');
+            assert.ok(body, env.editor.innerHTML);
+            assert.ok(body!.innerHTML.includes('注意1<br>注意2'), body!.innerHTML);
+        });
+
+        test('スペース無しの平文（>[!NOTE]）も変換する', () => {
+            env.editor.innerHTML = '<p>&gt;[!NOTE]</p>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('.markdown-alert-note'), env.editor.innerHTML);
+        });
+
+        test('マーカー行に余分なテキストがある場合は変換しない', () => {
+            env.editor.innerHTML = '<blockquote>[!NOTE] 余分</blockquote>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('blockquote'), env.editor.innerHTML);
+        });
+
+        test('マーカーが不完全な入力途中は変換しない', () => {
+            env.editor.innerHTML = '<blockquote>[!NOT</blockquote>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+        });
+
+        test('本文中に[!NOTE]を含む通常段落は変換しない', () => {
+            env.editor.innerHTML = '<p>引用の先頭行に [!NOTE] などのマーカーを書く</p>';
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+        });
+
+        test('変換済みのアラートは再変換しない', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('> [!TIP]\n> 本文');
+            const { didFormat } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('.markdown-alert').length, 1);
+        });
+
+        test('キャレットが対象内にあれば本文末尾へ移動する', () => {
+            env.editor.innerHTML = '<blockquote>[!NOTE]</blockquote>';
+            const quote = env.editor.querySelector('blockquote')!;
+            placeCaretIn(quote);
+            const { caretHandled } = env.commands.convertAlerts(env.editor);
+            assert.strictEqual(caretHandled, true);
+            const sel = env.window.getSelection();
+            const body = env.editor.querySelector('.markdown-alert-body')!;
+            assert.ok(body.contains(sel.anchorNode), 'キャレットが本文内にない');
+        });
+
+        test('変換後のアラートは往復で > [!TYPE] 形式に保存される', () => {
+            env.editor.innerHTML = '<blockquote>[!IMPORTANT]<br>重要</blockquote>';
+            env.commands.convertAlerts(env.editor);
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(md, '> [!IMPORTANT]\n> 重要\n');
+        });
+
+        test('applyInlineFormatting経由でも変換される（入力イベントの統合経路）', () => {
+            env.editor.innerHTML = '<blockquote>[!CAUTION]</blockquote>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('.markdown-alert-caution'), env.editor.innerHTML);
+        });
+    });
+
     suite('scrollToAnchor（TOCアンカーの遷移）', () => {
         test('#slug に対応するid要素へscrollIntoViewする', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml('# Title\n\n## Section A');

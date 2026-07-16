@@ -27,7 +27,7 @@
 - **インラインライブ変換**: `**太字**` / `~~取り消し線~~` 等を入力中に即時変換（`commands.js` の `applyInlineFormatting`）。contenteditableが入力テキストを複数の隣接テキストノードに分割しても記法がマッチするよう、走査前に `editor.normalize()` でテキストノードを結合する（要素境界はまたがない）。インラインコード（`` `...` ``）内の記法は装飾せず保持する: `convertInline`（`markdown.js`）と `convertInlineText`（`commands.js`）はコードを先にプレースホルダ（NUL文字＋通し番号）へ退避し、他の整形適用後に `<code>` として復元する。これにより `` `**太字**` `` が装飾へ化けず、WYSIWYG往復での記法欠損を防ぐ
 - **オートブロック変換**: 行頭の `- ` / `1. ` / `> ` をその場でリスト・引用へ変換（`commands.js` の `handleAutoBlock`）。引用ブロック内で `> ` を入力すると1段深いネスト引用を作る（`handleNestedQuote`。往復変換は `> > ` 形式）
 - **引用ブロックのEnter操作**: 引用の末尾で `Enter` は引用を抜けて後続段落へ、`Shift+Enter` は引用内改行（`<br>`）（`commands.js` の `handleBlockquoteEnter`。`editor.js` のkeydownでコードブロックEnter処理より前に配線）
-- **GitHubアラート**: 引用の先頭行が `[!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]` のみのとき、色分けアラートboxへ変換（`markdown.js` の `tryBuildAlertHtml`）。`data-alert-type` を保持し `serializeAlert` で `> [!TYPE]\n> 本文` へ往復。マーカー大文字必須・行内に余分なテキストがあると通常引用（GitHub準拠）。色はテーマ変数（`--vscode-editorInfo/Warning/Error-foreground`・`--vscode-charts-*`）
+- **GitHubアラート**: 引用の先頭行が `[!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]` のみのとき、色分けアラートboxへ変換（`markdown.js` の `tryBuildAlertHtml`）。`data-alert-type` を保持し `serializeAlert` で `> [!TYPE]\n> 本文` へ往復。マーカー大文字必須・行内に余分なテキストがあると通常引用（GitHub準拠）。色はテーマ変数（`--vscode-editorInfo/Warning/Error-foreground`・`--vscode-charts-*`）。手入力・ペーストは `commands.js` の `convertAlerts`（`applyInlineFormatting` 経由の入力イベント）がライブ変換: 対象ブロックをシリアライズ→再パースし単一アラートdivになる場合のみ置換（読込時パーサと判定が常に一致）、変換後キャレットは本文へ
 - **キーボードショートカット**: 一般的なショートカット（Ctrl+B、Ctrl+Iなど）をサポート
 - **テーマ対応**: VS Codeのカラーテーマに自動適応
 

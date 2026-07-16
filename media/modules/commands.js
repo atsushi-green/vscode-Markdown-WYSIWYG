@@ -1234,10 +1234,11 @@ window.CommandsModule = (function() {
         // ことがある。隣接テキストノードを結合してから走査する（要素境界はまたがない）。
         state.editor.normalize();
         const taskResult = convertTaskLists(state.editor);
+        const alertResult = convertAlerts(state.editor);
         const inlineResult = walkInline(state.editor);
         return {
-            didFormat: taskResult.didFormat || inlineResult.didFormat,
-            caretHandled: taskResult.caretHandled || inlineResult.caretHandled
+            didFormat: taskResult.didFormat || alertResult.didFormat || inlineResult.didFormat,
+            caretHandled: taskResult.caretHandled || alertResult.caretHandled || inlineResult.caretHandled
         };
     }
 
@@ -1364,6 +1365,78 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * GitHubアラート（`> [!NOTE]` 等）をライブでアラートboxへ変換する。
+     * ファイル読込時のパーサ（markdownToHtml）でしか解釈されず、手入力・ペーストでは
+     * Raw切替や再読込までGUIに反映されない問題を補う（タスクリストのライブ変換と同じ方針）。
+     *
+     * 対象はエディタ直下のブロック（blockquote / p / div）。要素を一度Markdownへ
+     * シリアライズして markdownToHtml に通し、「単一のアラートdiv」になった場合のみ
+     * 置き換える。判定・生成をファイル読込時と同一のコード（tryBuildAlertHtml）に
+     * 委ねるため、ライブ変換と読込時で挙動が食い違わない。
+     * - `> [!NOTE]` → handleAutoBlock でblockquote化済みのケース
+     * - `>[!NOTE]`（スペース無し）→ blockquote化されず平文段落のままのケース
+     * キャレットが変換対象内にあった場合は本文（.markdown-alert-body）末尾へ移動する。
+     */
+    function convertAlerts(root) {
+        let didFormat = false;
+        let caretHandled = false;
+
+        const selection = window.getSelection();
+        const anchor = selection && selection.rangeCount > 0
+            ? selection.getRangeAt(0).startContainer
+            : null;
+
+        const blocks = Array.prototype.slice.call(root.children);
+        blocks.forEach(function(block) {
+            const tag = block.tagName;
+            if (tag !== 'BLOCKQUOTE' && tag !== 'P' && tag !== 'DIV') {
+                return;
+            }
+            // 変換済みアラートやテーブル・Mermaid等のUIコンテナ（class付きdiv）は対象外
+            if (tag === 'DIV' && block.classList.length > 0) {
+                return;
+            }
+            // 安価な事前判定: マーカー文字列を含まないブロックはスキップ
+            if (block.textContent.indexOf('[!') === -1) {
+                return;
+            }
+
+            // 要素をMarkdown化→再パース。アラート成立条件（先頭行がマーカーのみ・
+            // 全行レベル1）を満たす場合だけ単一の .markdown-alert div が返る
+            const md = markdown.htmlToMarkdown(block.outerHTML);
+            const temp = document.createElement('div');
+            temp.innerHTML = markdown.markdownToHtml(md);
+            if (temp.children.length !== 1 ||
+                !temp.firstElementChild.classList.contains('markdown-alert')) {
+                return;
+            }
+
+            const alertEl = temp.firstElementChild;
+            const body = alertEl.querySelector('.markdown-alert-body');
+            // 本文が空でもキャレットを置けるようゼロ幅文字を入れる
+            // （シリアライズ時は stripZeroWidth で除去されるため保存内容には影響しない）
+            if (body && body.childNodes.length === 0) {
+                body.appendChild(document.createTextNode(state.ZERO_WIDTH));
+            }
+
+            const hadCaret = anchor !== null && block.contains(anchor);
+            block.replaceWith(alertEl);
+            didFormat = true;
+
+            if (hadCaret && body && selection) {
+                const range = document.createRange();
+                range.selectNodeContents(body);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                caretHandled = true;
+            }
+        });
+
+        return { didFormat: didFormat, caretHandled: caretHandled };
+    }
+
+    /**
      * インラインフォーマットを適用
      */
     function walkInline(root) {
@@ -1471,6 +1544,7 @@ window.CommandsModule = (function() {
         handleBlockquoteEnter: handleBlockquoteEnter,
         handleTaskListEnter: handleTaskListEnter,
         applyInlineFormatting: applyInlineFormatting,
-        convertTaskLists: convertTaskLists
+        convertTaskLists: convertTaskLists,
+        convertAlerts: convertAlerts
     };
 })();
