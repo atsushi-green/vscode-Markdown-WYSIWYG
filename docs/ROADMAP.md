@@ -27,7 +27,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | アラートbox内のEnter操作（末尾で押すとboxを抜けて段落へ／本文内では改行） | S | ライブ変換（`convertAlerts`）で変換した後、本文（`.markdown-alert-body`）内でのEnterはブラウザ既定挙動に任せているため、boxの外へ抜ける手段がキーボードだけでは分かりにくい。引用ブロックの `handleBlockquoteEnter` と同じ方針で、本文末尾でのEnterはboxを抜けて後続段落へ、途中では `<br>` 改行にするハンドラを追加する |
 | todo | リンクの挿入・編集ダイアログ（Ctrl+K） | M | 選択テキストをリンク化 |
 | todo | 右クリックメニューから表を挿入（行数・列数を入力して空の表を作成） | M | 現状 `table.js` は既存表のレンダリングのみで、新規表を作る手段（`insertTable`相当）が無い。UIはMermaidのコンテキストメニュー（`mermaidContextMenu` / `mermaid.js`の`showContextMenu`/`hideContextMenu`）と同じ仕組みを流用できる。エディタ本体への汎用右クリックメニュー自体も未実装のため、「エディタの空欄で右クリック→メニュー表示→行数・列数入力→空のMarkdownテーブルをカーソル位置に挿入→table.jsのrenderで即インタラクティブ化」という流れになる見込み |
 | todo | 画像のクリップボード貼り付け（ファイル保存＋相対パス挿入） | L | 拡張機能側でファイル書き込みが必要。分割して実装 |
@@ -50,6 +49,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
+| 2026-07-17 | アラートbox本文内のEnter操作（末尾でboxを抜けて段落へ／途中とShift+Enterは`<br>`改行。`handleAlertEnter`・共通ヘルパ`insertLineBreak`） | `PENDING` |
 | 2026-07-16 | 検索ウィジェットが Cmd+F で開かない問題の修正（macOSの `metaKey` 対応・`Ctrl/Cmd+F/G//`。ユーザー報告バグ） | `123edab` |
 | 2026-07-16 | GitHubアラートのライブ変換（手入力・ペーストで即時反映。`convertAlerts`・ユーザー報告バグの修正） | `a8d69d4` |
 | 2026-07-16 | 検索ウィジェットに置換機能（`replaceCurrent`/`replaceAll`・WYSIWYG/RAW両対応・リテラル置換） | `d304706` |

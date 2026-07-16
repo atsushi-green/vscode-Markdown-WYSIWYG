@@ -509,6 +509,114 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('handleAlertEnter（アラートbox本文内のEnter/Shift+Enter）', () => {
+        const ALERT = '<div class="markdown-alert markdown-alert-note" data-alert-type="NOTE">' +
+            '<p class="markdown-alert-title" contenteditable="false">Note</p>' +
+            '<div class="markdown-alert-body">補足です</div></div>';
+
+        /** 本文の先頭テキストノードの指定オフセットにキャレットを置く */
+        function placeCaretInBody(body: HTMLElement, offset: number): void {
+            const text = (body.firstChild ?? body) as Text;
+            const range = env.document.createRange();
+            range.setStart(text, Math.min(offset, text.textContent!.length));
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        /** 本文の末尾にキャレットを置く */
+        function placeCaretAtBodyEnd(body: HTMLElement): void {
+            placeCaretInBody(body, ((body.firstChild ?? body) as Text).textContent!.length);
+        }
+        /** アラートを1つ持つエディタを用意し、本文要素を返す */
+        function setupAlert(): HTMLElement {
+            env.editor.innerHTML = ALERT;
+            return env.editor.querySelector('.markdown-alert-body') as HTMLElement;
+        }
+
+        test('本文末尾のEnterでboxを抜けて後続の段落へ移る', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const alertEl = env.editor.querySelector('.markdown-alert') as HTMLElement;
+            assert.strictEqual(alertEl.nextElementSibling?.tagName, 'P', env.editor.innerHTML);
+            // 段落はboxの外にある（本文は変化しない）
+            assert.strictEqual(body.textContent, '補足です', env.editor.innerHTML);
+        });
+
+        test('boxを抜けた段落はアラートの外の段落としてMarkdownへ往復する', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            const p = env.editor.querySelector('p:not(.markdown-alert-title)') as HTMLElement;
+            p.textContent = '本文の続き';
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/^> \[!NOTE\]$/m.test(md), JSON.stringify(md));
+            assert.ok(/^> 補足です$/m.test(md), JSON.stringify(md));
+            assert.ok(/^本文の続き$/m.test(md), JSON.stringify(md));
+        });
+
+        test('本文の途中のEnterでは改行（<br>）を挿入しboxを抜けない', () => {
+            const body = setupAlert();
+            placeCaretInBody(body, 2); // 「補足」と「です」の間
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(body.querySelectorAll('br').length, 1, env.editor.innerHTML);
+            const alertEl = env.editor.querySelector('.markdown-alert') as HTMLElement;
+            assert.strictEqual(alertEl.nextElementSibling, null, env.editor.innerHTML);
+        });
+
+        test('本文の途中のEnterによる改行は2つの `> ` 行へ往復する', () => {
+            const body = setupAlert();
+            placeCaretInBody(body, 2);
+            env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/^> 補足$/m.test(md), JSON.stringify(md));
+            assert.ok(/^> です$/m.test(md), JSON.stringify(md));
+        });
+
+        test('本文末尾のShift+Enterではboxを抜けずプレースホルダ<br>が補われる', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(body.querySelectorAll('br').length, 2, env.editor.innerHTML);
+            const alertEl = env.editor.querySelector('.markdown-alert') as HTMLElement;
+            assert.strictEqual(alertEl.nextElementSibling, null, env.editor.innerHTML);
+        });
+
+        test('プレースホルダ<br>はMarkdownへ余分な行を出力しない', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            env.commands.handleAlertEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML).trim();
+            assert.strictEqual(md, '> [!NOTE]\n> 補足です', JSON.stringify(md));
+        });
+
+        test('タイトル行（contenteditable=false）は本文ではないので何もしない（false）', () => {
+            env.editor.innerHTML = ALERT;
+            const title = env.editor.querySelector('.markdown-alert-title') as HTMLElement;
+            placeCaretAtBodyEnd(title);
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, false);
+        });
+
+        test('アラートboxの外では何もしない（false）', () => {
+            env.editor.innerHTML = '<p>ふつうの段落</p>';
+            placeCaretAtBodyEnd(env.editor.querySelector('p') as HTMLElement);
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, false);
+        });
+
+        test('Ctrl/Cmd+Enterなどの修飾キー付きでは何もしない（false）', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            assert.strictEqual(env.commands.handleAlertEnter(fakeKeyEvent('Enter', { ctrlKey: true })), false);
+            assert.strictEqual(env.commands.handleAlertEnter(fakeKeyEvent('Enter', { metaKey: true })), false);
+        });
+    });
+
     suite('handleTaskListEnter（タスクリスト内のEnter）', () => {
         const CHECKBOX = '<input type="checkbox" class="task-checkbox" contenteditable="false">';
 

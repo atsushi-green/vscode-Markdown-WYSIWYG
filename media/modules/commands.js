@@ -897,6 +897,78 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 指定コンテナ内のキャレット位置へ<br>を挿入して改行する（引用・アラート本文で共用）。
+     * 挿入した<br>の後ろに内容が無い場合、末尾の<br>は描画上の改行として見えない
+     * （1回の操作でキャレットが進まない）ため、プレースホルダの<br>を補う。
+     * シリアライズ時は末尾の空行として除去される。
+     */
+    function insertLineBreak(container, range, selection) {
+        const br = document.createElement('br');
+        range.deleteContents();
+        range.insertNode(br);
+        const rest = document.createRange();
+        rest.setStartAfter(br);
+        rest.setEnd(container, container.childNodes.length);
+        if (rest.toString().length === 0 &&
+            !rest.cloneContents().querySelector('br')) {
+            br.after(document.createElement('br'));
+        }
+        range.setStartAfter(br);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    /**
+     * アラートbox（`.markdown-alert`）の本文内でのEnter / Shift+Enterを処理する。
+     * - 本文末尾でのEnter: boxを抜けて後続の段落へ移る（キーボードだけで抜けられるように）
+     * - 本文の途中でのEnter / Shift+Enter: 本文内に改行（<br>）を挿入して継続する
+     * ブラウザ既定のEnterは本文divを分割してbox構造を壊すため、本文内では常に自前で処理する。
+     */
+    function handleAlertEnter(event) {
+        if (event.key !== 'Enter' || event.ctrlKey || event.metaKey ||
+            event.altKey || event.isComposing) {
+            return false;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        const body = utils.findAncestor(range.startContainer, function(el) {
+            return el.classList && el.classList.contains('markdown-alert-body');
+        });
+        if (!body) {
+            return false;
+        }
+
+        // 末尾でのEnter: boxを抜けて後続の段落へ
+        const textBefore = utils.getTextBeforeCaret(body, range);
+        if (!event.shiftKey && textBefore.length >= body.textContent.length) {
+            const alertEl = utils.findAncestor(body, function(el) {
+                return el.classList && el.classList.contains('markdown-alert');
+            });
+            if (alertEl) {
+                event.preventDefault();
+                const p = document.createElement('p');
+                p.appendChild(document.createElement('br'));
+                alertEl.after(p);
+                utils.placeCaretAt(p, 0);
+                state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+                return true;
+            }
+        }
+
+        // 本文の途中、およびShift+Enter: 本文内で改行
+        event.preventDefault();
+        insertLineBreak(body, range, selection);
+        return true;
+    }
+
+    /**
      * 引用ブロック内でのEnter / Shift+Enterを処理する。
      * - Shift+Enter: 引用内に改行（<br>）を挿入して引用を継続する
      * - Enter: キャレットが引用の末尾にあるとき、引用を抜けて後続の段落へ移る
@@ -923,24 +995,7 @@ window.CommandsModule = (function() {
         // Shift+Enter: 引用内で改行
         if (event.shiftKey) {
             event.preventDefault();
-            const br = document.createElement('br');
-            range.deleteContents();
-            range.insertNode(br);
-            // 挿入した<br>の後ろに内容が無い場合、末尾の<br>は描画上の改行として
-            // 見えない（1回のShift+Enterでキャレットが進まない）ため、
-            // プレースホルダの<br>を補う。シリアライズ時は末尾の空行として除去される。
-            const rest = document.createRange();
-            rest.setStartAfter(br);
-            rest.setEnd(bq, bq.childNodes.length);
-            if (rest.toString().length === 0 &&
-                !rest.cloneContents().querySelector('br')) {
-                br.after(document.createElement('br'));
-            }
-            range.setStartAfter(br);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-            state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+            insertLineBreak(bq, range, selection);
             return true;
         }
 
@@ -1542,6 +1597,7 @@ window.CommandsModule = (function() {
         handleCodeFence: handleCodeFence,
         handleHeadingConfirm: handleHeadingConfirm,
         handleBlockquoteEnter: handleBlockquoteEnter,
+        handleAlertEnter: handleAlertEnter,
         handleTaskListEnter: handleTaskListEnter,
         applyInlineFormatting: applyInlineFormatting,
         convertTaskLists: convertTaskLists,

@@ -486,6 +486,11 @@
                 return;
             }
 
+            // アラートbox本文内でのEnter / Shift+Enter処理（末尾のEnterでboxを抜ける）
+            if (commands.handleAlertEnter(e)) {
+                return;
+            }
+
             // 引用ブロック内でのEnter / Shift+Enter処理
             if (commands.handleBlockquoteEnter(e)) {
                 return;
