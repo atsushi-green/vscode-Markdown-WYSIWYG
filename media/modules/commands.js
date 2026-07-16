@@ -631,11 +631,149 @@ window.CommandsModule = (function() {
     /**
      * リンクの挿入
      */
+    /**
+     * リンクの挿入・編集ダイアログを開く（`Ctrl+K` / ツールバーのリンクボタン）。
+     * Webviewでは `prompt()` が使えないため自前のダイアログ（`#linkDialog`）を表示する。
+     * 開いた時点の状態に応じて初期値を決める:
+     * - キャレットが既存リンク（`<a>` / 生Markdown表示中のspan）の内側: そのリンクを編集
+     * - テキストを選択中: 選択文字列をリンクテキストの初期値にする
+     * - それ以外: 空のまま新規挿入
+     * 入力欄へフォーカスを移すとエディタの選択が失われるため、Rangeを保持しておく。
+     */
     function insertLink() {
-        const url = prompt('リンクURLを入力してください:', 'https://');
-        if (url) {
-            document.execCommand('createLink', false, url);
+        const selection = window.getSelection();
+        const range = (selection && selection.rangeCount > 0)
+            ? selection.getRangeAt(0)
+            : null;
+        if (!range || !state.editor.contains(range.startContainer)) {
+            return false;
         }
+
+        // 編集対象の既存リンクを探す（生Markdown展開中のspanも対象）
+        const anchor = utils.findAncestor(range.startContainer, function(el) {
+            return el.tagName === 'A';
+        });
+        const raw = utils.findAncestor(range.startContainer, isRawMarkdownSpan);
+        const rawLink = raw ? parseRawLink(raw.textContent) : null;
+
+        let text = '';
+        let href = '';
+        let target = null;
+        if (anchor) {
+            target = anchor;
+            text = anchor.textContent;
+            href = anchor.getAttribute('href') || '';
+        } else if (rawLink) {
+            target = raw;
+            text = rawLink.text;
+            href = rawLink.href;
+        } else {
+            text = range.toString();
+        }
+
+        state.linkDialogRange = range.cloneRange();
+        state.linkDialogTarget = target;
+        showLinkDialog({ isEdit: !!target, text: text, href: href });
+        return true;
+    }
+
+    /**
+     * リンクダイアログを表示して初期値を設定する
+     */
+    function showLinkDialog(options) {
+        if (!state.linkDialog) {
+            return;
+        }
+        state.linkDialogTitle.textContent = options.isEdit ? 'リンクの編集' : 'リンクの挿入';
+        state.linkTextInput.value = options.text || '';
+        state.linkUrlInput.value = options.href || '';
+        state.linkDialogRemove.style.display = options.isEdit ? '' : 'none';
+        state.linkDialog.style.display = '';
+        // URLが未入力（新規）ならURL欄、URL既存（編集）ならテキスト欄から埋めたいことが多い
+        const focusUrl = !options.href;
+        const input = focusUrl ? state.linkUrlInput : state.linkTextInput;
+        input.focus();
+        input.select();
+    }
+
+    /**
+     * リンクダイアログを閉じ、保持していた選択状態を破棄する
+     */
+    function closeLinkDialog() {
+        if (!state.linkDialog) {
+            return;
+        }
+        state.linkDialog.style.display = 'none';
+        state.linkDialogRange = null;
+        state.linkDialogTarget = null;
+        state.editor.focus();
+    }
+
+    /**
+     * ダイアログの入力内容をエディタへ適用する。
+     * URLが空の場合は何もしない（リンクの解除は removeLinkFromDialog が担当）。
+     * テキストが空の場合はURLをそのままリンクテキストにする。
+     * 戻り値: 適用した場合 true
+     */
+    function applyLinkDialog() {
+        const href = (state.linkUrlInput.value || '').trim();
+        if (!href) {
+            return false;
+        }
+        const text = (state.linkTextInput.value || '').trim() || href;
+
+        const a = document.createElement('a');
+        a.setAttribute('href', href);
+        a.textContent = text;
+
+        const target = state.linkDialogTarget;
+        const range = state.linkDialogRange;
+        if (target && target.parentNode) {
+            // 既存リンクの編集（生Markdown展開中のspanもここで置き換わる）
+            target.parentNode.replaceChild(a, target);
+        } else if (range) {
+            range.deleteContents();
+            range.insertNode(a);
+        } else {
+            return false;
+        }
+
+        closeLinkDialog();
+        // キャレットをリンクの直後へ置く（リンク内に置くと生Markdown表示へ展開されるため）
+        const after = document.createRange();
+        after.setStartAfter(a);
+        after.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(after);
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    }
+
+    /**
+     * 編集中のリンクを解除し、リンクテキストだけを残す。
+     * 戻り値: 解除した場合 true
+     */
+    function removeLinkFromDialog() {
+        const target = state.linkDialogTarget;
+        if (!target || !target.parentNode) {
+            return false;
+        }
+        const text = (target.tagName === 'A')
+            ? target.textContent
+            : (parseRawLink(target.textContent) || { text: target.textContent }).text;
+        const node = document.createTextNode(text);
+        target.parentNode.replaceChild(node, target);
+
+        closeLinkDialog();
+        const after = document.createRange();
+        after.setStartAfter(node);
+        after.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(after);
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
     }
 
     /**
@@ -1751,6 +1889,9 @@ window.CommandsModule = (function() {
         executeCommand: executeCommand,
         formatHeading: formatHeading,
         insertLink: insertLink,
+        applyLinkDialog: applyLinkDialog,
+        removeLinkFromDialog: removeLinkFromDialog,
+        closeLinkDialog: closeLinkDialog,
         insertCodeBlock: insertCodeBlock,
         insertBlockquote: insertBlockquote,
         insertToc: insertToc,

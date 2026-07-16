@@ -509,6 +509,158 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('insertLink（リンクの挿入・編集ダイアログ / Ctrl+K）', () => {
+        /** ダイアログのDOM参照 */
+        function dialog() {
+            return {
+                root: env.document.getElementById('linkDialog') as HTMLElement,
+                title: env.document.getElementById('linkDialogTitle') as HTMLElement,
+                text: env.document.getElementById('linkTextInput') as HTMLInputElement,
+                url: env.document.getElementById('linkUrlInput') as HTMLInputElement,
+                remove: env.document.getElementById('linkDialogRemove') as HTMLElement
+            };
+        }
+        /** 指定ノードの範囲を選択する（start〜endは先頭テキストノードのオフセット） */
+        function selectIn(node: Node, start: number, end: number): void {
+            const text = (node.firstChild ?? node) as Text;
+            const range = env.document.createRange();
+            range.setStart(text, start);
+            range.setEnd(text, end);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('選択したテキストがリンクテキストの初期値になる', () => {
+            env.editor.innerHTML = '<p>ここをリンクにする</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            assert.strictEqual(env.commands.insertLink(), true);
+            const d = dialog();
+            assert.strictEqual(d.root.style.display, '', 'ダイアログが表示されていない');
+            assert.strictEqual(d.text.value, 'ここ');
+            assert.strictEqual(d.url.value, '');
+            assert.strictEqual(d.title.textContent, 'リンクの挿入');
+        });
+
+        test('選択テキストがリンクになりMarkdownへ往復する', () => {
+            env.editor.innerHTML = '<p>ここをリンクにする</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            dialog().url.value = 'https://example.com';
+            assert.strictEqual(env.commands.applyLinkDialog(), true);
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('href'), 'https://example.com', env.editor.innerHTML);
+            assert.strictEqual(a.textContent, 'ここ', env.editor.innerHTML);
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/\[ここ\]\(https:\/\/example\.com\)をリンクにする/.test(md), JSON.stringify(md));
+        });
+
+        test('適用後はダイアログが閉じる', () => {
+            env.editor.innerHTML = '<p>ここをリンクにする</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            dialog().url.value = 'https://example.com';
+            env.commands.applyLinkDialog();
+            assert.strictEqual(dialog().root.style.display, 'none');
+        });
+
+        test('キャレットが既存リンク内にあるとそのリンクの編集になる', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const a = env.editor.querySelector('a') as HTMLElement;
+            selectIn(a, 1, 1);
+            assert.strictEqual(env.commands.insertLink(), true);
+            const d = dialog();
+            assert.strictEqual(d.title.textContent, 'リンクの編集');
+            assert.strictEqual(d.text.value, 'サイト');
+            assert.strictEqual(d.url.value, 'https://example.com');
+        });
+
+        test('既存リンクの編集は新しいリンクへ置き換わる（二重リンクにならない）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            selectIn(env.editor.querySelector('a') as HTMLElement, 1, 1);
+            env.commands.insertLink();
+            const d = dialog();
+            d.text.value = '新しい名前';
+            d.url.value = 'https://vscode.dev';
+            env.commands.applyLinkDialog();
+            assert.strictEqual(env.editor.querySelectorAll('a').length, 1, env.editor.innerHTML);
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('href'), 'https://vscode.dev');
+            assert.strictEqual(a.textContent, '新しい名前');
+        });
+
+        test('生Markdown展開中のリンクも編集対象になる', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            selectIn(env.editor.querySelector('a') as HTMLElement, 1, 1);
+            env.commands.syncRawMarkdownToCaret();
+            const span = env.editor.querySelector('span.raw-markdown') as HTMLElement;
+            selectIn(span, 1, 1);
+            assert.strictEqual(env.commands.insertLink(), true);
+            const d = dialog();
+            assert.strictEqual(d.title.textContent, 'リンクの編集');
+            assert.strictEqual(d.text.value, 'サイト');
+            assert.strictEqual(d.url.value, 'https://example.com');
+            // 適用すると展開中のspanがリンクへ置き換わる（生テキストが残らない）
+            d.url.value = 'https://vscode.dev';
+            env.commands.applyLinkDialog();
+            assert.strictEqual(env.editor.querySelector('span.raw-markdown'), null, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('a').length, 1, env.editor.innerHTML);
+        });
+
+        test('テキスト未入力ならURLがリンクテキストになる', () => {
+            env.editor.innerHTML = '<p>あ</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 1, 1);
+            env.commands.insertLink();
+            const d = dialog();
+            d.text.value = '';
+            d.url.value = 'https://example.com';
+            env.commands.applyLinkDialog();
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.textContent, 'https://example.com', env.editor.innerHTML);
+        });
+
+        test('URL未入力では適用しない（false）', () => {
+            env.editor.innerHTML = '<p>ここ</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            dialog().url.value = '   ';
+            assert.strictEqual(env.commands.applyLinkDialog(), false);
+            assert.strictEqual(env.editor.querySelector('a'), null, env.editor.innerHTML);
+        });
+
+        test('新規挿入では「リンク解除」ボタンを出さない', () => {
+            env.editor.innerHTML = '<p>ここ</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            assert.strictEqual(dialog().remove.style.display, 'none');
+        });
+
+        test('リンク解除でリンクテキストだけが残る', () => {
+            env.editor.innerHTML = '<p>前<a href="https://example.com">サイト</a>後</p>';
+            selectIn(env.editor.querySelector('a') as HTMLElement, 1, 1);
+            env.commands.insertLink();
+            assert.strictEqual(dialog().remove.style.display, '');
+            assert.strictEqual(env.commands.removeLinkFromDialog(), true);
+            assert.strictEqual(env.editor.querySelector('a'), null, env.editor.innerHTML);
+            assert.strictEqual(env.editor.textContent, '前サイト後', env.editor.innerHTML);
+        });
+
+        test('キャンセルするとエディタは変化しない', () => {
+            env.editor.innerHTML = '<p>ここをリンクにする</p>';
+            const before = env.editor.innerHTML;
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            env.commands.closeLinkDialog();
+            assert.strictEqual(dialog().root.style.display, 'none');
+            assert.strictEqual(env.editor.innerHTML, before);
+        });
+
+        test('エディタ外に選択がある場合は開かない（false）', () => {
+            env.window.getSelection().removeAllRanges();
+            assert.strictEqual(env.commands.insertLink(), false);
+        });
+    });
+
     suite('handleLinkClick（リンクのクリック挙動）', () => {
         /** クリックイベントの代用オブジェクト（target は指定要素） */
         function fakeClick(target: unknown, modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean }> = {}) {

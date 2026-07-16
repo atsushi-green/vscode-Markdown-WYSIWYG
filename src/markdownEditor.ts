@@ -222,6 +222,24 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                     <div class="mermaid-menu-item" data-action="copyImage">📋 画像をコピー</div>
                     <div class="mermaid-menu-item" data-action="savePng">💾 PNG画像として保存</div>
                 </div>
+                <!-- リンクの挿入・編集ダイアログ（Webviewでは prompt() が使えないため自前で用意する） -->
+                <div id="linkDialog" class="link-dialog" style="display: none;">
+                    <div class="link-dialog-title" id="linkDialogTitle">リンクの挿入</div>
+                    <label class="link-dialog-field">
+                        <span class="link-dialog-label">テキスト</span>
+                        <input type="text" id="linkTextInput" class="link-dialog-input" placeholder="リンクとして表示する文字列" />
+                    </label>
+                    <label class="link-dialog-field">
+                        <span class="link-dialog-label">URL</span>
+                        <input type="text" id="linkUrlInput" class="link-dialog-input" placeholder="https://" />
+                    </label>
+                    <div class="link-dialog-actions">
+                        <button id="linkDialogRemove" class="link-dialog-btn" title="リンクを解除してテキストだけ残す">リンク解除</button>
+                        <span class="link-dialog-spacer"></span>
+                        <button id="linkDialogCancel" class="link-dialog-btn" title="キャンセル (Escape)">キャンセル</button>
+                        <button id="linkDialogOk" class="link-dialog-btn link-dialog-btn-primary" title="適用 (Enter)">OK</button>
+                    </div>
+                </div>
                 <div id="editor" contenteditable="true" spellcheck="false"></div>
                 <textarea id="rawEditor" spellcheck="false" style="display: none;"></textarea>
                 <script nonce="${nonce}" src="${hljsUri}"></script>

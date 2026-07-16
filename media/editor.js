@@ -79,6 +79,9 @@
         // キャレット位置に応じた生Markdown表示の切り替えを監視
         setupRawMarkdownCaretEvent();
 
+        // リンクの挿入・編集ダイアログの操作を監視
+        setupLinkDialogEvents();
+
         // VS Codeからのメッセージを受信
         setupMessageListener();
 
@@ -235,6 +238,33 @@
                 commands.syncRawMarkdownToCaret();
             } finally {
                 isSyncingRawMarkdown = false;
+            }
+        });
+    }
+
+    /**
+     * リンクの挿入・編集ダイアログの操作の設定。
+     * ダイアログ内では Enter で適用、Escape でキャンセルする。
+     */
+    function setupLinkDialogEvents() {
+        state.linkDialogOk.addEventListener('click', () => {
+            commands.applyLinkDialog();
+        });
+        state.linkDialogCancel.addEventListener('click', () => {
+            commands.closeLinkDialog();
+        });
+        state.linkDialogRemove.addEventListener('click', () => {
+            commands.removeLinkFromDialog();
+        });
+        state.linkDialog.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                commands.applyLinkDialog();
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                commands.closeLinkDialog();
             }
         });
     }
@@ -486,6 +516,13 @@
             }
 
             if (commands.handleInlineCodeExitRight(e)) {
+                return;
+            }
+
+            // リンクの挿入・編集ダイアログ（Ctrl+K / Cmd+K）
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                commands.insertLink();
                 return;
             }
 
