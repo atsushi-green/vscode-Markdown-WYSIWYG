@@ -897,6 +897,96 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 生Markdown表示（キャレットが記法の内側にある間だけ展開する）で使うクラス名。
+     * このspanの中身は生のMarkdownテキストそのもののため、
+     * `utils.shouldSkipInline` で walkInline の再変換対象から除外する。
+     * 直列化（`markdown.js` の serializeInline のSPAN分岐）では中身のテキストが
+     * そのまま出力されるため、展開中でもMarkdownは展開前と同一になる（往復に非影響）。
+     */
+    const RAW_MARKDOWN_CLASS = 'raw-markdown';
+
+    /** 生Markdown表示中のspanか */
+    function isRawMarkdownSpan(el) {
+        return !!(el.classList && el.classList.contains(RAW_MARKDOWN_CLASS));
+    }
+
+    /**
+     * リンク（<a>）を生Markdown記法 `[text](url)` のテキストへ展開し、そのspanを返す。
+     */
+    function expandLinkToRaw(link) {
+        const span = document.createElement('span');
+        span.className = RAW_MARKDOWN_CLASS;
+        span.textContent = '[' + link.textContent + '](' + (link.getAttribute('href') || '') + ')';
+        link.parentNode.replaceChild(span, link);
+        return span;
+    }
+
+    /**
+     * 生Markdown表示中のspanをレンダリング表示へ戻す。
+     * 記法として成立していれば対応する要素（リンク）へ、
+     * 壊れていればプレーンテキストへ戻す（以後は通常の入力として再変換され得る）。
+     */
+    function collapseRawMarkdown(span) {
+        const text = span.textContent;
+        const link = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(text);
+        if (link) {
+            const a = document.createElement('a');
+            a.setAttribute('href', link[2]);
+            a.textContent = link[1];
+            span.parentNode.replaceChild(a, span);
+            return;
+        }
+        span.parentNode.replaceChild(document.createTextNode(text), span);
+    }
+
+    /**
+     * キャレット位置に応じて生Markdown表示を切り替える（`selectionchange` から呼ぶ）。
+     * - キャレットがリンクの内側のどこかにある間: そのリンクを `[text](url)` の生テキストへ展開し、
+     *   URLやリンクテキストを直接修正できるようにする
+     * - キャレットが展開中のspanの外へ出た時点: レンダリング表示へ戻して確定する
+     * 選択範囲がある場合も開始位置（`startContainer`）の所属で判定するため、
+     * 展開中のテキストをドラッグ選択して編集できる。
+     * 戻り値: DOMを変更した場合 true
+     */
+    function syncRawMarkdownToCaret() {
+        const selection = window.getSelection();
+        const start = (selection && selection.rangeCount > 0)
+            ? selection.getRangeAt(0).startContainer
+            : null;
+        const inEditor = !!start && state.editor.contains(start);
+        const active = inEditor ? utils.findAncestor(start, isRawMarkdownSpan) : null;
+
+        // キャレットが外れた展開中のspanを戻す（エディタ外へフォーカスが移った場合も含む）
+        let changed = false;
+        Array.prototype.forEach.call(
+            state.editor.querySelectorAll('span.' + RAW_MARKDOWN_CLASS),
+            function(span) {
+                if (span !== active) {
+                    collapseRawMarkdown(span);
+                    changed = true;
+                }
+            }
+        );
+
+        if (!inEditor || active) {
+            return changed;
+        }
+
+        const link = utils.findAncestor(start, function(el) {
+            return el.tagName === 'A';
+        });
+        if (!link) {
+            return changed;
+        }
+
+        // リンクテキスト内の相対位置を保つ（先頭に `[` が付く分だけ後ろへずらす）
+        const offset = utils.getTextBeforeCaret(link, selection.getRangeAt(0)).length;
+        const span = expandLinkToRaw(link);
+        utils.placeCaretAt(span, offset + 1);
+        return true;
+    }
+
+    /**
      * 指定コンテナ内のキャレット位置へ<br>を挿入して改行する（引用・アラート本文で共用）。
      * 挿入した<br>の後ろに内容が無い場合、末尾の<br>は描画上の改行として見えない
      * （1回の操作でキャレットが進まない）ため、プレースホルダの<br>を補う。
@@ -1598,6 +1688,7 @@ window.CommandsModule = (function() {
         handleHeadingConfirm: handleHeadingConfirm,
         handleBlockquoteEnter: handleBlockquoteEnter,
         handleAlertEnter: handleAlertEnter,
+        syncRawMarkdownToCaret: syncRawMarkdownToCaret,
         handleTaskListEnter: handleTaskListEnter,
         applyInlineFormatting: applyInlineFormatting,
         convertTaskLists: convertTaskLists,

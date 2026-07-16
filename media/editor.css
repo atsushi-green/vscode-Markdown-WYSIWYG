@@ -178,6 +178,14 @@ body {
     opacity: 0.6;
 }
 
+/* 生Markdown表示（キャレットが記法の内側にある間だけ展開されるテキスト）。
+   レンダリング表示との差が分かるよう薄く・等幅で表示する。 */
+#editor .raw-markdown {
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family, monospace);
+    opacity: 0.75;
+}
+
 #editor p {
     margin: 1em 0;
 }

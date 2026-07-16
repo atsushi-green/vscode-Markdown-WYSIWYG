@@ -171,7 +171,11 @@ window.EditorUtils = (function() {
 
         selection.removeAllRanges();
         selection.addRange(range);
-        state.editor.focus();
+        // 既にフォーカスがある場合の focus() はブラウザでは何もしないため呼ばない
+        // （フォーカス済み要素への再フォーカスで選択が変わる実装もあるため、明示的に避ける）
+        if (document.activeElement !== state.editor) {
+            state.editor.focus();
+        }
     }
 
     /**
@@ -230,11 +234,18 @@ window.EditorUtils = (function() {
 
     /**
      * インラインフォーマットをスキップすべきか判定
+     * （コードブロック内、および生Markdown表示中のテキストが対象）
      */
     function shouldSkipInline(node) {
         let current = node.parentNode;
         while (current && current !== state.editor) {
             if (current.nodeName === 'CODE' || current.nodeName === 'PRE') {
+                return true;
+            }
+            // 生Markdown表示中（キャレットが記法の内側にある）のテキストは、
+            // 編集中に装飾へ戻ってしまわないよう再変換しない。
+            // キャレットが外れた時点で commands.syncRawMarkdownToCaret が確定させる。
+            if (current.classList && current.classList.contains('raw-markdown')) {
                 return true;
             }
             current = current.parentNode;

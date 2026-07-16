@@ -76,6 +76,9 @@
         // タスクリストのチェックボックス操作を監視
         setupTaskCheckboxEvent();
 
+        // キャレット位置に応じた生Markdown表示の切り替えを監視
+        setupRawMarkdownCaretEvent();
+
         // VS Codeからのメッセージを受信
         setupMessageListener();
 
@@ -209,6 +212,30 @@
                 clearTimeout(editSyncTimeout);
             }
             editSyncTimeout = setTimeout(syncEditorToDocument, 150);
+        });
+    }
+
+    /**
+     * キャレット位置に応じた生Markdown表示の切り替えの設定。
+     * キャレットがリンクの内側にある間だけ生Markdown（`[text](url)`）を表示する。
+     * `selectionchange` はdocumentにしか発火しないため、documentで監視してエディタ内かを判定する。
+     * 切り替え自体がDOM・選択を変更して再度 `selectionchange` を呼ぶため、再入を抑止する。
+     * Markdownの内容は展開の前後で変わらない（生テキストがそのまま直列化される）ため、
+     * ここでは文書への書き戻しは行わない。
+     */
+    function setupRawMarkdownCaretEvent() {
+        let isSyncingRawMarkdown = false;
+        document.addEventListener('selectionchange', () => {
+            if (isSyncingRawMarkdown ||
+                state.isUpdating || state.isFormatting || state.isCreatingCodeBlock) {
+                return;
+            }
+            isSyncingRawMarkdown = true;
+            try {
+                commands.syncRawMarkdownToCaret();
+            } finally {
+                isSyncingRawMarkdown = false;
+            }
         });
     }
 
