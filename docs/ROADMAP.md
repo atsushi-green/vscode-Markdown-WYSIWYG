@@ -49,7 +49,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
-| 2026-07-17 | アラートbox本文内のEnter操作（末尾でboxを抜けて段落へ／途中とShift+Enterは`<br>`改行。`handleAlertEnter`・共通ヘルパ`insertLineBreak`） | `PENDING` |
+| 2026-07-17 | アラートbox本文内のEnter操作（末尾でboxを抜けて段落へ／途中とShift+Enterは`<br>`改行。`handleAlertEnter`・共通ヘルパ`insertLineBreak`） | `318194a` |
 | 2026-07-16 | 検索ウィジェットが Cmd+F で開かない問題の修正（macOSの `metaKey` 対応・`Ctrl/Cmd+F/G//`。ユーザー報告バグ） | `123edab` |
 | 2026-07-16 | GitHubアラートのライブ変換（手入力・ペーストで即時反映。`convertAlerts`・ユーザー報告バグの修正） | `a8d69d4` |
 | 2026-07-16 | 検索ウィジェットに置換機能（`replaceCurrent`/`replaceAll`・WYSIWYG/RAW両対応・リテラル置換） | `d304706` |
