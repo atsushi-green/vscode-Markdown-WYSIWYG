@@ -61,6 +61,88 @@
         wordCountStatusEl.textContent = `単語数: ${c.words} / 文字数: ${c.chars}`;
     }
 
+    // Rawモードの行番号ガター（初期化時に生成）
+    let rawEditorWrap = null;
+    let rawGutterInner = null;
+
+    /**
+     * Rawモードの行番号ガターを生成する（一度だけ）。
+     * `#rawEditor`（textarea）を flex 行のラッパーで包み、その左に行番号ガターを置く。
+     * markdownEditor.ts のHTMLは変えず、単語数バーと同じくJS側で構造を組む。
+     * textarea は `white-space: pre`（非折り返し）にしているため、論理行＝1表示行で
+     * 番号がずれない（VS Codeの既定＝行折り返しオフと同じ挙動。CSSは editor.css）。
+     */
+    function initRawLineGutter() {
+        const ta = state.rawEditor;
+        if (!ta || rawGutterInner) {
+            return;
+        }
+        const wrap = document.createElement('div');
+        wrap.id = 'rawEditorWrap';
+        wrap.className = 'raw-editor-wrap';
+        wrap.style.display = 'none'; // Rawモードに入るまで隠す
+
+        const gutter = document.createElement('div');
+        gutter.className = 'raw-line-gutter';
+        const inner = document.createElement('div');
+        inner.className = 'raw-line-gutter-inner';
+        gutter.appendChild(inner);
+
+        // ラッパーを rawEditor の位置へ挿し、gutter と rawEditor を中へ移す
+        ta.parentNode.insertBefore(wrap, ta);
+        wrap.appendChild(gutter);
+        wrap.appendChild(ta);
+        // 可視制御はラッパー側で行うため、textarea自体は常に表示のままにする
+        ta.style.display = 'block';
+
+        rawEditorWrap = wrap;
+        rawGutterInner = inner;
+
+        // 縦スクロールに追従（横スクロールでは動かさない）。リサイズでも再同期
+        ta.addEventListener('scroll', syncRawGutterScroll);
+        window.addEventListener('resize', syncRawGutterScroll);
+    }
+
+    /**
+     * ガターの番号列を textarea の縦スクロール量だけ上へずらして行位置を合わせる。
+     */
+    function syncRawGutterScroll() {
+        if (rawGutterInner && state.rawEditor) {
+            rawGutterInner.style.transform = 'translateY(' + (-state.rawEditor.scrollTop) + 'px)';
+        }
+    }
+
+    /**
+     * 現在のRaw本文の行数に合わせて行番号を並べ直す。
+     */
+    function updateRawLineGutter() {
+        if (!rawGutterInner || !state.rawEditor) {
+            return;
+        }
+        const count = utils.countLines(state.rawEditor.value || '');
+        rawGutterInner.textContent = utils.buildLineNumberText(count);
+        syncRawGutterScroll();
+    }
+
+    /**
+     * Rawモードに入るときにガター付きラッパーを表示し、行番号を更新する。
+     */
+    function showRawLineGutter() {
+        if (rawEditorWrap) {
+            rawEditorWrap.style.display = 'flex';
+        }
+        updateRawLineGutter();
+    }
+
+    /**
+     * Rawモードを抜けるときにガター付きラッパーを隠す。
+     */
+    function hideRawLineGutter() {
+        if (rawEditorWrap) {
+            rawEditorWrap.style.display = 'none';
+        }
+    }
+
     /**
      * エディタの初期化
      */
@@ -112,6 +194,9 @@
 
         // 単語数・文字数ステータスバーを生成
         initWordCountStatus();
+
+        // Rawモードの行番号ガターを生成（rawEditorをラッパーで包む）
+        initRawLineGutter();
 
         console.log('[Editor] Initialized');
     }
@@ -311,6 +396,7 @@
                 state.isUpdating = false;
             }
             state.lastSentMarkdown = incoming;
+            updateRawLineGutter();
             updateWordCount();
             return;
         }
@@ -387,7 +473,7 @@
             const md = state.lastSentMarkdown || markdown.htmlToMarkdown(cleanHtml);
             state.rawEditor.value = md;
             state.editor.style.display = 'none';
-            state.rawEditor.style.display = 'block';
+            showRawLineGutter();
             state.toggleBtn.classList.add('active');
             state.toggleBtn.innerHTML = '👁️ Preview';
             state.toggleBtn.title = 'プレビュー表示に切替 (Ctrl+/)';
@@ -402,7 +488,7 @@
             mermaidModule.render();
             mathModule.render(state.editor);
             tableModule.render();
-            state.rawEditor.style.display = 'none';
+            hideRawLineGutter();
             state.editor.style.display = 'block';
             state.toggleBtn.classList.remove('active');
             state.toggleBtn.innerHTML = '📄 Raw';
@@ -436,6 +522,9 @@
                 type: 'edit',
                 content: md
             });
+
+            // 行番号ガターを更新
+            updateRawLineGutter();
 
             // 単語数・文字数の表示を更新
             updateWordCount();

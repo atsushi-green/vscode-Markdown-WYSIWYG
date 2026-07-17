@@ -66,16 +66,52 @@ body {
     color: var(--vscode-button-foreground);
 }
 
+/* Rawモード: 行番号ガター付きラッパー（JSでrawEditorを包む） */
+.raw-editor-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    /* 直接の flex 子だった #rawEditor から min-height:0 を引き継ぐ
+       （ツールバー分を無視して伸びるのを防ぎ、スクロールを内側へ閉じ込める） */
+    min-height: 0;
+}
+
+/* 行番号ガター（左端・固定幅・縦スクロールに追従） */
+.raw-line-gutter {
+    flex: 0 0 auto;
+    overflow: hidden;
+    box-sizing: border-box;
+    /* 横方向の余白のみ。縦(上)の余白は内側要素で textarea と揃える */
+    padding: 0 8px 0 12px;
+    text-align: right;
+    color: var(--vscode-editorLineNumber-foreground, var(--vscode-descriptionForeground));
+    background-color: var(--vscode-editorGutter-background, var(--vscode-editor-background));
+    border-right: 1px solid var(--vscode-editorGroup-border);
+    user-select: none;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.raw-line-gutter-inner {
+    /* textarea の padding-top(20px) と合わせて1行目を揃える。
+       縦スクロールは transform: translateY(-scrollTop) で追従する。 */
+    padding-top: 20px;
+    white-space: pre;
+    text-align: right;
+    will-change: transform;
+}
+
 /* RAWエディタ */
 #rawEditor {
     flex: 1;
     padding: 20px;
-    overflow-y: auto;
+    overflow: auto;
     outline: none;
     /* flexの子に min-height:100% を与えると、ツールバー分を無視して
        ビューポート全高まで伸び、body側がはみ出してツールバーごと
        スクロールしてしまう。min-height:0 にして残り領域内に収め、
-       スクロールを #rawEditor 内部（overflow-y:auto）へ閉じ込める。
+       スクロールを #rawEditor 内部（overflow:auto）へ閉じ込める。
        flex:1 により短い内容でも領域は満たされる。 */
     min-height: 0;
     box-sizing: border-box;
@@ -86,8 +122,10 @@ body {
     background-color: var(--vscode-editor-background);
     border: none;
     resize: none;
-    white-space: pre-wrap;
-    word-wrap: break-word;
+    /* 行番号を論理行と1対1で揃えるため折り返さない（VS Codeの既定＝
+       行折り返しオフと同じ。長い行は横スクロールで確認する）。 */
+    white-space: pre;
+    overflow-wrap: normal;
 }
 
 #rawEditor:focus {
