@@ -509,6 +509,664 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('insertLink（リンクの挿入・編集ダイアログ / Ctrl+K）', () => {
+        /** ダイアログのDOM参照 */
+        function dialog() {
+            return {
+                root: env.document.getElementById('linkDialog') as HTMLElement,
+                title: env.document.getElementById('linkDialogTitle') as HTMLElement,
+                text: env.document.getElementById('linkTextInput') as HTMLInputElement,
+                url: env.document.getElementById('linkUrlInput') as HTMLInputElement,
+                remove: env.document.getElementById('linkDialogRemove') as HTMLElement
+            };
+        }
+        /** 指定ノードの範囲を選択する（start〜endは先頭テキストノードのオフセット） */
+        function selectIn(node: Node, start: number, end: number): void {
+            const text = (node.firstChild ?? node) as Text;
+            const range = env.document.createRange();
+            range.setStart(text, start);
+            range.setEnd(text, end);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('選択したテキストがリンクテキストの初期値になる', () => {
+            env.editor.innerHTML = '<p>ここをリンクにする</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            assert.strictEqual(env.commands.insertLink(), true);
+            const d = dialog();
+            assert.strictEqual(d.root.style.display, '', 'ダイアログが表示されていない');
+            assert.strictEqual(d.text.value, 'ここ');
+            assert.strictEqual(d.url.value, '');
+            assert.strictEqual(d.title.textContent, 'リンクの挿入');
+        });
+
+        test('選択テキストがリンクになりMarkdownへ往復する', () => {
+            env.editor.innerHTML = '<p>ここをリンクにする</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            dialog().url.value = 'https://example.com';
+            assert.strictEqual(env.commands.applyLinkDialog(), true);
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('href'), 'https://example.com', env.editor.innerHTML);
+            assert.strictEqual(a.textContent, 'ここ', env.editor.innerHTML);
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/\[ここ\]\(https:\/\/example\.com\)をリンクにする/.test(md), JSON.stringify(md));
+        });
+
+        test('適用後はダイアログが閉じる', () => {
+            env.editor.innerHTML = '<p>ここをリンクにする</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            dialog().url.value = 'https://example.com';
+            env.commands.applyLinkDialog();
+            assert.strictEqual(dialog().root.style.display, 'none');
+        });
+
+        test('キャレットが既存リンク内にあるとそのリンクの編集になる', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const a = env.editor.querySelector('a') as HTMLElement;
+            selectIn(a, 1, 1);
+            assert.strictEqual(env.commands.insertLink(), true);
+            const d = dialog();
+            assert.strictEqual(d.title.textContent, 'リンクの編集');
+            assert.strictEqual(d.text.value, 'サイト');
+            assert.strictEqual(d.url.value, 'https://example.com');
+        });
+
+        test('既存リンクの編集は新しいリンクへ置き換わる（二重リンクにならない）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            selectIn(env.editor.querySelector('a') as HTMLElement, 1, 1);
+            env.commands.insertLink();
+            const d = dialog();
+            d.text.value = '新しい名前';
+            d.url.value = 'https://vscode.dev';
+            env.commands.applyLinkDialog();
+            assert.strictEqual(env.editor.querySelectorAll('a').length, 1, env.editor.innerHTML);
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('href'), 'https://vscode.dev');
+            assert.strictEqual(a.textContent, '新しい名前');
+        });
+
+        test('生Markdown展開中のリンクも編集対象になる', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            selectIn(env.editor.querySelector('a') as HTMLElement, 1, 1);
+            env.commands.syncRawMarkdownToCaret();
+            const span = env.editor.querySelector('span.raw-markdown') as HTMLElement;
+            selectIn(span, 1, 1);
+            assert.strictEqual(env.commands.insertLink(), true);
+            const d = dialog();
+            assert.strictEqual(d.title.textContent, 'リンクの編集');
+            assert.strictEqual(d.text.value, 'サイト');
+            assert.strictEqual(d.url.value, 'https://example.com');
+            // 適用すると展開中のspanがリンクへ置き換わる（生テキストが残らない）
+            d.url.value = 'https://vscode.dev';
+            env.commands.applyLinkDialog();
+            assert.strictEqual(env.editor.querySelector('span.raw-markdown'), null, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('a').length, 1, env.editor.innerHTML);
+        });
+
+        test('テキスト未入力ならURLがリンクテキストになる', () => {
+            env.editor.innerHTML = '<p>あ</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 1, 1);
+            env.commands.insertLink();
+            const d = dialog();
+            d.text.value = '';
+            d.url.value = 'https://example.com';
+            env.commands.applyLinkDialog();
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.textContent, 'https://example.com', env.editor.innerHTML);
+        });
+
+        test('URL未入力では適用しない（false）', () => {
+            env.editor.innerHTML = '<p>ここ</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            dialog().url.value = '   ';
+            assert.strictEqual(env.commands.applyLinkDialog(), false);
+            assert.strictEqual(env.editor.querySelector('a'), null, env.editor.innerHTML);
+        });
+
+        test('新規挿入では「リンク解除」ボタンを出さない', () => {
+            env.editor.innerHTML = '<p>ここ</p>';
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            assert.strictEqual(dialog().remove.style.display, 'none');
+        });
+
+        test('リンク解除でリンクテキストだけが残る', () => {
+            env.editor.innerHTML = '<p>前<a href="https://example.com">サイト</a>後</p>';
+            selectIn(env.editor.querySelector('a') as HTMLElement, 1, 1);
+            env.commands.insertLink();
+            assert.strictEqual(dialog().remove.style.display, '');
+            assert.strictEqual(env.commands.removeLinkFromDialog(), true);
+            assert.strictEqual(env.editor.querySelector('a'), null, env.editor.innerHTML);
+            assert.strictEqual(env.editor.textContent, '前サイト後', env.editor.innerHTML);
+        });
+
+        test('キャンセルするとエディタは変化しない', () => {
+            env.editor.innerHTML = '<p>ここをリンクにする</p>';
+            const before = env.editor.innerHTML;
+            selectIn(env.editor.querySelector('p') as HTMLElement, 0, 2);
+            env.commands.insertLink();
+            env.commands.closeLinkDialog();
+            assert.strictEqual(dialog().root.style.display, 'none');
+            assert.strictEqual(env.editor.innerHTML, before);
+        });
+
+        test('エディタ外に選択がある場合は開かない（false）', () => {
+            env.window.getSelection().removeAllRanges();
+            assert.strictEqual(env.commands.insertLink(), false);
+        });
+    });
+
+    suite('handleLinkClick（リンクのクリック挙動）', () => {
+        /** クリックイベントの代用オブジェクト（target は指定要素） */
+        function fakeClick(target: unknown, modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean }> = {}) {
+            return {
+                target,
+                ctrlKey: false,
+                metaKey: false,
+                ...modifiers,
+                defaultPrevented: false,
+                preventDefault() { this.defaultPrevented = true; },
+                stopPropagation() { /* noop */ }
+            };
+        }
+        /** エディタ内の唯一のリンク要素 */
+        function link(): HTMLElement {
+            return env.editor.querySelector('a') as HTMLElement;
+        }
+        /**
+         * openLink メッセージが1件だけpostされたことを検証する。
+         * postされるオブジェクトはjsdom側のrealmで生成されるため、
+         * deepStrictEqual（プロトタイプ検査）ではなくフィールドで比較する。
+         */
+        function assertPostedOpenLink(href: string): void {
+            assert.strictEqual(env.posted.length, 1, JSON.stringify(env.posted));
+            assert.strictEqual(env.posted[0].type, 'openLink');
+            assert.strictEqual(env.posted[0].href, href);
+        }
+
+        test('通常クリックでは外部リンクへ飛ばない', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const e = fakeClick(link());
+            assert.strictEqual(env.commands.handleLinkClick(e), false);
+            assert.deepStrictEqual(env.posted, []);
+        });
+
+        test('通常クリックでは既定動作を抑止しない（キャレット設置を妨げない）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const e = fakeClick(link());
+            env.commands.handleLinkClick(e);
+            assert.strictEqual(e.defaultPrevented, false, 'preventDefaultするとキャレットが動かなくなる');
+        });
+
+        test('Ctrl+クリックではキャレットを動かさない（既定動作を抑止する）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const e = fakeClick(link(), { ctrlKey: true });
+            env.commands.handleLinkClick(e);
+            assert.strictEqual(e.defaultPrevented, true, env.editor.innerHTML);
+        });
+
+        test('生Markdown展開中のリンクもCmd+クリックで開ける（キャレットが既にリンク内にある場合）', () => {
+            // クリックでキャレットが入ると <a> は span.raw-markdown へ置き換わるため、
+            // その状態からの修飾キー+クリックでも遷移できる必要がある
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const range = env.document.createRange();
+            range.setStart(link().firstChild as Text, 1);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            env.commands.syncRawMarkdownToCaret();
+            const span = env.editor.querySelector('span.raw-markdown') as HTMLElement;
+            assert.ok(span, '前提: リンクが展開されている');
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(span, { metaKey: true })), true);
+            assertPostedOpenLink('https://example.com');
+        });
+
+        test('生Markdown展開中でも記法が壊れていれば開かない', () => {
+            env.editor.innerHTML = '<p><span class="raw-markdown">[サイト](https://example.com</span></p>';
+            const span = env.editor.querySelector('span.raw-markdown') as HTMLElement;
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(span, { metaKey: true })), false);
+            assert.deepStrictEqual(env.posted, []);
+        });
+
+        test('Ctrl+クリックで外部リンクを開くよう拡張機能へ通知する', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            const e = fakeClick(link(), { ctrlKey: true });
+            assert.strictEqual(env.commands.handleLinkClick(e), true);
+            assertPostedOpenLink('https://example.com');
+        });
+
+        test('Cmd+クリック（macOS）でも外部リンクを開く', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { metaKey: true })), true);
+            assertPostedOpenLink('https://example.com');
+        });
+
+        test('通常クリックではページ内アンカーへスクロールしない', () => {
+            env.editor.innerHTML = '<h2 id="見出し">見出し</h2><p><a href="#見出し">目次リンク</a></p>';
+            const heading = env.editor.querySelector('h2') as HTMLElement;
+            let scrolled = false;
+            (heading as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { scrolled = true; };
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link())), false);
+            assert.strictEqual(scrolled, false, '通常クリックでスクロールしている');
+        });
+
+        test('Ctrl+クリックでページ内アンカーの見出しへスクロールする', () => {
+            env.editor.innerHTML = '<h2 id="見出し">見出し</h2><p><a href="#見出し">目次リンク</a></p>';
+            const heading = env.editor.querySelector('h2') as HTMLElement;
+            let scrolled = false;
+            (heading as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { scrolled = true; };
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { ctrlKey: true })), true);
+            assert.strictEqual(scrolled, true, 'アンカー先へスクロールしていない');
+            assert.deepStrictEqual(env.posted, [], 'アンカーは外部リンクとして開かない');
+        });
+
+        test('javascript: など許可外のスキームはCtrl+クリックでも開かない', () => {
+            env.editor.innerHTML = '<p><a href="javascript:alert(1)">あやしいリンク</a></p>';
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { ctrlKey: true })), false);
+            assert.deepStrictEqual(env.posted, []);
+        });
+
+        test('相対パスのリンクはCtrl+クリックでも何もしない（キャレット設置のみ）', () => {
+            env.editor.innerHTML = '<p><a href="./other.md">別のファイル</a></p>';
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { ctrlKey: true })), false);
+            assert.deepStrictEqual(env.posted, []);
+        });
+
+        test('mailto: リンクはCtrl+クリックで開く', () => {
+            env.editor.innerHTML = '<p><a href="mailto:a@example.com">メール</a></p>';
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(link(), { ctrlKey: true })), true);
+            assertPostedOpenLink('mailto:a@example.com');
+        });
+
+        test('リンク以外のCtrl+クリックでは何もしない（false）', () => {
+            env.editor.innerHTML = '<p>ふつうの段落</p>';
+            const e = fakeClick(env.editor.querySelector('p'), { ctrlKey: true });
+            assert.strictEqual(env.commands.handleLinkClick(e), false);
+            assert.strictEqual(e.defaultPrevented, false, 'リンク以外で既定動作を抑止している');
+        });
+
+        test('リンク内の装飾要素をクリックしてもリンクとして扱う', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com"><strong>太字リンク</strong></a></p>';
+            const strong = env.editor.querySelector('strong') as HTMLElement;
+            assert.strictEqual(env.commands.handleLinkClick(fakeClick(strong, { ctrlKey: true })), true);
+            assertPostedOpenLink('https://example.com');
+        });
+    });
+
+    suite('syncRawMarkdownToCaret（強調記法の生Markdown表示）', () => {
+        /** 指定ノードの指定オフセットにキャレットを置く */
+        function caretIn(node: Node, offset: number): void {
+            const range = env.document.createRange();
+            range.setStart(node, offset);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        /** 生Markdown表示中のspanを返す */
+        function rawSpan(): HTMLElement | null {
+            return env.editor.querySelector('span.raw-markdown');
+        }
+        /** 装飾要素の中のテキストノードにキャレットを置く（深い入れ子は最深のテキストへ） */
+        function caretInDeepest(root: HTMLElement, offset: number): void {
+            let node: Node = root;
+            while (node.firstChild) { node = node.firstChild; }
+            caretIn(node, offset);
+        }
+
+        test('太字（strong）の内側にキャレットがあると `**...**` へ展開される', () => {
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            const changed = env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(changed, true, env.editor.innerHTML);
+            assert.strictEqual(rawSpan()?.textContent, '**太字**', env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+        });
+
+        test('取り消し線（del）は `~~...~~` へ展開される', () => {
+            env.editor.innerHTML = '<p><del>消し</del></p>';
+            caretInDeepest(env.editor.querySelector('del') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(rawSpan()?.textContent, '~~消し~~', env.editor.innerHTML);
+        });
+
+        test('下線（u）は `++...++` へ展開される', () => {
+            env.editor.innerHTML = '<p><u>下線</u></p>';
+            caretInDeepest(env.editor.querySelector('u') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(rawSpan()?.textContent, '++下線++', env.editor.innerHTML);
+        });
+
+        test('斜体（em）は `*...*` へ展開される', () => {
+            env.editor.innerHTML = '<p><em>斜体</em></p>';
+            caretInDeepest(env.editor.querySelector('em') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(rawSpan()?.textContent, '*斜体*', env.editor.innerHTML);
+        });
+
+        test('入れ子（太字斜体 ***）は最も外側ごと `***...***` へ展開される', () => {
+            env.editor.innerHTML = '<p><strong><em>強</em></strong></p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            // 内側のemだけ展開すると *** が壊れるため、strongごと展開されること
+            assert.strictEqual(rawSpan()?.textContent, '***強***', env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+        });
+
+        test('展開中の記法は walkInline に再変換されない（生表示が維持される）', () => {
+            env.editor.innerHTML = '<p><strong>太字</strong></p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            env.commands.applyInlineFormatting();
+            assert.ok(rawSpan(), env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+        });
+
+        test('キャレットが外れると装飾表示へ戻る', () => {
+            env.editor.innerHTML = '<p><strong>太字</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            const changed = env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(changed, true, env.editor.innerHTML);
+            assert.strictEqual(rawSpan(), null, env.editor.innerHTML);
+            const strong = env.editor.querySelector('strong');
+            assert.ok(strong, env.editor.innerHTML);
+            assert.strictEqual(strong!.textContent, '太字', env.editor.innerHTML);
+        });
+
+        test('展開中に記法を編集すると復帰時に反映される（** を ~~ へ）', () => {
+            env.editor.innerHTML = '<p><strong>語</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            rawSpan()!.textContent = '~~語~~';
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('del'), env.editor.innerHTML);
+        });
+
+        test('記法が壊れたまま外れた場合はプレーンテキストとして残す', () => {
+            env.editor.innerHTML = '<p><strong>語</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            rawSpan()!.textContent = '**語'; // 閉じ ** を消した状態
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+            assert.strictEqual(rawSpan(), null, env.editor.innerHTML);
+            assert.ok(env.editor.textContent!.includes('**語'), env.editor.innerHTML);
+        });
+
+        test('展開中の太字が往復しても同じMarkdownになる', () => {
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            const before = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            const after = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(after, before, JSON.stringify(after));
+            assert.ok(/前\*\*太字\*\*後/.test(after), JSON.stringify(after));
+        });
+    });
+
+    suite('syncRawMarkdownToCaret（リンク上の生Markdown表示）', () => {
+        /** 指定ノードの指定オフセットにキャレットを置く */
+        function caretIn(node: Node, offset: number): void {
+            const range = env.document.createRange();
+            range.setStart(node, offset);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        /** リンクのテキストノードの指定オフセットにキャレットを置く */
+        function caretInLink(offset: number): void {
+            const a = env.editor.querySelector('a') as HTMLElement;
+            caretIn(a.firstChild as Text, offset);
+        }
+        /** 生Markdown表示中のspanを返す */
+        function rawSpan(): HTMLElement | null {
+            return env.editor.querySelector('span.raw-markdown');
+        }
+
+        test('リンクの内側にキャレットがあると生Markdownへ展開される', () => {
+            env.editor.innerHTML = '<p>前<a href="https://example.com">サイト</a>後</p>';
+            caretInLink(1);
+            const changed = env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(changed, true, env.editor.innerHTML);
+            assert.strictEqual(rawSpan()?.textContent, '[サイト](https://example.com)', env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('a'), null, env.editor.innerHTML);
+        });
+
+        test('リンクテキストの途中（境界以外）でも展開される', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト名</a></p>';
+            caretInLink(2); // 「サイ」と「ト名」の間
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(rawSpan()?.textContent, '[サイト名](https://example.com)', env.editor.innerHTML);
+        });
+
+        test('展開時のキャレットはリンクテキスト内の相対位置を保つ（`[` の分だけ後ろ）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            env.editor.focus(); // 実機同様、キャレットがリンク内にある＝エディタはフォーカス済み
+            caretInLink(2);
+            env.commands.syncRawMarkdownToCaret();
+            const range = env.window.getSelection().getRangeAt(0);
+            assert.strictEqual(range.startContainer, rawSpan()!.firstChild, env.editor.innerHTML);
+            assert.strictEqual(range.startOffset, 3, '`[` + 2文字'); // [サイ|ト](...)
+        });
+
+        test('展開中のテキストはMarkdownへ往復しても同じ（展開は内容を変えない）', () => {
+            env.editor.innerHTML = '<p>前<a href="https://example.com">サイト</a>後</p>';
+            const before = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            caretInLink(1);
+            env.commands.syncRawMarkdownToCaret();
+            const after = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(after, before, JSON.stringify(after));
+            assert.ok(/前\[サイト\]\(https:\/\/example\.com\)後/.test(after), JSON.stringify(after));
+        });
+
+        test('展開中のテキストは walkInline に再変換されない（薄い表示が維持される）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            caretInLink(1);
+            env.commands.syncRawMarkdownToCaret();
+            env.commands.applyInlineFormatting();
+            assert.ok(rawSpan(), env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('a'), null, env.editor.innerHTML);
+        });
+
+        test('キャレットがリンクから外れるとレンダリング表示へ戻る', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a>後</p>';
+            caretInLink(1);
+            env.commands.syncRawMarkdownToCaret();
+            // 段落の末尾テキスト「後」へキャレットを移す
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            const changed = env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(changed, true, env.editor.innerHTML);
+            assert.strictEqual(rawSpan(), null, env.editor.innerHTML);
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('href'), 'https://example.com', env.editor.innerHTML);
+            assert.strictEqual(a.textContent, 'サイト', env.editor.innerHTML);
+        });
+
+        test('展開中に編集したURL・リンクテキストが復帰時のリンクへ反映される', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a>後</p>';
+            caretInLink(1);
+            env.commands.syncRawMarkdownToCaret();
+            rawSpan()!.textContent = '[新しい名前](https://vscode.dev)';
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            env.commands.syncRawMarkdownToCaret();
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('href'), 'https://vscode.dev', env.editor.innerHTML);
+            assert.strictEqual(a.textContent, '新しい名前', env.editor.innerHTML);
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/\[新しい名前\]\(https:\/\/vscode\.dev\)/.test(md), JSON.stringify(md));
+        });
+
+        test('記法が壊れたまま外れた場合はプレーンテキストとして残す', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a>後</p>';
+            caretInLink(1);
+            env.commands.syncRawMarkdownToCaret();
+            rawSpan()!.textContent = '[サイト](https://example.com'; // `)` を消した状態
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(env.editor.querySelector('a'), null, env.editor.innerHTML);
+            assert.strictEqual(rawSpan(), null, env.editor.innerHTML);
+            assert.ok(env.editor.textContent!.includes('[サイト](https://example.com'), env.editor.innerHTML);
+        });
+
+        test('同じリンク内でキャレットを動かしても展開は維持される（DOM変更なし）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            caretInLink(1);
+            env.commands.syncRawMarkdownToCaret();
+            const span = rawSpan();
+            caretIn(span!.firstChild as Text, 5);
+            const changed = env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(changed, false, env.editor.innerHTML);
+            assert.strictEqual(rawSpan(), span, env.editor.innerHTML);
+        });
+
+        test('リンクの外にキャレットがあるときは何もしない（false）', () => {
+            env.editor.innerHTML = '<p>ふつうの段落</p>';
+            caretIn(env.editor.querySelector('p')!.firstChild as Text, 2);
+            assert.strictEqual(env.commands.syncRawMarkdownToCaret(), false, env.editor.innerHTML);
+        });
+
+        test('選択範囲がある場合も開始位置の所属で判定する（展開中のテキストを選択して編集できる）', () => {
+            env.editor.innerHTML = '<p><a href="https://example.com">サイト</a></p>';
+            caretInLink(1);
+            env.commands.syncRawMarkdownToCaret();
+            const span = rawSpan()!;
+            const range = env.document.createRange();
+            range.setStart(span.firstChild as Text, 1);
+            range.setEnd(span.firstChild as Text, 4); // span内を範囲選択
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            assert.strictEqual(env.commands.syncRawMarkdownToCaret(), false, env.editor.innerHTML);
+            assert.strictEqual(rawSpan(), span, env.editor.innerHTML);
+        });
+    });
+
+    suite('handleAlertEnter（アラートbox本文内のEnter/Shift+Enter）', () => {
+        const ALERT = '<div class="markdown-alert markdown-alert-note" data-alert-type="NOTE">' +
+            '<p class="markdown-alert-title" contenteditable="false">Note</p>' +
+            '<div class="markdown-alert-body">補足です</div></div>';
+
+        /** 本文の先頭テキストノードの指定オフセットにキャレットを置く */
+        function placeCaretInBody(body: HTMLElement, offset: number): void {
+            const text = (body.firstChild ?? body) as Text;
+            const range = env.document.createRange();
+            range.setStart(text, Math.min(offset, text.textContent!.length));
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        /** 本文の末尾にキャレットを置く */
+        function placeCaretAtBodyEnd(body: HTMLElement): void {
+            placeCaretInBody(body, ((body.firstChild ?? body) as Text).textContent!.length);
+        }
+        /** アラートを1つ持つエディタを用意し、本文要素を返す */
+        function setupAlert(): HTMLElement {
+            env.editor.innerHTML = ALERT;
+            return env.editor.querySelector('.markdown-alert-body') as HTMLElement;
+        }
+
+        test('本文末尾のEnterでboxを抜けて後続の段落へ移る', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            const alertEl = env.editor.querySelector('.markdown-alert') as HTMLElement;
+            assert.strictEqual(alertEl.nextElementSibling?.tagName, 'P', env.editor.innerHTML);
+            // 段落はboxの外にある（本文は変化しない）
+            assert.strictEqual(body.textContent, '補足です', env.editor.innerHTML);
+        });
+
+        test('boxを抜けた段落はアラートの外の段落としてMarkdownへ往復する', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            const p = env.editor.querySelector('p:not(.markdown-alert-title)') as HTMLElement;
+            p.textContent = '本文の続き';
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/^> \[!NOTE\]$/m.test(md), JSON.stringify(md));
+            assert.ok(/^> 補足です$/m.test(md), JSON.stringify(md));
+            assert.ok(/^本文の続き$/m.test(md), JSON.stringify(md));
+        });
+
+        test('本文の途中のEnterでは改行（<br>）を挿入しboxを抜けない', () => {
+            const body = setupAlert();
+            placeCaretInBody(body, 2); // 「補足」と「です」の間
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(body.querySelectorAll('br').length, 1, env.editor.innerHTML);
+            const alertEl = env.editor.querySelector('.markdown-alert') as HTMLElement;
+            assert.strictEqual(alertEl.nextElementSibling, null, env.editor.innerHTML);
+        });
+
+        test('本文の途中のEnterによる改行は2つの `> ` 行へ往復する', () => {
+            const body = setupAlert();
+            placeCaretInBody(body, 2);
+            env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(/^> 補足$/m.test(md), JSON.stringify(md));
+            assert.ok(/^> です$/m.test(md), JSON.stringify(md));
+        });
+
+        test('本文末尾のShift+Enterではboxを抜けずプレースホルダ<br>が補われる', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(body.querySelectorAll('br').length, 2, env.editor.innerHTML);
+            const alertEl = env.editor.querySelector('.markdown-alert') as HTMLElement;
+            assert.strictEqual(alertEl.nextElementSibling, null, env.editor.innerHTML);
+        });
+
+        test('プレースホルダ<br>はMarkdownへ余分な行を出力しない', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            env.commands.handleAlertEnter(fakeKeyEvent('Enter', { shiftKey: true }));
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML).trim();
+            assert.strictEqual(md, '> [!NOTE]\n> 補足です', JSON.stringify(md));
+        });
+
+        test('タイトル行（contenteditable=false）は本文ではないので何もしない（false）', () => {
+            env.editor.innerHTML = ALERT;
+            const title = env.editor.querySelector('.markdown-alert-title') as HTMLElement;
+            placeCaretAtBodyEnd(title);
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, false);
+        });
+
+        test('アラートboxの外では何もしない（false）', () => {
+            env.editor.innerHTML = '<p>ふつうの段落</p>';
+            placeCaretAtBodyEnd(env.editor.querySelector('p') as HTMLElement);
+            const handled = env.commands.handleAlertEnter(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, false);
+        });
+
+        test('Ctrl/Cmd+Enterなどの修飾キー付きでは何もしない（false）', () => {
+            const body = setupAlert();
+            placeCaretAtBodyEnd(body);
+            assert.strictEqual(env.commands.handleAlertEnter(fakeKeyEvent('Enter', { ctrlKey: true })), false);
+            assert.strictEqual(env.commands.handleAlertEnter(fakeKeyEvent('Enter', { metaKey: true })), false);
+        });
+    });
+
     suite('handleTaskListEnter（タスクリスト内のEnter）', () => {
         const CHECKBOX = '<input type="checkbox" class="task-checkbox" contenteditable="false">';
 

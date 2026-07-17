@@ -4,7 +4,7 @@
 
 | コマンドID | タイトル | 表示条件 |
 |---|---|---|
-| `markdown-wysiwyg-editor.openEditor` | Markdown: WYSIWYGエディタで開く | `resourceLangId == markdown`（コマンドパレット・`editor/title`メニュー） |
+| `markdown-wysiwyg-editor.openEditor` | Markdown: WYSIWYGエディタで開く | `resourceLangId == markdown`（コマンドパレットのみ。タイトルバーのボタンは廃止） |
 | `markdown-wysiwyg-editor.openAsText` | Markdown: テキストエディタで開く | `resourceLangId == markdown`（コマンドパレット） |
 | `markdown-wysiwyg-editor.toggleEditor` | Markdown: エディタ切り替え (WYSIWYG/テキスト) | `resourceLangId == markdown`（コマンドパレット） |
 | `markdown-wysiwyg-editor.newMarkdownFile` | Markdown: 新しいWYSIWYGドキュメントを作成 | 常に表示 |
@@ -25,6 +25,7 @@
 | 斜体 | `Ctrl+I` | `Cmd+I` |
 | 下線 | `Ctrl+U` | `Cmd+U` |
 | 取り消し線 | `Ctrl+Shift+X` | `Cmd+Shift+X` |
+| リンクの挿入・編集 | `Ctrl+K` | `Cmd+K` |
 | 目次(TOC)を挿入 | `Ctrl+Shift+O` | `Cmd+Shift+O` |
 
 ### 表示切り替え
@@ -68,10 +69,16 @@
 | 引用ブロック内の行頭で `> ` + スペース | 1段深いネスト引用に変換 |
 | 引用ブロックの末尾で `Enter` | 引用を抜けて後続の段落へ移動 |
 | 引用ブロック内で `Shift+Enter` | 引用内で改行（`<br>`、引用を継続） |
+| アラートbox本文の末尾で `Enter` | boxを抜けて後続の段落へ移動 |
+| アラートbox本文の途中で `Enter`、または `Shift+Enter` | 本文内で改行（`<br>`、boxを継続） |
 | `` ``` `` または `` ```lang `` の行でEnter | コードブロックに変換 |
 | `---` / `***` / `___` の行でEnter | 水平線に変換（リスト項目内は無効） |
 | `# `〜`###### ` の行でEnter | 見出し要素として確定 |
 | インラインコード末尾で `→` | コード要素の外へキャレット移動 |
+| リンクの内側へカーソルを移動 | 生Markdown（`[text](url)`）を薄く表示し直接編集可能に（外れると復帰） |
+| リンクを通常クリック | キャレットを合わせるだけ（リンク先へ移動しない） |
+| リンクを `Ctrl+クリック`（Mac: `Cmd+クリック`） | リンク先へ移動（`#slug` は該当見出しへスクロール、http/https/mailto は外部で開く） |
+| `Ctrl+K` / `Cmd+K` | リンクの挿入・編集ダイアログを開く（選択テキストはリンクテキストの初期値、既存リンク内なら編集） |
 
 ## ツールバーのコマンド（`data-command` 属性経由）
 

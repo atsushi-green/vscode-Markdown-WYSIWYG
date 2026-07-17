@@ -82,6 +82,9 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 case 'saveMermaidPng':
                     await this.saveMermaidPng(e.pngBase64, e.filename);
                     return;
+                case 'openLink':
+                    await this.openLink(e.href);
+                    return;
             }
         });
 
@@ -123,6 +126,9 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         const commandsModuleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'commands.js')
         );
+        const mathModuleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'modules', 'math.js')
+        );
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'editor.js')
         );
@@ -135,6 +141,17 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         );
         const hljsPowershellUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'hljs-powershell.min.js')
+        );
+
+        // KaTeX関連のURI（数式レンダリング）
+        // WebviewはCSPで外部CDNを読めないため media/katex/ へ同梱している。
+        // katex.min.css がフォントを `fonts/*.woff2` の相対パスで参照するため、
+        // フォントは katex.min.css と同じ階層の fonts/ に置く必要がある（CSPは font-src で許可済み）。
+        const katexUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'katex', 'katex.min.js')
+        );
+        const katexStyleUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'katex', 'katex.min.css')
         );
 
         // Mermaid.js関連のURI
@@ -159,6 +176,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                                img-src ${webview.cspSource} data: blob:;
                                font-src ${webview.cspSource};">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <link href="${katexStyleUri}" rel="stylesheet">
                 <link href="${styleUri}" rel="stylesheet">
                 <title>Markdown WYSIWYG Editor</title>
             </head>
@@ -219,10 +237,29 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                     <div class="mermaid-menu-item" data-action="copyImage">📋 画像をコピー</div>
                     <div class="mermaid-menu-item" data-action="savePng">💾 PNG画像として保存</div>
                 </div>
+                <!-- リンクの挿入・編集ダイアログ（Webviewでは prompt() が使えないため自前で用意する） -->
+                <div id="linkDialog" class="link-dialog" style="display: none;">
+                    <div class="link-dialog-title" id="linkDialogTitle">リンクの挿入</div>
+                    <label class="link-dialog-field">
+                        <span class="link-dialog-label">テキスト</span>
+                        <input type="text" id="linkTextInput" class="link-dialog-input" placeholder="リンクとして表示する文字列" />
+                    </label>
+                    <label class="link-dialog-field">
+                        <span class="link-dialog-label">URL</span>
+                        <input type="text" id="linkUrlInput" class="link-dialog-input" placeholder="https://" />
+                    </label>
+                    <div class="link-dialog-actions">
+                        <button id="linkDialogRemove" class="link-dialog-btn" title="リンクを解除してテキストだけ残す">リンク解除</button>
+                        <span class="link-dialog-spacer"></span>
+                        <button id="linkDialogCancel" class="link-dialog-btn" title="キャンセル (Escape)">キャンセル</button>
+                        <button id="linkDialogOk" class="link-dialog-btn link-dialog-btn-primary" title="適用 (Enter)">OK</button>
+                    </div>
+                </div>
                 <div id="editor" contenteditable="true" spellcheck="false"></div>
                 <textarea id="rawEditor" spellcheck="false" style="display: none;"></textarea>
                 <script nonce="${nonce}" src="${hljsUri}"></script>
                 <script nonce="${nonce}" src="${hljsPowershellUri}"></script>
+                <script nonce="${nonce}" src="${katexUri}"></script>
                 <script nonce="${nonce}" src="${html2canvasUri}"></script>
                 <script nonce="${nonce}" src="${mermaidUri}"></script>
                 <!-- Editor modules (order matters due to dependencies) -->
@@ -233,6 +270,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 <script nonce="${nonce}" src="${tableModuleUri}"></script>
                 <script nonce="${nonce}" src="${searchModuleUri}"></script>
                 <script nonce="${nonce}" src="${commandsModuleUri}"></script>
+                <script nonce="${nonce}" src="${mathModuleUri}"></script>
                 <script nonce="${nonce}" src="${scriptUri}"></script>
             </body>
             </html>
@@ -279,6 +317,22 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         );
 
         return vscode.workspace.applyEdit(edit);
+    }
+
+    /**
+     * リンク先を外部（既定のブラウザ・メールクライアント等）で開く。
+     * Webview側（commands.handleLinkClick）でもスキームを絞っているが、
+     * Webviewからのメッセージは信頼せず拡張機能側でも同じ検証を行う。
+     */
+    private async openLink(href: unknown): Promise<void> {
+        if (typeof href !== 'string' || !/^(https?|mailto):/i.test(href)) {
+            return;
+        }
+        try {
+            await vscode.env.openExternal(vscode.Uri.parse(href, true));
+        } catch (error) {
+            vscode.window.showErrorMessage(`リンクを開けませんでした: ${error}`);
+        }
     }
 
     /**

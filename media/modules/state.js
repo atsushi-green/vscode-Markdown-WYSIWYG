@@ -30,6 +30,13 @@ window.EditorState = (function() {
         replaceInput: null,
         replaceBtn: null,
         replaceAllBtn: null,
+        linkDialog: null,
+        linkDialogTitle: null,
+        linkTextInput: null,
+        linkUrlInput: null,
+        linkDialogOk: null,
+        linkDialogCancel: null,
+        linkDialogRemove: null,
 
         // エディタ状態フラグ
         isUpdating: false,
@@ -42,6 +49,12 @@ window.EditorState = (function() {
         // カーソル・編集状態
         lastCursorPosition: null,
         lastSentMarkdown: '',
+
+        // リンクダイアログ関連
+        // ダイアログの入力欄へフォーカスを移すとエディタの選択が失われるため、
+        // 開いた時点のRangeと編集対象の要素を保持して適用時に使う
+        linkDialogRange: null,
+        linkDialogTarget: null,
 
         // Mermaid関連
         mermaidIdCounter: 0,
@@ -85,6 +98,13 @@ window.EditorState = (function() {
         state.replaceInput = document.getElementById('replaceInput');
         state.replaceBtn = document.getElementById('replaceBtn');
         state.replaceAllBtn = document.getElementById('replaceAllBtn');
+        state.linkDialog = document.getElementById('linkDialog');
+        state.linkDialogTitle = document.getElementById('linkDialogTitle');
+        state.linkTextInput = document.getElementById('linkTextInput');
+        state.linkUrlInput = document.getElementById('linkUrlInput');
+        state.linkDialogOk = document.getElementById('linkDialogOk');
+        state.linkDialogCancel = document.getElementById('linkDialogCancel');
+        state.linkDialogRemove = document.getElementById('linkDialogRemove');
     }
 
     /**
@@ -123,6 +143,20 @@ window.EditorState = (function() {
         get replaceInput() { return state.replaceInput; },
         get replaceBtn() { return state.replaceBtn; },
         get replaceAllBtn() { return state.replaceAllBtn; },
+        get linkDialog() { return state.linkDialog; },
+        get linkDialogTitle() { return state.linkDialogTitle; },
+        get linkTextInput() { return state.linkTextInput; },
+        get linkUrlInput() { return state.linkUrlInput; },
+        get linkDialogOk() { return state.linkDialogOk; },
+        get linkDialogCancel() { return state.linkDialogCancel; },
+        get linkDialogRemove() { return state.linkDialogRemove; },
+
+        // リンクダイアログの選択状態
+        get linkDialogRange() { return state.linkDialogRange; },
+        set linkDialogRange(v) { state.linkDialogRange = v; },
+
+        get linkDialogTarget() { return state.linkDialogTarget; },
+        set linkDialogTarget(v) { state.linkDialogTarget = v; },
 
         // フラグのゲッター/セッター
         get isUpdating() { return state.isUpdating; },

@@ -178,6 +178,14 @@ body {
     opacity: 0.6;
 }
 
+/* 生Markdown表示（キャレットが記法の内側にある間だけ展開されるテキスト）。
+   レンダリング表示との差が分かるよう薄く・等幅で表示する。 */
+#editor .raw-markdown {
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family, monospace);
+    opacity: 0.75;
+}
+
 #editor p {
     margin: 1em 0;
 }
@@ -187,6 +195,15 @@ body {
        アンチエイリアスの効き方の違いから太字だと気づきにくい。700（ボールド）へ
        引き上げてどのテーマでも判別しやすくする。 */
     font-weight: 700;
+    /* ウェイトを上げてもダークテーマでは判別しにくいとの報告のため、わずかに大きくする。
+       em指定にすることで見出し内の太字も見出しのサイズに対して相対的に拡大される
+       （px固定だと見出しで本文より小さくなり破綻する）。テーマによって太字の大きさが
+       変わらないよう、拡大は全テーマへ適用する（ウェイトのみテーマ別に出し分ける）。 */
+    font-size: 1.05em;
+    /* #editor 配下の line-height は body の単位なし 1.6 を継承する＝各要素が自身の
+       font-size を基準に計算するため、font-size を上げると太字を含む行だけ行の高さが
+       伸びて前後の行がずれる。1.6 / 1.05 へ補正し、行の高さを拡大前と同じに保つ。 */
+    line-height: calc(1.6 / 1.05);
 }
 
 /* ダークテーマ・ダーク系ハイコントラストでは、暗い背景に明るい文字だと
@@ -201,9 +218,30 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     font-style: italic;
 }
 
+/* 数式（KaTeX）。ブロック数式は中央寄せ、横に長い式は内部でスクロールさせて
+   本文が横に広がらないようにする（テーブル等と同じ方針）。 */
+#editor .math-block {
+    margin: 1em 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    text-align: center;
+}
+
+/* レンダリング前（KaTeXの読み込み前・失敗時）に式が消えて見えないよう、
+   data-math の中身を代わりに表示する。レンダリング後は :not() で無効になる。 */
+#editor .math-inline:not([data-math-rendered])::before,
+#editor .math-block:not([data-math-rendered])::before {
+    content: attr(data-math);
+    font-family: var(--vscode-editor-font-family, monospace);
+    color: var(--vscode-descriptionForeground);
+}
+
+/* 通常クリックはキャレット設置のため、テキストカーソルを出す。
+   リンク先へ移動するのは Ctrl（Mac: Cmd）+クリックのみ（VS Codeエディタ本体と同じ操作感）。 */
 #editor a {
     color: var(--vscode-textLink-foreground);
     text-decoration: none;
+    cursor: text;
 }
 
 #editor a:hover {
@@ -582,6 +620,89 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     border: 1px solid var(--vscode-editorWidget-border, #454545);
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* リンクの挿入・編集ダイアログ（Ctrl+K）。検索ウィジェットと同じ配色・角丸に揃える */
+.link-dialog {
+    position: absolute;
+    top: 48px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    background-color: var(--vscode-editorWidget-background, #252526);
+    border: 1px solid var(--vscode-editorWidget-border, #454545);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.link-dialog-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--vscode-editorWidget-foreground, var(--vscode-editor-foreground));
+}
+
+.link-dialog-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.link-dialog-label {
+    width: 48px;
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground, #808080);
+}
+
+.link-dialog-input {
+    width: 260px;
+    padding: 4px 8px;
+    background-color: var(--vscode-input-background, #3c3c3c);
+    color: var(--vscode-input-foreground, #cccccc);
+    border: 1px solid var(--vscode-input-border, #3c3c3c);
+    border-radius: 2px;
+    font-size: 13px;
+    outline: none;
+}
+
+.link-dialog-input:focus {
+    border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.link-dialog-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 「リンク解除」を左、OK/キャンセルを右に寄せる */
+.link-dialog-spacer {
+    flex: 1;
+}
+
+.link-dialog-btn {
+    padding: 4px 12px;
+    background-color: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #cccccc);
+    border: none;
+    border-radius: 2px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.link-dialog-btn:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+.link-dialog-btn-primary {
+    background-color: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #ffffff);
+}
+
+.link-dialog-btn-primary:hover {
+    background-color: var(--vscode-button-hoverBackground, #1177bb);
 }
 
 /* 検索行・置換行（それぞれ横並び） */

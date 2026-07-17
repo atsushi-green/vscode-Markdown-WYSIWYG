@@ -48,6 +48,16 @@ const FIXTURE_HTML = `<!DOCTYPE html>
         </div>
     </div>
     <div id="mermaidContextMenu" class="mermaid-context-menu" style="display: none;"></div>
+    <div id="linkDialog" class="link-dialog" style="display: none;">
+        <div class="link-dialog-title" id="linkDialogTitle">リンクの挿入</div>
+        <input type="text" id="linkTextInput" class="link-dialog-input" />
+        <input type="text" id="linkUrlInput" class="link-dialog-input" />
+        <div class="link-dialog-actions">
+            <button id="linkDialogRemove" class="link-dialog-btn">リンク解除</button>
+            <button id="linkDialogCancel" class="link-dialog-btn">キャンセル</button>
+            <button id="linkDialogOk" class="link-dialog-btn link-dialog-btn-primary">OK</button>
+        </div>
+    </div>
     <div id="editor" contenteditable="true" spellcheck="false"></div>
     <textarea id="rawEditor" spellcheck="false" style="display: none;"></textarea>
 </body>

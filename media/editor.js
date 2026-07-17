@@ -19,6 +19,7 @@
     const utils = window.EditorUtils;
     const markdown = window.MarkdownModule;
     const mermaidModule = window.MermaidModule;
+    const mathModule = window.MathModule;
     const tableModule = window.TableModule;
     const searchModule = window.SearchModule;
     const commands = window.CommandsModule;
@@ -75,6 +76,12 @@
 
         // タスクリストのチェックボックス操作を監視
         setupTaskCheckboxEvent();
+
+        // キャレット位置に応じた生Markdown表示の切り替えを監視
+        setupRawMarkdownCaretEvent();
+
+        // リンクの挿入・編集ダイアログの操作を監視
+        setupLinkDialogEvents();
 
         // VS Codeからのメッセージを受信
         setupMessageListener();
@@ -174,6 +181,9 @@
             // Mermaid図を更新
             mermaidModule.update();
 
+            // 追加・変更された数式（KaTeX）をレンダリング
+            mathModule.render(state.editor);
+
             // 単語数・文字数の表示を更新
             updateWordCount();
 
@@ -209,6 +219,57 @@
                 clearTimeout(editSyncTimeout);
             }
             editSyncTimeout = setTimeout(syncEditorToDocument, 150);
+        });
+    }
+
+    /**
+     * キャレット位置に応じた生Markdown表示の切り替えの設定。
+     * キャレットがリンクの内側にある間だけ生Markdown（`[text](url)`）を表示する。
+     * `selectionchange` はdocumentにしか発火しないため、documentで監視してエディタ内かを判定する。
+     * 切り替え自体がDOM・選択を変更して再度 `selectionchange` を呼ぶため、再入を抑止する。
+     * Markdownの内容は展開の前後で変わらない（生テキストがそのまま直列化される）ため、
+     * ここでは文書への書き戻しは行わない。
+     */
+    function setupRawMarkdownCaretEvent() {
+        let isSyncingRawMarkdown = false;
+        document.addEventListener('selectionchange', () => {
+            if (isSyncingRawMarkdown ||
+                state.isUpdating || state.isFormatting || state.isCreatingCodeBlock) {
+                return;
+            }
+            isSyncingRawMarkdown = true;
+            try {
+                commands.syncRawMarkdownToCaret();
+            } finally {
+                isSyncingRawMarkdown = false;
+            }
+        });
+    }
+
+    /**
+     * リンクの挿入・編集ダイアログの操作の設定。
+     * ダイアログ内では Enter で適用、Escape でキャンセルする。
+     */
+    function setupLinkDialogEvents() {
+        state.linkDialogOk.addEventListener('click', () => {
+            commands.applyLinkDialog();
+        });
+        state.linkDialogCancel.addEventListener('click', () => {
+            commands.closeLinkDialog();
+        });
+        state.linkDialogRemove.addEventListener('click', () => {
+            commands.removeLinkFromDialog();
+        });
+        state.linkDialog.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                commands.applyLinkDialog();
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                commands.closeLinkDialog();
+            }
         });
     }
 
@@ -279,6 +340,9 @@
         // Mermaid図をレンダリング
         mermaidModule.render();
 
+        // 数式（KaTeX）をレンダリング
+        mathModule.render(state.editor);
+
         // テーブルをレンダリング
         tableModule.render();
 
@@ -333,6 +397,7 @@
             commands.applySyntaxHighlighting();
             commands.decorateCodeBlocks();
             mermaidModule.render();
+            mathModule.render(state.editor);
             tableModule.render();
             state.rawEditor.style.display = 'none';
             state.editor.style.display = 'block';
@@ -462,6 +527,13 @@
                 return;
             }
 
+            // リンクの挿入・編集ダイアログ（Ctrl+K / Cmd+K）
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                commands.insertLink();
+                return;
+            }
+
             // 目次（TOC）の生成・挿入（Ctrl+Shift+O / Cmd+Shift+O）
             if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
                 e.preventDefault();
@@ -483,6 +555,11 @@
 
             // 見出しの確定処理（Enterキー）
             if (commands.handleHeadingConfirm(e)) {
+                return;
+            }
+
+            // アラートbox本文内でのEnter / Shift+Enter処理（末尾のEnterでboxを抜ける）
+            if (commands.handleAlertEnter(e)) {
                 return;
             }
 

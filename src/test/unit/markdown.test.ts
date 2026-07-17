@@ -434,6 +434,103 @@ suite('MarkdownModule', () => {
         });
     });
 
+    suite('数式（インライン $...$ / ブロック $$...$$）', () => {
+        /** 数式コンテナの data-math（＝保持している生の式）を返す */
+        function mathOf(html: string, selector: string): string | null {
+            const div = env.document.createElement('div');
+            div.innerHTML = html;
+            return div.querySelector(selector)?.getAttribute('data-math') ?? null;
+        }
+
+        test('インライン数式が data-math に生の式を保持したspanになる', () => {
+            const html = env.markdown.markdownToHtml('文中の $\\alpha + \\beta$ です');
+            assert.strictEqual(mathOf(html, '.math-inline'), '\\alpha + \\beta', html);
+        });
+
+        test('インライン数式の中身は強調・斜体へ変換されない', () => {
+            // 退避しないと `^*` の `*` が <em> に、`a_1` の `_` が強調に化ける
+            const html = env.markdown.markdownToHtml('$\\alpha^*$ と $a_1 + b_2$');
+            assert.ok(!/<em>|<strong>/.test(html), html);
+            assert.strictEqual(mathOf(html, '.math-inline'), '\\alpha^*', html);
+        });
+
+        test('ブロック数式（複数行）が data-math を持つdivになる', () => {
+            const html = env.markdown.markdownToHtml('$$\nx = \\frac{1}{2}\n$$');
+            assert.strictEqual(mathOf(html, '.math-block'), 'x = \\frac{1}{2}', html);
+        });
+
+        test('1行で書いたブロック数式（$$ x $$）も対応する', () => {
+            const html = env.markdown.markdownToHtml('$$ x^2 $$');
+            assert.strictEqual(mathOf(html, '.math-block'), 'x^2', html);
+        });
+
+        test('数式コンテナは contenteditable=false（KaTeXの生成DOMを編集で壊さない）', () => {
+            const html = env.markdown.markdownToHtml('$x$\n\n$$y$$');
+            assert.ok(/<span class="math-inline"[^>]*contenteditable="false"/.test(html), html);
+            assert.ok(/<div class="math-block"[^>]*contenteditable="false"/.test(html), html);
+        });
+
+        test('インラインコード内の $ は数式にならない', () => {
+            const html = env.markdown.markdownToHtml('`$x$` はコード');
+            assert.strictEqual(html.includes('math-inline'), false, html);
+            assert.ok(html.includes('<code>$x$</code>'), html);
+        });
+
+        test('エスケープした \\$ は数式にならずリテラルの $ になる', () => {
+            const html = env.markdown.markdownToHtml('価格は \\$100 と \\$200 です');
+            assert.strictEqual(html.includes('math-inline'), false, html);
+            assert.ok(html.includes('価格は $100 と $200 です'), html);
+        });
+
+        test('式に含まれるダブルクォートが属性を壊さない', () => {
+            const html = env.markdown.markdownToHtml('$\\text{"x"}$');
+            assert.strictEqual(mathOf(html, '.math-inline'), '\\text{"x"}', html);
+        });
+
+        test('式に含まれる < や & が生の文字として復元される', () => {
+            const html = env.markdown.markdownToHtml('$a < b \\& c$');
+            assert.strictEqual(mathOf(html, '.math-inline'), 'a < b \\& c', html);
+        });
+
+        test('インライン数式が往復で保存される', () => {
+            const md = '文中の $\\alpha^2$ です';
+            const back = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(md)).trim();
+            assert.strictEqual(back, md);
+        });
+
+        test('ブロック数式が往復で保存される', () => {
+            const md = '$$\nx = \\frac{1}{2}\n$$';
+            const back = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(md)).trim();
+            assert.strictEqual(back, md);
+        });
+
+        test('エスケープした \\$ が往復で保存される', () => {
+            const md = '価格は \\$100 です';
+            const back = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(md)).trim();
+            assert.strictEqual(back, md);
+        });
+
+        test('テキスト中の素の $ は往復で \\$ へエスケープされる（次回読込で数式化しない）', () => {
+            // 単独の $ は数式にならない（対になっていない）が、書き戻すときに
+            // エスケープしておかないと後続の $ と対になって数式に化けうる
+            const html = env.markdown.markdownToHtml('残高 \\$5');
+            const back = env.markdown.htmlToMarkdown(html).trim();
+            assert.strictEqual(back, '残高 \\$5');
+        });
+
+        test('コードブロック内の $ はエスケープされない', () => {
+            const md = '```bash\necho $HOME\n```';
+            const back = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(md)).trim();
+            assert.strictEqual(back, md);
+        });
+
+        test('インラインコード内の $ はエスケープされない', () => {
+            const md = '`$HOME` を参照';
+            const back = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(md)).trim();
+            assert.strictEqual(back, md);
+        });
+    });
+
     suite('ラウンドトリップ（Markdown → HTML → Markdown）', () => {
         test('各種ブロックを含む文書が変換往復で保存される', () => {
             const original = [

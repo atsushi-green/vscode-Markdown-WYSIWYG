@@ -42,6 +42,28 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * data-* 属性値へ埋め込むための追加エスケープ。
+     * escapeHtml 済みのテキスト（`&`/`<`/`>` は変換済み）に対し、属性を閉じてしまう
+     * ダブルクォートだけをさらに潰す。取り出しは getAttribute で行うため
+     * `&amp;`/`&lt;`/`&gt;`/`&quot;` は自動的に元の文字へ戻る（＝生の式が復元される）。
+     */
+    function escapeAttr(escapedText) {
+        return escapedText.replace(/"/g, '&quot;');
+    }
+
+    /**
+     * ブロック数式（`$$ ... $$`）のコンテナHTMLを生成する。
+     * 生の式は data-math に保持し、`htmlToMarkdown`（serializeBlockElement）で復元する。
+     * 中身のレンダリングは math.js（KaTeX）が後から行うため、ここでは空のまま返す。
+     * contenteditable=false でキャレットがKaTeXの生成DOM内へ入らないようにする
+     * （式の編集は生Markdown表示の項目で対応予定。現状はRawモードで編集する）。
+     */
+    function buildMathBlockHtml(expr) {
+        return '<div class="math-block" data-math="' + escapeAttr(escapeHtml(expr)) +
+            '" contenteditable="false"></div>';
+    }
+
+    /**
      * インラインMarkdown記法をHTMLへ変換（エスケープ済みテキストに適用）
      * commands.jsのライブ変換（convertInlineText）と同じ記法をサポートする
      */
@@ -55,6 +77,26 @@ window.MarkdownModule = (function() {
         let html = escapedText.replace(/`([^`]+)`/g, function (_m, p1) {
             codeSpans.push(p1);
             return '\u0000' + (codeSpans.length - 1) + '\u0000';
+        });
+
+        // エスケープされたドル記号（\$）を退避する。素の $ は数式の開始として扱うため、
+        // 通常のドル記号（$100 など）を書きたい場合は \$100 と書く仕様。
+        // 先に退避しておくことで \$ が数式の区切りとして拾われるのを防ぐ。
+        const escapedDollars = [];
+        html = html.replace(/\\\$/g, function () {
+            escapedDollars.push('$');
+            return '\u0001' + (escapedDollars.length - 1) + '\u0001';
+        });
+
+        // インライン数式（$...$）。中身は data-math に生のまま保持し、要素ごと
+        // プレースホルダへ退避する。退避しないと `$\alpha^*$` の `*` が斜体に、
+        // `$a_1$` の `_` が強調に化けてしまう（インラインコード退避と同じ方針）。
+        // 実際のレンダリングは math.js（KaTeX）が data-math を読んで後から行う。
+        const mathSpans = [];
+        html = html.replace(/\$([^$\n]+)\$/g, function (_m, expr) {
+            mathSpans.push('<span class="math-inline" data-math="' + escapeAttr(expr) +
+                '" contenteditable="false"></span>');
+            return '\u0002' + (mathSpans.length - 1) + '\u0002';
         });
 
         // リンク
@@ -77,6 +119,16 @@ window.MarkdownModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避した数式を復元（中身は整形しない。KaTeXでのレンダリングは math.js が行う）
+        html = html.replace(/\u0002(\d+)\u0002/g, function (_m, i) {
+            return mathSpans[Number(i)];
+        });
+
+        // 退避した \$ をリテラルのドル記号として復元（この時点なら数式判定は済んでいる）
+        html = html.replace(/\u0001(\d+)\u0001/g, function (_m, i) {
+            return escapedDollars[Number(i)];
+        });
 
         // 退避したインラインコードを <code> として復元（中身は整形しない）
         html = html.replace(/\u0000(\d+)\u0000/g, function (_m, i) {
@@ -328,6 +380,27 @@ window.MarkdownModule = (function() {
                 continue;
             }
 
+            // --- ブロック数式（$$ ... $$） ---
+            // 1行完結（`$$ x $$`）と複数行（`$$` で開いて `$$` で閉じる）の両方に対応。
+            // コードブロックと同じく中身は一切インライン整形せず、生の式を data-math に持つ。
+            const inlineBlockMath = /^\$\$(.+?)\$\$\s*$/.exec(line);
+            if (inlineBlockMath) {
+                out.push(buildMathBlockHtml(inlineBlockMath[1].trim()));
+                i++;
+                continue;
+            }
+            if (/^\$\$\s*$/.test(line)) {
+                const mathLines = [];
+                i++;
+                while (i < lines.length && !/^\$\$\s*$/.test(lines[i])) {
+                    mathLines.push(lines[i]);
+                    i++;
+                }
+                i++; // 閉じの `$$`（無い場合は終端到達）をスキップ
+                out.push(buildMathBlockHtml(mathLines.join('\n')));
+                continue;
+            }
+
             // --- 空行 ---
             if (!line.trim()) {
                 i++;
@@ -462,7 +535,11 @@ window.MarkdownModule = (function() {
      */
     function serializeInline(node) {
         if (node.nodeType === Node.TEXT_NODE) {
-            return stripZeroWidth(node.textContent);
+            // 素の $ は数式の開始として解釈されるため、テキストとしての $ は
+            // \$ へエスケープして書き戻す（次に読み込んだとき数式に化けないように）。
+            // インラインコード（CODE）・コードブロック（PRE）は textContent を
+            // 直接使う別分岐のため、この置換の影響を受けない。
+            return stripZeroWidth(node.textContent).replace(/\$/g, '\\$');
         }
         if (node.nodeType !== Node.ELEMENT_NODE) {
             return '';
@@ -502,6 +579,11 @@ window.MarkdownModule = (function() {
                 return `[${serializeInlineChildren(node)}](${href})`;
             }
             case 'SPAN':
+                // インライン数式は data-math の生の式から `$...$` を復元する
+                // （KaTeXがレンダリングしたDOMではなく、保持した元の式が唯一の正）
+                if (node.classList.contains('math-inline')) {
+                    return '$' + (node.getAttribute('data-math') || '') + '$';
+                }
                 // 見出しの#マーク表示用スパンは見出しシリアライズ側で再生成する
                 if (node.classList.contains('heading-hash')) {
                     return '';
@@ -709,6 +791,10 @@ window.MarkdownModule = (function() {
                 if (el.classList && el.classList.contains('markdown-alert')) {
                     return serializeAlert(el);
                 }
+                // ブロック数式は data-math の生の式から `$$ ... $$` を復元
+                if (el.classList && el.classList.contains('math-block')) {
+                    return '$$\n' + (el.getAttribute('data-math') || '') + '\n$$\n\n';
+                }
                 // ブロック子要素を含む場合はコンテナとして再帰
                 const hasBlockChild = Array.from(el.children).some(c => BLOCK_TAGS.has(c.tagName));
                 if (hasBlockChild) {
@@ -881,6 +967,12 @@ window.MarkdownModule = (function() {
     return {
         markdownToHtml: markdownToHtml,
         htmlToMarkdown: htmlToMarkdown,
+        // 生Markdown表示（commands.syncRawMarkdownToCaret）が、任意のインライン要素
+        // ⇔ 生Markdown の相互変換に使う。読込時の変換と同じ関数を共有することで、
+        // 展開／復帰の結果が通常のレンダリング結果と食い違わないことを保証する。
+        serializeInline: serializeInline,
+        convertInline: convertInline,
+        escapeHtml: escapeHtml,
         convertTableToMarkdown: convertTableToMarkdown,
         getCleanHtmlFromEditor: getCleanHtmlFromEditor,
         slugify: slugify,
