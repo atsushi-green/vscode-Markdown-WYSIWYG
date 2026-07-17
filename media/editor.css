@@ -186,6 +186,14 @@ body {
     opacity: 0.75;
 }
 
+/* ブロック数式（`$$ ... $$`）の生Markdown表示。複数行の式を折り返さず改行のまま
+   見せる（編集した内容がそのままMarkdownへ書き戻る）。 */
+#editor .raw-markdown.raw-math-block {
+    display: block;
+    white-space: pre-wrap;
+    margin: 1em 0;
+}
+
 #editor p {
     margin: 1em 0;
 }

@@ -529,6 +529,27 @@ suite('MarkdownModule', () => {
             const back = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(md)).trim();
             assert.strictEqual(back, md);
         });
+
+        test('生Markdown表示中のインライン数式span（`$式$`）は $ をエスケープせず直列化する', () => {
+            // 生Markdown表示（commands.expandMathToRaw）の展開中に書き戻しても
+            // 展開前と同一のMarkdownになること（$ が \$ へ化けない）
+            const html = '<p><span class="raw-markdown">$\\alpha^2$</span></p>';
+            const back = env.markdown.htmlToMarkdown(html).trim();
+            assert.strictEqual(back, '$\\alpha^2$');
+        });
+
+        test('生Markdown表示中のブロック数式div（`$$式$$`）は $ をエスケープせず直列化する', () => {
+            const html = '<div class="raw-markdown raw-math-block">$$\nx = \\frac{1}{2}\n$$</div>';
+            const back = env.markdown.htmlToMarkdown(html).trim();
+            assert.strictEqual(back, '$$\nx = \\frac{1}{2}\n$$');
+        });
+
+        test('ブロック数式divの改行が<br>で表現されていても直列化で改行に戻る', () => {
+            // contenteditableは改行を <br> で表すことがあるため、それも改行として扱う
+            const html = '<div class="raw-markdown raw-math-block">$$<br>x^2<br>$$</div>';
+            const back = env.markdown.htmlToMarkdown(html).trim();
+            assert.strictEqual(back, '$$\nx^2\n$$');
+        });
     });
 
     suite('ラウンドトリップ（Markdown → HTML → Markdown）', () => {

@@ -531,6 +531,31 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * 生Markdown表示中の要素（`span.raw-markdown` / `div.raw-markdown`）から
+     * 生のMarkdownテキストを取り出す。中身は既に生の記法テキストそのもののため、
+     * `$` のエスケープは行わない（そのまま書き戻せば展開前と同一のMarkdownになる）。
+     * contenteditableが改行に対して生成する `<br>` や行divは改行へ戻す
+     * （ブロック数式 `$$ ... $$` の複数行編集を保つため）。
+     * リンク・強調（インライン）・数式（インライン／ブロック）で共有する。
+     */
+    function rawMarkdownText(el) {
+        let text = '';
+        el.childNodes.forEach(node => {
+            if (node.nodeType === Node.TEXT_NODE) {
+                text += stripZeroWidth(node.textContent);
+            } else if (node.nodeName === 'BR') {
+                text += '\n';
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                if (text && !text.endsWith('\n')) {
+                    text += '\n';
+                }
+                text += rawMarkdownText(node);
+            }
+        });
+        return text;
+    }
+
+    /**
      * 単一ノードをインラインMarkdownへ直列化
      */
     function serializeInline(node) {
@@ -579,6 +604,12 @@ window.MarkdownModule = (function() {
                 return `[${serializeInlineChildren(node)}](${href})`;
             }
             case 'SPAN':
+                // 生Markdown表示中のspan（リンク・強調・インライン数式の展開中）は
+                // 中身の生テキストをそのまま返す（`$` もエスケープしない）。
+                // これで展開の前後でMarkdownが変わらない（往復に非影響）。
+                if (node.classList.contains('raw-markdown')) {
+                    return rawMarkdownText(node);
+                }
                 // インライン数式は data-math の生の式から `$...$` を復元する
                 // （KaTeXがレンダリングしたDOMではなく、保持した元の式が唯一の正）
                 if (node.classList.contains('math-inline')) {
@@ -787,6 +818,12 @@ window.MarkdownModule = (function() {
                 return inner.trim() ? inner + '\n\n' : '\n';
             }
             case 'DIV': {
+                // 生Markdown表示中のブロック（ブロック数式 `$$ ... $$` の展開中）は
+                // 中身の生テキストをそのまま返す（`$` もエスケープしない）。
+                if (el.classList && el.classList.contains('raw-markdown')) {
+                    const raw = rawMarkdownText(el);
+                    return raw.trim() ? raw + '\n\n' : '';
+                }
                 // GitHubアラートのdivは `> [!TYPE]` 形式の引用へ復元
                 if (el.classList && el.classList.contains('markdown-alert')) {
                     return serializeAlert(el);
@@ -972,6 +1009,11 @@ window.MarkdownModule = (function() {
         // 展開／復帰の結果が通常のレンダリング結果と食い違わないことを保証する。
         serializeInline: serializeInline,
         convertInline: convertInline,
+        // ブロック数式の生Markdown表示（commands.js）が、復帰時に math-block
+        // コンテナを再生成するために使う（読込時の変換と同じ関数を共有する）。
+        buildMathBlockHtml: buildMathBlockHtml,
+        // 生Markdown表示中の要素から生テキストを取り出す（<br>→改行）。
+        rawMarkdownText: rawMarkdownText,
         escapeHtml: escapeHtml,
         convertTableToMarkdown: convertTableToMarkdown,
         getCleanHtmlFromEditor: getCleanHtmlFromEditor,

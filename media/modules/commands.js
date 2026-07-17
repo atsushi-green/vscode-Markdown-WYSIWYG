@@ -380,6 +380,15 @@ window.CommandsModule = (function() {
                 copyCodeBlock(copyBtn);
                 return;
             }
+            // 数式（`contenteditable="false"`）はキャレットが内側へ入れないため、
+            // クリックで生Markdown表示（`$...$` / `$$...$$`）へ展開して編集可能にする。
+            const mathEl = target.closest('.math-inline, .math-block');
+            if (mathEl) {
+                e.preventDefault();
+                e.stopPropagation();
+                handleMathClick(mathEl);
+                return;
+            }
             // 通常クリックでリンク先へ飛ばないよう既定遷移を抑止する
             // （キャレット設置はmousedownで済んでいるため影響しない）。
             if (target.closest('a[href]')) {
@@ -1108,9 +1117,34 @@ window.CommandsModule = (function() {
      */
     const RAW_MARKDOWN_CLASS = 'raw-markdown';
 
-    /** 生Markdown表示中のspanか */
+    /** 生Markdown表示中の要素（span/div）か */
     function isRawMarkdownSpan(el) {
         return !!(el.classList && el.classList.contains(RAW_MARKDOWN_CLASS));
+    }
+
+    /** ブロック数式を生Markdown表示中のdivに付けるクラス（インラインspanと復帰処理を分ける） */
+    const RAW_MATH_BLOCK_CLASS = 'raw-math-block';
+
+    /** 数式コンテナ（インライン `$...$` / ブロック `$$...$$`）か */
+    function isMathContainer(el) {
+        return !!(el.classList &&
+            (el.classList.contains('math-inline') || el.classList.contains('math-block')));
+    }
+
+    /** レンダリング済みの数式を（MathModuleがあれば）再描画する */
+    function renderMath(root) {
+        if (window.MathModule && typeof window.MathModule.render === 'function') {
+            window.MathModule.render(root);
+        }
+    }
+
+    /**
+     * 生Markdownのブロック数式（`$$ ... $$`）をパースして生の式を返す（不成立なら null）。
+     * 開き／閉じの `$$` の内側を式として取り出す（前後の空白・改行はKaTeX同様に無視）。
+     */
+    function parseRawBlockMath(text) {
+        const m = /^\s*\$\$([\s\S]*?)\$\$\s*$/.exec(text);
+        return m ? m[1].trim() : null;
     }
 
     /**
@@ -1168,14 +1202,75 @@ window.CommandsModule = (function() {
      * 記法が壊れていれば convertInline が変換しない＝プレーンテキストのまま残り、
      * 以後は通常の入力として再変換され得る。
      */
-    function collapseRawMarkdown(span) {
-        const holder = document.createElement('span');
-        holder.innerHTML = markdown.convertInline(markdown.escapeHtml(span.textContent));
-        const parent = span.parentNode;
-        while (holder.firstChild) {
-            parent.insertBefore(holder.firstChild, span);
+    function collapseRawMarkdown(el) {
+        const parent = el.parentNode;
+        const text = markdown.rawMarkdownText(el);
+
+        // ブロック数式（`$$ ... $$`）は math-block コンテナへ戻して再レンダリングする。
+        // インライン記法と違い convertInline は `$$` を解釈しないため、専用に復元する。
+        if (el.classList.contains(RAW_MATH_BLOCK_CLASS)) {
+            const expr = parseRawBlockMath(text);
+            const holder = document.createElement('div');
+            // 記法が壊れていれば内容を失わないよう通常のMarkdown変換に委ねる
+            holder.innerHTML = expr !== null
+                ? markdown.buildMathBlockHtml(expr)
+                : markdown.markdownToHtml(text);
+            while (holder.firstChild) {
+                parent.insertBefore(holder.firstChild, el);
+            }
+            parent.removeChild(el);
+            renderMath(parent);
+            return;
         }
-        parent.removeChild(span);
+
+        // インライン（リンク・強調・インライン数式 `$...$`）は convertInline で戻す。
+        // `$...$` は convertInline が math-inline コンテナへ変換するため、renderMath で描画する。
+        const holder = document.createElement('span');
+        holder.innerHTML = markdown.convertInline(markdown.escapeHtml(text));
+        while (holder.firstChild) {
+            parent.insertBefore(holder.firstChild, el);
+        }
+        parent.removeChild(el);
+        renderMath(parent);
+    }
+
+    /**
+     * 数式コンテナ（`contenteditable="false"`）を生Markdown表示へ展開する。
+     * - インライン数式: `<span class="raw-markdown">$式$</span>`
+     * - ブロック数式: `<div class="raw-markdown raw-math-block">$$\n式\n$$</div>`
+     * リンク・強調と同じ `raw-markdown` クラスのため、再変換抑止（`utils.shouldSkipInline`）と
+     * キャレット離脱時の復帰（`syncRawMarkdownToCaret` → `collapseRawMarkdown`）を共有する。
+     * 数式コンテナはキャレットが内側へ入れない（`contenteditable="false"`）ため、
+     * 展開のトリガーだけはクリック（`handleMathClick`）で明示的に行う。
+     * 返り値: 展開後の raw-markdown 要素
+     */
+    function expandMathToRaw(el) {
+        const isBlock = el.classList.contains('math-block');
+        const expr = el.getAttribute('data-math') || '';
+        let raw;
+        if (isBlock) {
+            raw = document.createElement('div');
+            raw.className = RAW_MARKDOWN_CLASS + ' ' + RAW_MATH_BLOCK_CLASS;
+            raw.textContent = '$$\n' + expr + '\n$$';
+        } else {
+            raw = document.createElement('span');
+            raw.className = RAW_MARKDOWN_CLASS;
+            raw.textContent = '$' + expr + '$';
+        }
+        el.parentNode.replaceChild(raw, el);
+        return raw;
+    }
+
+    /**
+     * 数式コンテナのクリックで生Markdown表示へ展開し、式の内側へキャレットを置く。
+     * 開き記法（インラインは `$`・ブロックは `$$\n`）の直後へ置くことで、
+     * 続けて入力する文字が式の一部になる（記法の外へ出したいときはキャレットを動かす）。
+     * 展開後はキャレット離脱で `syncRawMarkdownToCaret` がレンダリング表示へ戻す。
+     */
+    function handleMathClick(el) {
+        const isBlock = el.classList.contains('math-block');
+        const raw = expandMathToRaw(el);
+        utils.placeCaretAt(raw, isBlock ? 3 : 1);
     }
 
     /**
@@ -1202,7 +1297,7 @@ window.CommandsModule = (function() {
         // キャレットが外れた展開中のspanを戻す（エディタ外へフォーカスが移った場合も含む）
         let changed = false;
         Array.prototype.forEach.call(
-            state.editor.querySelectorAll('span.' + RAW_MARKDOWN_CLASS),
+            state.editor.querySelectorAll('.' + RAW_MARKDOWN_CLASS),
             function(span) {
                 if (span !== active) {
                     collapseRawMarkdown(span);
@@ -1936,6 +2031,8 @@ window.CommandsModule = (function() {
         handleBlockquoteEnter: handleBlockquoteEnter,
         handleAlertEnter: handleAlertEnter,
         syncRawMarkdownToCaret: syncRawMarkdownToCaret,
+        expandMathToRaw: expandMathToRaw,
+        handleMathClick: handleMathClick,
         handleLinkClick: handleLinkClick,
         handleTaskListEnter: handleTaskListEnter,
         applyInlineFormatting: applyInlineFormatting,
