@@ -4,7 +4,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
-| 2026-07-18 | ブロック数式を右クリックでPNG画像としてクリップボードにコピー。`math.js` に自前コンテキストメニュー（動的生成・`markdownEditor.ts` 非変更）＋`html2canvas` での `math-block`→PNG化（`document.fonts.ready` 待機）を追加。CSSは `.mermaid-context-menu` 系と共有。ユーザー要望 | `_______` |
+| 2026-07-18 | ブロック数式を右クリックでPNG画像としてクリップボードにコピー。`math.js` に自前コンテキストメニュー（動的生成・`markdownEditor.ts` 非変更）＋`html2canvas` での `math-block`→PNG化（`document.fonts.ready` 待機）を追加。CSSは `.mermaid-context-menu` 系と共有。ユーザー要望 | `44b4031` |
 | 2026-07-18 | 数式のライブ変換（入力・ペースト時点で即時レンダリング）。`commands.convertInlineText` に `$...$` の分岐を追加し、`markdown.convertInline` と同じ退避順序で `math-inline` コンテナへ変換→入力イベント末尾の `MathModule.render` で描画。閉じ `$` を打つまで非変換で入力途中に壊れない。`data-math` は読込パスと同一（突き合わせテスト有り）。ユーザー要望 | `45d5bc2` |
 | 2026-07-18 | 数式の内側にカーソルがある間、生Markdownを表示する（数式コンテナは `contenteditable="false"` でキャレットが入れないため、クリックで `$...$` / `$$...$$` の生Markdownへ展開＝`commands.handleMathClick`／`expandMathToRaw`。復帰・再変換抑止は既存の `syncRawMarkdownToCaret`／`raw-markdown` クラスを共有し、`collapseRawMarkdown` にブロック数式（`raw-math-block`→`buildMathBlockHtml`＋`MathModule.render`）分岐を追加。直列化は `markdown.rawMarkdownText` で `$` を非エスケープ・`<br>`→改行。ユーザー要望） | `f3426e1` |
 | 2026-07-18 | 強調記法（太字・斜体・取り消し線・下線）とリンクの生Markdown表示（`syncRawMarkdownToCaret` を汎用化・`outermostInlineDecoration`・展開は `serializeInline`／復帰は `convertInline` に委譲・入れ子は最外要素ごと展開） | `7c82d3b` |
