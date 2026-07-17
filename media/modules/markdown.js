@@ -917,6 +917,71 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * ブロックの直列化文字列から、前後の空行だけを取り除いた「本文行の配列」を返す。
+     * 各ブロックは末尾に `\n\n` を付けて直列化されるため、その空行を落として
+     * 実際に本文が占める行だけにする。全て空なら空配列（＝行を占めないブロック）。
+     */
+    function coreLinesOf(blockMarkdown) {
+        const lines = (blockMarkdown || '').replace(/\r\n?/g, '\n').split('\n');
+        let start = 0;
+        let end = lines.length;
+        while (start < end && lines[start].trim() === '') {
+            start++;
+        }
+        while (end > start && lines[end - 1].trim() === '') {
+            end--;
+        }
+        return lines.slice(start, end);
+    }
+
+    /**
+     * WYSIWYGの各トップレベルブロックが、Markdownソースの何行目から始まるかを求める
+     * （行番号表示 2/3 の中核。純粋関数＝DOM非依存でユニットテスト可能）。
+     *
+     * `finalMarkdown` は `htmlToMarkdown` が出力した確定ソース（唯一の変換規則）、
+     * `blockMarkdowns` は各トップレベルブロックを `serializeBlockElement` で直列化した
+     * 文字列の配列（`finalMarkdown` と同じ順序）。
+     *
+     * 各ブロックの本文行は `finalMarkdown` 内に順番どおり連続して現れるため、
+     * 直前に確定した位置（cursor）から前方一致で探して開始行を確定する。こうすることで
+     * ブロック間の空行の畳み込み（`\n{3,}`→`\n\n`）や先頭空行の除去に依存せず、
+     * 同一本文が複数あっても順序で正しく対応づく。
+     *
+     * 戻り値は各ブロックの1始まりの開始行番号の配列。本文を持たない
+     * （空段落など、ソース上に行を占めない）ブロックは `null`。
+     */
+    function computeBlockStartLines(finalMarkdown, blockMarkdowns) {
+        const docLines = (finalMarkdown || '').replace(/\r\n?/g, '\n').split('\n');
+        const starts = [];
+        let cursor = 0; // 次に探索を始める行インデックス（0始まり）
+
+        (blockMarkdowns || []).forEach(function (blockMd) {
+            const core = coreLinesOf(blockMd);
+            if (core.length === 0) {
+                starts.push(null);
+                return;
+            }
+            // cursor 以降で本文先頭行に一致する行を探す
+            let found = -1;
+            for (let i = cursor; i < docLines.length; i++) {
+                if (docLines[i] === core[0]) {
+                    found = i;
+                    break;
+                }
+            }
+            if (found === -1) {
+                // 想定外（入力が不整合）: 行番号を付けずに次へ
+                starts.push(null);
+                return;
+            }
+            starts.push(found + 1); // 1始まり
+            cursor = found + core.length; // 本文行数だけ進める（間の空行は次回スキップ）
+        });
+
+        return starts;
+    }
+
+    /**
      * テーブルHTML（innerHTML文字列）をMarkdownに変換するヘルパー関数
      */
     function convertTableToMarkdown(tableContent) {
@@ -1018,6 +1083,10 @@ window.MarkdownModule = (function() {
         convertTableToMarkdown: convertTableToMarkdown,
         getCleanHtmlFromEditor: getCleanHtmlFromEditor,
         slugify: slugify,
-        buildTocMarkdown: buildTocMarkdown
+        buildTocMarkdown: buildTocMarkdown,
+        // 行番号表示（2/3）: 各トップレベルブロックのソース開始行の対応付け。
+        // UI（3/3）は各ブロックを serializeBlockElement で直列化して渡す。
+        coreLinesOf: coreLinesOf,
+        computeBlockStartLines: computeBlockStartLines
     };
 })();

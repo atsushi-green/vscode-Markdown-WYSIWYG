@@ -786,4 +786,93 @@ suite('MarkdownModule', () => {
             assert.strictEqual(roundTripped.trim(), original.trim());
         });
     });
+
+    // env.markdown が返す配列はjsdom側レルムのため、deepStrictEqualの
+    // プロトタイプ照合に通らない。Node側配列へ移し替えてから比較する。
+    const eqArr = (actual: unknown[], expected: unknown[]) =>
+        assert.deepStrictEqual(Array.prototype.slice.call(actual), expected);
+
+    suite('coreLinesOf（行番号表示2/3）', () => {
+        test('見出し・段落は末尾の空行を落として本文行だけ返す', () => {
+            eqArr(env.markdown.coreLinesOf('# 見出し\n\n'), ['# 見出し']);
+            eqArr(env.markdown.coreLinesOf('para1\n\n'), ['para1']);
+        });
+
+        test('複数行ブロック（コードフェンス）は本文行をすべて返す', () => {
+            eqArr(env.markdown.coreLinesOf('```\na\nb\n```\n\n'), ['```', 'a', 'b', '```']);
+        });
+
+        test('前後の空行を落とすが本文中の空行は保つ', () => {
+            eqArr(env.markdown.coreLinesOf('\nl1\n\nl2\n\n'), ['l1', '', 'l2']);
+        });
+
+        test('空だけのブロックは空配列（行を占めない）', () => {
+            eqArr(env.markdown.coreLinesOf('\n'), []);
+            eqArr(env.markdown.coreLinesOf(''), []);
+        });
+    });
+
+    suite('computeBlockStartLines（行番号表示2/3）', () => {
+        test('段落2つは [1, 3]（間に空行1つ）', () => {
+            const final = 'para1\n\npara2\n';
+            const blocks = ['para1\n\n', 'para2\n\n'];
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, 3]);
+        });
+
+        test('見出し＋段落は [1, 3]', () => {
+            const final = '# H\n\npara\n';
+            const blocks = ['# H\n\n', 'para\n\n'];
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, 3]);
+        });
+
+        test('複数行のコードブロックの次の段落は空行分ずれる', () => {
+            const final = '```\na\nb\nc\n```\n\npara\n';
+            const blocks = ['```\na\nb\nc\n```\n\n', 'para\n\n'];
+            // コードは1〜5行目、6行目は空行、段落は7行目
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, 7]);
+        });
+
+        test('本文を持たない空ブロックは null（行を占めない）', () => {
+            const final = 'para\n\np2\n';
+            const blocks = ['para\n\n', '\n', 'p2\n\n'];
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, null, 3]);
+        });
+
+        test('同一本文の段落が並んでも順序（cursor前進）で正しく対応づく', () => {
+            const final = 'foo\n\nfoo\n';
+            const blocks = ['foo\n\n', 'foo\n\n'];
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, 3]);
+        });
+
+        test('実DOM経由: markdownToHtml→各ブロック直列化→開始行が本文行と一致する', () => {
+            const src = '# 見出し\n\n段落A\n\n```\nx\ny\n```\n\n段落B';
+            const html = env.markdown.markdownToHtml(src);
+            const editor = env.document.createElement('div');
+            editor.innerHTML = html;
+
+            const finalMd = env.markdown.htmlToMarkdown(html);
+            // 各トップレベルブロックを個別に直列化（serializeBlockElement相当）
+            const blocks = Array.from(editor.children).map(
+                (c: Element) => env.markdown.htmlToMarkdown(c.outerHTML)
+            );
+
+            const starts = env.markdown.computeBlockStartLines(finalMd, blocks);
+            const docLines = finalMd.split('\n');
+
+            assert.strictEqual(starts[0], 1, finalMd);
+            // 返った各開始行には、そのブロックの本文先頭行が実際に存在する
+            starts.forEach((line: number | null, i: number) => {
+                if (line === null) {
+                    return;
+                }
+                const core = env.markdown.coreLinesOf(blocks[i]);
+                assert.strictEqual(docLines[line - 1], core[0], `block ${i}: ${finalMd}`);
+            });
+            // 開始行は単調増加（順序が保たれる）
+            const nums = starts.filter((n: number | null) => n !== null) as number[];
+            for (let i = 1; i < nums.length; i++) {
+                assert.ok(nums[i] > nums[i - 1], `not increasing: ${nums}`);
+            }
+        });
+    });
 });

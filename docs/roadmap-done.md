@@ -4,6 +4,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
+| 2026-07-18 | 行番号表示 (2/3): WYSIWYG側「ブロック→ソース開始行」対応付け。純粋関数 `markdown.computeBlockStartLines(finalMarkdown, blockMarkdowns)`＋補助 `coreLinesOf` を追加。各ブロックの本文先頭行を確定ソース内から前方一致で探し1始まりの開始行を返す（空ブロックは `null`・空行畳み込みに非依存）。DOM非依存でユニットテスト（元L項目の分割(2/3)・UIは(3/3)） | `_______` |
 | 2026-07-18 | 行番号表示 (1/3): Rawモード（textarea）の行番号ガター。左端にソース行番号を表示、行を揃えるため textarea を `white-space: pre`（折り返しオフ）へ変更。行数/番号列は純粋関数 `utils.countLines`/`buildLineNumberText`（ユニットテスト）、ガターは `transform` で縦スクロール追従。UIは `#rawEditor` をラッパーで包む動的生成で `markdownEditor.ts` 非変更。ユーザー要望（元L項目の分割(1/3)） | `fcf630e` |
 | 2026-07-18 | ブロック数式を右クリックでPNG画像としてクリップボードにコピー。`math.js` に自前コンテキストメニュー（動的生成・`markdownEditor.ts` 非変更）＋`html2canvas` での `math-block`→PNG化（`document.fonts.ready` 待機）を追加。CSSは `.mermaid-context-menu` 系と共有。ユーザー要望 | `44b4031` |
 | 2026-07-18 | 数式のライブ変換（入力・ペースト時点で即時レンダリング）。`commands.convertInlineText` に `$...$` の分岐を追加し、`markdown.convertInline` と同じ退避順序で `math-inline` コンテナへ変換→入力イベント末尾の `MathModule.render` で描画。閉じ `$` を打つまで非変換で入力途中に壊れない。`data-math` は読込パスと同一（突き合わせテスト有り）。ユーザー要望 | `45d5bc2` |
