@@ -967,6 +967,12 @@ window.MarkdownModule = (function() {
     return {
         markdownToHtml: markdownToHtml,
         htmlToMarkdown: htmlToMarkdown,
+        // 生Markdown表示（commands.syncRawMarkdownToCaret）が、任意のインライン要素
+        // ⇔ 生Markdown の相互変換に使う。読込時の変換と同じ関数を共有することで、
+        // 展開／復帰の結果が通常のレンダリング結果と食い違わないことを保証する。
+        serializeInline: serializeInline,
+        convertInline: convertInline,
+        escapeHtml: escapeHtml,
         convertTableToMarkdown: convertTableToMarkdown,
         getCleanHtmlFromEditor: getCleanHtmlFromEditor,
         slugify: slugify,

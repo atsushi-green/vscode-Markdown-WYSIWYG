@@ -1123,39 +1123,70 @@ window.CommandsModule = (function() {
     }
 
     /**
-     * リンク（<a>）を生Markdown記法 `[text](url)` のテキストへ展開し、そのspanを返す。
+     * 生Markdown表示の対象となるインライン要素のタグ。
+     * リンクに加え、強調系（太字・斜体・取り消し線・下線）を対象とする。
+     * `CODE` は含めない（インラインコードの中身は記法として解釈しないため）。
      */
-    function expandLinkToRaw(link) {
+    const RAW_INLINE_TAGS = new Set(['A', 'STRONG', 'B', 'EM', 'I', 'DEL', 'S', 'STRIKE', 'U']);
+
+    /**
+     * 指定ノードを含む最も外側のインライン装飾要素を返す（無ければ null）。
+     * `***text***`（`<strong><em>`）や `[**text**](url)` のような入れ子では、
+     * 内側だけを展開すると記法が壊れる（`**text**` だけ生に戻すと `***` が復元できない）ため、
+     * 常に最も外側の要素ごと展開する。引用の `outermostBlockquote` と同じ考え方。
+     */
+    function outermostInlineDecoration(node) {
+        let result = null;
+        let current = node;
+        while (current && current !== state.editor) {
+            if (current.nodeType === Node.ELEMENT_NODE &&
+                RAW_INLINE_TAGS.has(current.tagName)) {
+                result = current;
+            }
+            current = current.parentNode;
+        }
+        return result;
+    }
+
+    /**
+     * インライン装飾要素を生Markdown記法のテキストへ展開し、そのspanを返す。
+     * 記法の組み立ては `markdown.serializeInline`（htmlToMarkdownと同じ関数）に任せるため、
+     * リンク・太字・斜体・取り消し線・下線とその入れ子が同じ規則で生Markdownになる。
+     */
+    function expandToRaw(el) {
         const span = document.createElement('span');
         span.className = RAW_MARKDOWN_CLASS;
-        span.textContent = '[' + link.textContent + '](' + (link.getAttribute('href') || '') + ')';
-        link.parentNode.replaceChild(span, link);
+        span.textContent = markdown.serializeInline(el);
+        el.parentNode.replaceChild(span, el);
         return span;
     }
 
     /**
      * 生Markdown表示中のspanをレンダリング表示へ戻す。
-     * 記法として成立していれば対応する要素（リンク）へ、
-     * 壊れていればプレーンテキストへ戻す（以後は通常の入力として再変換され得る）。
+     * 記法の解釈は `markdown.convertInline`（markdownToHtmlと同じ関数）に任せるため、
+     * 復帰後の表示は通常のレンダリング結果と必ず一致する。
+     * 記法が壊れていれば convertInline が変換しない＝プレーンテキストのまま残り、
+     * 以後は通常の入力として再変換され得る。
      */
     function collapseRawMarkdown(span) {
-        const text = span.textContent;
-        const link = parseRawLink(text);
-        if (link) {
-            const a = document.createElement('a');
-            a.setAttribute('href', link.href);
-            a.textContent = link.text;
-            span.parentNode.replaceChild(a, span);
-            return;
+        const holder = document.createElement('span');
+        holder.innerHTML = markdown.convertInline(markdown.escapeHtml(span.textContent));
+        const parent = span.parentNode;
+        while (holder.firstChild) {
+            parent.insertBefore(holder.firstChild, span);
         }
-        span.parentNode.replaceChild(document.createTextNode(text), span);
+        parent.removeChild(span);
     }
 
     /**
      * キャレット位置に応じて生Markdown表示を切り替える（`selectionchange` から呼ぶ）。
-     * - キャレットがリンクの内側のどこかにある間: そのリンクを `[text](url)` の生テキストへ展開し、
-     *   URLやリンクテキストを直接修正できるようにする
+     * - キャレットがインライン装飾（リンク `[](…)`・太字 `**`・斜体 `*`・取り消し線 `~~`・
+     *   下線 `++`）の内側のどこかにある間: その要素を生Markdownのテキストへ展開し、
+     *   記法ごと直接修正できるようにする
      * - キャレットが展開中のspanの外へ出た時点: レンダリング表示へ戻して確定する
+     * 展開中は記法が見えているため、次に入力する文字を装飾の内側／外側どちらに含めるかは
+     * キャレットを記法の内側／外側どちらへ置くかで示せる（例: `**太字**` の `**` より内側に
+     * 置けば装飾が続き、外側へ置き直せば装飾から抜ける）。
      * 選択範囲がある場合も開始位置（`startContainer`）の所属で判定するため、
      * 展開中のテキストをドラッグ選択して編集できる。
      * 戻り値: DOMを変更した場合 true
@@ -1184,17 +1215,18 @@ window.CommandsModule = (function() {
             return changed;
         }
 
-        const link = utils.findAncestor(start, function(el) {
-            return el.tagName === 'A';
-        });
-        if (!link) {
+        const target = outermostInlineDecoration(start);
+        if (!target) {
             return changed;
         }
 
-        // リンクテキスト内の相対位置を保つ（先頭に `[` が付く分だけ後ろへずらす）
-        const offset = utils.getTextBeforeCaret(link, selection.getRangeAt(0)).length;
-        const span = expandLinkToRaw(link);
-        utils.placeCaretAt(span, offset + 1);
+        // 装飾内のテキストでの相対位置を保つ。展開後は先頭に記法（`**` や `[`）が付くため、
+        // 生Markdown内での本文の開始位置（＝記法の文字数）だけキャレットを後ろへずらす。
+        const offset = utils.getTextBeforeCaret(target, selection.getRangeAt(0)).length;
+        const text = target.textContent;
+        const span = expandToRaw(target);
+        const prefix = text ? Math.max(span.textContent.indexOf(text), 0) : 0;
+        utils.placeCaretAt(span, offset + prefix);
         return true;
     }
 

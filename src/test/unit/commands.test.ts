@@ -799,6 +799,125 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('syncRawMarkdownToCaret（強調記法の生Markdown表示）', () => {
+        /** 指定ノードの指定オフセットにキャレットを置く */
+        function caretIn(node: Node, offset: number): void {
+            const range = env.document.createRange();
+            range.setStart(node, offset);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        /** 生Markdown表示中のspanを返す */
+        function rawSpan(): HTMLElement | null {
+            return env.editor.querySelector('span.raw-markdown');
+        }
+        /** 装飾要素の中のテキストノードにキャレットを置く（深い入れ子は最深のテキストへ） */
+        function caretInDeepest(root: HTMLElement, offset: number): void {
+            let node: Node = root;
+            while (node.firstChild) { node = node.firstChild; }
+            caretIn(node, offset);
+        }
+
+        test('太字（strong）の内側にキャレットがあると `**...**` へ展開される', () => {
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            const changed = env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(changed, true, env.editor.innerHTML);
+            assert.strictEqual(rawSpan()?.textContent, '**太字**', env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+        });
+
+        test('取り消し線（del）は `~~...~~` へ展開される', () => {
+            env.editor.innerHTML = '<p><del>消し</del></p>';
+            caretInDeepest(env.editor.querySelector('del') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(rawSpan()?.textContent, '~~消し~~', env.editor.innerHTML);
+        });
+
+        test('下線（u）は `++...++` へ展開される', () => {
+            env.editor.innerHTML = '<p><u>下線</u></p>';
+            caretInDeepest(env.editor.querySelector('u') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(rawSpan()?.textContent, '++下線++', env.editor.innerHTML);
+        });
+
+        test('斜体（em）は `*...*` へ展開される', () => {
+            env.editor.innerHTML = '<p><em>斜体</em></p>';
+            caretInDeepest(env.editor.querySelector('em') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(rawSpan()?.textContent, '*斜体*', env.editor.innerHTML);
+        });
+
+        test('入れ子（太字斜体 ***）は最も外側ごと `***...***` へ展開される', () => {
+            env.editor.innerHTML = '<p><strong><em>強</em></strong></p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            // 内側のemだけ展開すると *** が壊れるため、strongごと展開されること
+            assert.strictEqual(rawSpan()?.textContent, '***強***', env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+        });
+
+        test('展開中の記法は walkInline に再変換されない（生表示が維持される）', () => {
+            env.editor.innerHTML = '<p><strong>太字</strong></p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            env.commands.applyInlineFormatting();
+            assert.ok(rawSpan(), env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+        });
+
+        test('キャレットが外れると装飾表示へ戻る', () => {
+            env.editor.innerHTML = '<p><strong>太字</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            const changed = env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(changed, true, env.editor.innerHTML);
+            assert.strictEqual(rawSpan(), null, env.editor.innerHTML);
+            const strong = env.editor.querySelector('strong');
+            assert.ok(strong, env.editor.innerHTML);
+            assert.strictEqual(strong!.textContent, '太字', env.editor.innerHTML);
+        });
+
+        test('展開中に記法を編集すると復帰時に反映される（** を ~~ へ）', () => {
+            env.editor.innerHTML = '<p><strong>語</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            rawSpan()!.textContent = '~~語~~';
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('del'), env.editor.innerHTML);
+        });
+
+        test('記法が壊れたまま外れた場合はプレーンテキストとして残す', () => {
+            env.editor.innerHTML = '<p><strong>語</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            rawSpan()!.textContent = '**語'; // 閉じ ** を消した状態
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+            assert.strictEqual(rawSpan(), null, env.editor.innerHTML);
+            assert.ok(env.editor.textContent!.includes('**語'), env.editor.innerHTML);
+        });
+
+        test('展開中の太字が往復しても同じMarkdownになる', () => {
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            const before = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            const after = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(after, before, JSON.stringify(after));
+            assert.ok(/前\*\*太字\*\*後/.test(after), JSON.stringify(after));
+        });
+    });
+
     suite('syncRawMarkdownToCaret（リンク上の生Markdown表示）', () => {
         /** 指定ノードの指定オフセットにキャレットを置く */
         function caretIn(node: Node, offset: number): void {
