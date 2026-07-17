@@ -49,7 +49,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
-| 2026-07-18 | 数式の内側にカーソルがある間、生Markdownを表示する（数式コンテナは `contenteditable="false"` でキャレットが入れないため、クリックで `$...$` / `$$...$$` の生Markdownへ展開＝`commands.handleMathClick`／`expandMathToRaw`。復帰・再変換抑止は既存の `syncRawMarkdownToCaret`／`raw-markdown` クラスを共有し、`collapseRawMarkdown` にブロック数式（`raw-math-block`→`buildMathBlockHtml`＋`MathModule.render`）分岐を追加。直列化は `markdown.rawMarkdownText` で `$` を非エスケープ・`<br>`→改行。ユーザー要望） | `PENDING` |
+| 2026-07-18 | 数式の内側にカーソルがある間、生Markdownを表示する（数式コンテナは `contenteditable="false"` でキャレットが入れないため、クリックで `$...$` / `$$...$$` の生Markdownへ展開＝`commands.handleMathClick`／`expandMathToRaw`。復帰・再変換抑止は既存の `syncRawMarkdownToCaret`／`raw-markdown` クラスを共有し、`collapseRawMarkdown` にブロック数式（`raw-math-block`→`buildMathBlockHtml`＋`MathModule.render`）分岐を追加。直列化は `markdown.rawMarkdownText` で `$` を非エスケープ・`<br>`→改行。ユーザー要望） | `f3426e1` |
 | 2026-07-18 | 強調記法（太字・斜体・取り消し線・下線）とリンクの生Markdown表示（`syncRawMarkdownToCaret` を汎用化・`outermostInlineDecoration`・展開は `serializeInline`／復帰は `convertInline` に委譲・入れ子は最外要素ごと展開） | `7c82d3b` |
 | 2026-07-17 | 数式（インライン `$...$` / ブロック `$$...$$`）の表示・双方向変換（KaTeXを `media/katex/` へ同梱・生の式は `data-math` に保持・描画は `math.js`・`\$` エスケープ対応。ユーザー要望） | `fd2a368` |
 | 2026-07-17 | エディタ右上の「Markdown: WYSIWYGエディタで開く」ボタンの削除（`menus.editor/title` のエントリを削除。コマンド定義とコマンドパレットは維持。ユーザー要望） | `4fb531b` |
