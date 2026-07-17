@@ -120,6 +120,74 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('インライン数式のライブ変換（$...$ の入力）', () => {
+        /** math-inline コンテナの data-math（＝保持している生の式）を返す */
+        function mathOf(): string | null {
+            return env.editor.querySelector('.math-inline')?.getAttribute('data-math') ?? null;
+        }
+
+        test('$x$ を入力すると math-inline コンテナへ変換される', () => {
+            env.editor.innerHTML = '<p>式 $x^2$ です</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const span = env.editor.querySelector('.math-inline');
+            assert.ok(span, env.editor.innerHTML);
+            assert.strictEqual(mathOf(), 'x^2', env.editor.innerHTML);
+            // KaTeX描画前なのでコンテナは空・編集不可
+            assert.strictEqual(span!.getAttribute('contenteditable'), 'false');
+            assert.strictEqual(span!.textContent, '');
+        });
+
+        test('数式の中身の _ や ^* は強調・斜体へ化けない', () => {
+            env.editor.innerHTML = '<p>$a_1 + b_2$ と $\\alpha^*$</p>';
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('em'), null, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+            assert.strictEqual(mathOf(), 'a_1 + b_2', env.editor.innerHTML);
+        });
+
+        test('閉じ `$` が無いうちは変換されない（入力途中で式が壊れない）', () => {
+            env.editor.innerHTML = '<p>入力中 $x^2</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('.math-inline'), null, env.editor.innerHTML);
+        });
+
+        test('エスケープした \\$ は数式にならずリテラルの $ になる', () => {
+            env.editor.innerHTML = '<p>価格は \\$100 と \\$200 です</p>';
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('.math-inline'), null, env.editor.innerHTML);
+            assert.ok(env.editor.textContent!.includes('価格は $100 と $200 です'), env.editor.innerHTML);
+        });
+
+        test('インラインコード内の $x$ は数式にならずコードに保持される', () => {
+            env.editor.innerHTML = '<p>`$x$` はコード</p>';
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('.math-inline'), null, env.editor.innerHTML);
+            const code = env.editor.querySelector('code');
+            assert.ok(code, env.editor.innerHTML);
+            assert.strictEqual(code!.textContent, '$x$');
+        });
+
+        test('式に含まれるダブルクォートが属性を壊さない', () => {
+            env.editor.innerHTML = '<p>$\\text{"x"}$</p>';
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(mathOf(), '\\text{"x"}', env.editor.innerHTML);
+        });
+
+        test('markdownToHtml と同じ data-math を生成する（読込時とライブ変換の一致）', () => {
+            const expr = '\\alpha + \\beta';
+            env.editor.innerHTML = `<p>$${expr}$</p>`;
+            env.commands.applyInlineFormatting();
+            const live = mathOf();
+            // 読込パス（markdownToHtml）の data-math と突き合わせる
+            const div = env.document.createElement('div');
+            div.innerHTML = env.markdown.markdownToHtml(`$${expr}$`);
+            const loaded = div.querySelector('.math-inline')?.getAttribute('data-math') ?? null;
+            assert.strictEqual(live, loaded, `live=${live} loaded=${loaded}`);
+        });
+    });
+
     suite('handleHorizontalRule', () => {
         /** エディタに1ブロック置き、キャレットをその先頭に置く */
         function setupBlock(html: string): HTMLElement {

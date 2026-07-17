@@ -1983,6 +1983,30 @@ window.CommandsModule = (function() {
             return '\u0000' + (codeSpans.length - 1) + '\u0000';
         });
 
+        // エスケープされたドル記号（\$）を退避する。素の $ は数式の開始として扱うため、
+        // 通常のドル記号（$100 など）を書きたい場合は \$100 と書く仕様。
+        // markdown.js の convertInline と同じ退避順序（\$ → 数式 → 復元）に揃える。
+        const escapedDollars = [];
+        html = html.replace(/\\\$/g, function () {
+            escapedDollars.push('$');
+            return '' + (escapedDollars.length - 1) + '';
+        });
+
+        // インライン数式（$...$）。閉じ `$` を打った時点で math-inline コンテナへ変換する
+        // （閉じが無いうちは正規表現がマッチしないため、入力途中で式が壊れない）。
+        // 中身は生のまま data-math に保持して要素ごとプレースホルダへ退避し、`$a_1$` の
+        // `_` などが後続の強調変換に化けるのを防ぐ（インラインコード退避と同じ方針）。
+        // 実レンダリング（KaTeX）は編集イベントの最後に mathModule.render が data-math を
+        // 読んで行う（markdown.js と同じ役割分担）。入力テキストは未エスケープのため、
+        // 属性値は escapeHtml と " のエスケープを施す。
+        const mathSpans = [];
+        html = html.replace(/\$([^$\n]+)\$/g, function (_m, expr) {
+            const attr = markdown.escapeHtml(expr).replace(/"/g, '&quot;');
+            mathSpans.push('<span class="math-inline" data-math="' + attr +
+                '" contenteditable="false"></span>');
+            return '' + (mathSpans.length - 1) + '';
+        });
+
         // リンク
         html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
@@ -1998,6 +2022,16 @@ window.CommandsModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避した数式を復元（中身は整形しない。KaTeXでのレンダリングは mathModule が行う）
+        html = html.replace(/(\d+)/g, function (_m, i) {
+            return mathSpans[Number(i)];
+        });
+
+        // 退避した \$ をリテラルのドル記号として復元（この時点なら数式判定は済んでいる）
+        html = html.replace(/(\d+)/g, function (_m, i) {
+            return escapedDollars[Number(i)];
+        });
 
         // 退避したインラインコードを <code> として復元（中身は整形しない）
         html = html.replace(/\u0000(\d+)\u0000/g, function (_m, i) {
