@@ -1,4 +1,5 @@
 ---
+name: evolve
 description: バックログから機能を1つ選び、実装→テスト→ドキュメント→commit/pushまでを1サイクル実行する
 ---
 
@@ -49,10 +50,10 @@ Markdown WYSIWYG エディタの自動開発サイクルを **1周だけ** 実�
 
 ## 5. commit & push
 
-1. `docs/ROADMAP.md` の該当項目を `done` に移し、完了日を記入する
+1. `docs/ROADMAP.md` の該当項目を削除し、`docs/roadmap-done.md` の表に `done` として追記する（完了日を記入）
 2. 関連する変更をまとめて1コミットにする（**1サイクル=1コミット**。これが後から個別に revert できるチェックポイントになる）。コミットメッセージは既存の履歴に合わせて日本語で「〜の追加」「fix: 〜」の形式
 3. `git push -u origin HEAD` で **現在の evolve ブランチに** push する。**main へ push しない。`--force` は絶対に使わない**
-4. push後、ROADMAP.md の done 行にコミットハッシュを追記して amend せず追加コミットしてよい（または同一コミットに含める）
+4. push後、`docs/roadmap-done.md` の該当行にコミットハッシュを追記して amend せず追加コミットしてよい（または同一コミットに含める）
 
 ## 6. サイクル終了時の報告
 
