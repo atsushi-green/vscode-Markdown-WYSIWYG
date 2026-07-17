@@ -986,8 +986,9 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     opacity: 0.95;
 }
 
-/* Mermaidコンテキストメニュー */
-.mermaid-context-menu {
+/* Mermaid／数式ブロックのコンテキストメニュー（見た目を共有） */
+.mermaid-context-menu,
+.math-context-menu {
     position: fixed;
     z-index: 10000;
     background-color: var(--vscode-menu-background, #252526);
@@ -998,7 +999,8 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     min-width: 180px;
 }
 
-.mermaid-menu-item {
+.mermaid-menu-item,
+.math-menu-item {
     padding: 8px 16px;
     cursor: pointer;
     font-size: 13px;
@@ -1006,7 +1008,8 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     transition: background-color 0.1s;
 }
 
-.mermaid-menu-item:hover {
+.mermaid-menu-item:hover,
+.math-menu-item:hover {
     background-color: var(--vscode-menu-selectionBackground, #04395e);
     color: var(--vscode-menu-selectionForeground, #ffffff);
 }

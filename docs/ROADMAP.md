@@ -20,7 +20,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | ブロック数式を右クリックでPNGとしてクリップボードにコピーする | M | ユーザー要望。UI・処理とも Mermaid図の既存実装（`media/modules/mermaid.js` の `showContextMenu`/`hideContextMenu`/`copyToClipboard`、`mermaidContextMenu` のHTML）をほぼ流用できる。**ライブラリはKaTeXで確定**（レンダリング実装済み）のため、出力はSVGではなくHTML+CSS＝mermaidの `svgToPngBlob`（SVG→canvas）は使えない。同梱済みの `html2canvas.min.js`（Mermaid PNG保存で実績あり）で `div.math-block` → canvas → PNG Blob → `navigator.clipboard.write(ClipboardItem)` とする。注意: html2canvasはWebフォント（KaTeXのwoff2）の読み込み完了前だと文字が崩れることがあるため、`document.fonts.ready` を待つなどの対策が要る |
 | todo | 行番号を表示する（**Markdownソースの行番号に厳密に合わせる**） | L | ユーザー要望・仕様確定: 見た目の行やブロック通し番号ではなく、**Markdownソースの行番号と厳密に一致**させる。まずS/Mへ分割してから着手すること。論点: `#editor` は contenteditable のブロック要素の集合で「行」の概念が無いため、各ブロックがソースの何行目から始まるかを対応付ける必要がある。方向性: 先頭から順に各トップレベルブロックを `htmlToMarkdown` で直列化して行数を積算し、ブロックごとの開始行を求める（`markdownToHtml`/`htmlToMarkdown` が唯一の変換規則なので、これに合わせれば定義上ずれない）。入力のたびに全体を再計算すると重いためデバウンス・差分更新が要る。表示は左ガター（`#editor` と横並びの固定幅要素）に絶対配置し、各ブロックの `offsetTop`/高さに合わせて番号を置く。**要検討**: 1ブロックが複数行を占める場合（コードブロック・テーブル・リスト・複数行の引用）は開始行だけ出すのか全行に出すのか、折り返し行には番号を出さない（VS Code本体と同じ挙動）、ブロック間の空行の扱い（`htmlToMarkdown` は段落間に空行を出す）、Rawモード（`#rawEditor` は textarea なので行番号は素直に出せる）との表示の統一。分割案: (1) Rawモードの行番号ガター、(2) WYSIWYG側のブロック→開始行の対応付け（純粋関数＋ユニットテスト）、(3) WYSIWYG側のガター描画と同期 |
 
 ## 優先度: 中

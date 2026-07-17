@@ -104,6 +104,9 @@
         // Mermaidコンテキストメニューのイベント
         mermaidModule.setupContextMenuEvents();
 
+        // ブロック数式の右クリックメニュー（PNGコピー）
+        mathModule.setupContextMenu(state.editor);
+
         // コードブロック言語セレクタのイベント
         commands.setupCodeLangEvents();
 
