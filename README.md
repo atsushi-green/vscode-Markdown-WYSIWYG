@@ -6,6 +6,10 @@ VS Code上でMarkdownファイルをWYSIWYG（What You See Is What You Get）形
 ![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.108.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+## 📖 ドキュメント
+
+実装済み機能・アーキテクチャ・コマンド一覧などの詳細なドキュメントは、この拡張機能自身のMarkdownレンダリングエンジンで描画した[ドキュメントサイト](https://atsushi-green.github.io/vscode-Markdown-WYSIWYG/)で公開しています（ソースは[docs/](./docs/)）。
+
 ## ✨ 特徴
 
 * **直感的なWYSIWYG編集**: Markdownの構文を意識せずに、見たままの状態で編集可能

@@ -15,3 +15,7 @@ Markdown WYSIWYG Editor 拡張機能の実装内容を機能単位・技術単�
 ## 更新方針
 
 新しい機能を追加した場合は、対応するドキュメントを更新してください（[AGENTS.md](../AGENTS.md) の「機能追加時の注意事項」も参照）。
+
+## 公開サイト
+
+このページと上表の4ファイルは [GitHub Pages](https://atsushi-green.github.io/vscode-Markdown-WYSIWYG/) として公開されます（`scripts/docs-site/build.js` がビルド）。[ROADMAP.md](./ROADMAP.md) と [roadmap-done.md](./roadmap-done.md) は `/evolve` 自動開発ループ向けの内部バックログのため公開対象外です。

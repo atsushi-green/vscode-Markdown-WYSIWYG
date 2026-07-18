@@ -106,7 +106,8 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "test:unit": "npm run compile-tests && mocha --ui tdd --exit \"out/test/unit/**/*.test.js\"",
-    "test:all": "npm run test:unit && npm test"
+    "test:all": "npm run test:unit && npm test",
+    "docs:build": "node scripts/docs-site/build.js"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
