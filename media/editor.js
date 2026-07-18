@@ -267,6 +267,9 @@
         // エディタの変更を監視
         setupEditorInputEvent();
 
+        // コピー／カット＝生Markdown書き込み、ペースト＝ブロックMarkdownの取り込み
+        setupClipboardEvents();
+
         // タスクリストのチェックボックス操作を監視
         setupTaskCheckboxEvent();
 
@@ -397,6 +400,76 @@
                 clearTimeout(editSyncTimeout);
             }
             editSyncTimeout = setTimeout(syncEditorToDocument, 150);
+        });
+    }
+
+    /**
+     * テキスト入力系のフォーム部品（Mermaidソースのtextarea・検索入力・リンクダイアログ等）に
+     * フォーカスがあるか。この間のコピー／ペーストはその部品の既定動作に任せる
+     * （`window.getSelection()` はフォーム部品内の選択を反映せず、直前のエディタ内選択が
+     * 残ったままのことがあり、誤ってエディタへの操作として扱ってしまうため）。
+     */
+    function isFormFieldFocused() {
+        const active = document.activeElement;
+        return !!active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT');
+    }
+
+    /**
+     * コピー／カット／ペーストのクリップボード連携の設定。
+     *
+     * コピー／カット: WYSIWYG表示のままコピーするとレンダリング後のテキスト（テーブルや
+     * 数式・Mermaidが潰れた形）になってしまうため、選択範囲を生Markdownへ直列化して
+     * text/plain で書き込む。段落・見出しの部分選択は既定動作（素のテキストコピー）に委ねる。
+     * リスナーは document に張る: 選択が Mermaid図・テーブル・数式などの
+     * `contenteditable=false` 島で始まる／終わると、copy イベントが #editor を
+     * バブリングしない（フォーカスが editor に無い）ことがあるため。
+     *
+     * ペースト: ブロックMarkdown（見出し・リスト・コードフェンス・テーブル・`$$`数式・
+     * Mermaid）を含むテキストは `commands.handleMarkdownPaste` でその場で変換して挿入する
+     * （既定のプレーンテキスト挿入では再読み込みまでレンダリングされないため）。
+     * テーブルセル内の paste は table.js が stopPropagation するためここには届かない。
+     */
+    function setupClipboardEvents() {
+        const copyHandler = function (event) {
+            if (state.isRawMode || isFormFieldFocused()) {
+                return;
+            }
+            const selection = window.getSelection();
+            if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+                return;
+            }
+            const range = selection.getRangeAt(0);
+            if (!state.editor.contains(range.commonAncestorContainer)) {
+                return;
+            }
+            const md = commands.getSelectedMarkdown(range);
+            if (md === null || !event.clipboardData) {
+                return;
+            }
+            event.preventDefault();
+            event.clipboardData.setData('text/plain', md);
+            if (event.type === 'cut') {
+                range.deleteContents();
+                selection.removeAllRanges();
+                state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        };
+        document.addEventListener('copy', copyHandler);
+        document.addEventListener('cut', copyHandler);
+
+        document.addEventListener('paste', (event) => {
+            if (state.isRawMode || isFormFieldFocused() || !event.clipboardData) {
+                return;
+            }
+            const text = event.clipboardData.getData('text/plain');
+            if (!text || !commands.handleMarkdownPaste(text)) {
+                return;
+            }
+            event.preventDefault();
+            // テーブルは input パイプラインの対象外のためここで描画する。
+            // 残り（ハイライト・Mermaid・数式・文書への書き戻し）は input イベントで走る。
+            tableModule.render();
+            state.editor.dispatchEvent(new Event('input', { bubbles: true }));
         });
     }
 

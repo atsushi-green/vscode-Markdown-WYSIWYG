@@ -1983,12 +1983,16 @@ window.CommandsModule = (function() {
             return '\u0000' + (codeSpans.length - 1) + '\u0000';
         });
 
-        // エスケープされたドル記号（\$）を退避する。素の $ は数式の開始として扱うため、
+        // エスケープされたドル記号を退避する。素の $ は数式の開始として扱うため、
         // 通常のドル記号（$100 など）を書きたい場合は \$100 と書く仕様。
         // markdown.js の convertInline と同じ退避順序（\$ → 数式 → 復元）に揃える。
+        // 対象は2形態: 入力されたままの `\$` と、読み込み時に convertInline が
+        // 「エスケープ由来の $」として展開したゼロ幅スペース付きの `$`（$ + ZERO_WIDTH）。
+        // どちらもゼロ幅スペース付きで復元することで、同じテキストノードに複数あっても
+        // `$…$` がインライン数式として誤変換されない（バックスラッシュ消失バグの根本対処）。
         const escapedDollars = [];
-        html = html.replace(/\\\$/g, function () {
-            escapedDollars.push('$');
+        html = html.replace(new RegExp('\\\\\\$|\\$' + state.ZERO_WIDTH, 'g'), function () {
+            escapedDollars.push('$' + state.ZERO_WIDTH);
             return '' + (escapedDollars.length - 1) + '';
         });
 
@@ -2041,8 +2045,237 @@ window.CommandsModule = (function() {
         return html;
     }
 
+    /**
+     * 段落・見出しなど「本文だけの単一ブロック」か判定する。
+     * これらの部分選択は素のテキストコピー（既定動作）に委ねてよい
+     * （リスト・引用・テーブル・コード・数式・Mermaid は記法が失われるため生Markdown化する）。
+     */
+    function isPlainTextBlock(el) {
+        return !!el && (el.tagName === 'P' || /^H[1-6]$/.test(el.tagName));
+    }
+
+    /**
+     * 選択範囲を生Markdownへ直列化する（コピー／カット用）。
+     * WYSIWYG表示のままコピーするとレンダリング後のテキスト（テーブルや数式が潰れた形）に
+     * なるため、選択が交差したトップレベルブロックを生Markdownへ直列化して返す。
+     *
+     * 「表示中のトップレベルブロック」（Mermaidの隠しソースpreは除外）は
+     * クリーンクローン（`markdown.getCleanEditorClone`）のトップレベル子要素と 1:1 で
+     * 対応する（`computeEditorLineMap` と同じ不変条件）。選択が交差したブロックだけを
+     * クリーンクローン側から取り出し、読込／保存と同じ `htmlToMarkdown` で直列化する。
+     *
+     * 生Markdown化しない（＝既定のコピーに委ねる）場合は null を返す:
+     *   - エディタ内に選択が無い／交差ブロックが無い
+     *   - 交差ブロックが本文だけの単一ブロック（段落／見出し）の部分選択
+     *   - 不変条件が崩れている（トップレベル数の不一致）
+     */
+    function getSelectedMarkdown(range) {
+        if (!range) {
+            return null;
+        }
+        // 単一テーブルセル内に収まる選択はセルのテキストコピー（既定動作）に委ねる
+        // （テーブル全体のMarkdown化はセルをまたぐ選択・テーブル外を含む選択のとき）
+        const cell = utils.findAncestor(range.commonAncestorContainer, function (el) {
+            return el.tagName === 'TD' || el.tagName === 'TH';
+        });
+        if (cell) {
+            return null;
+        }
+        const liveBlocks = Array.prototype.slice.call(state.editor.children).filter(function (el) {
+            return !(el.classList && el.classList.contains('mermaid-source'));
+        });
+        const clone = markdown.getCleanEditorClone(state.editor);
+        const cleanBlocks = Array.prototype.slice.call(clone.children);
+        if (liveBlocks.length !== cleanBlocks.length) {
+            return null;
+        }
+
+        const selected = [];
+        for (let i = 0; i < liveBlocks.length; i++) {
+            if (range.intersectsNode(liveBlocks[i])) {
+                selected.push({ live: liveBlocks[i], clean: cleanBlocks[i] });
+            }
+        }
+        if (selected.length === 0) {
+            return null;
+        }
+        if (selected.length === 1 && isPlainTextBlock(selected[0].live)) {
+            return null;
+        }
+
+        // 全ブロック選択時は文書全体の直列化（保存内容と一致）
+        if (selected.length === cleanBlocks.length) {
+            return markdown.htmlToMarkdown(clone.innerHTML).replace(/\s+$/, '');
+        }
+        const container = document.createElement('div');
+        selected.forEach(function (b) {
+            container.appendChild(b.clean.cloneNode(true));
+        });
+        return markdown.htmlToMarkdown(container.innerHTML).replace(/\s+$/, '');
+    }
+
+    /**
+     * クリップボードのMarkdownテキストをブロック要素へ変換してキャレット位置に挿入する。
+     * 貼り付けを既定動作（プレーンテキスト挿入）に任せるとブロック記法（見出し・リスト・
+     * コードフェンス・テーブル・ブロック数式・Mermaid）が再読み込みまで描画されないため、
+     * 読込時と同じ `markdown.markdownToHtml` でその場で変換する。
+     *
+     * 取り込まない（＝既定の貼り付けに委ねる）場合は false を返す:
+     *   - キャレットがエディタ内に無い
+     *   - 変換結果が単一の段落（インラインのみ）: 既定挿入＋inputイベントの
+     *     `applyInlineFormatting` で十分なため
+     * 取り込んだ場合は true を返す（呼び出し側で preventDefault し、
+     * テーブル描画と input イベント発火＝残りのパイプラインを行う）。
+     *
+     * 挿入位置:
+     *   - キャレットが段落内: 段落をキャレット位置で前半/後半に分割し、間へ挿入
+     *   - 段落以外のブロック内: そのトップレベルブロックの直後へ挿入
+     *   - 構造ブロックで終わる場合は直後に空段落を作りキャレットを置く
+     */
+    function handleMarkdownPaste(text) {
+        if (!text) {
+            return false;
+        }
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return false;
+        }
+        const range = selection.getRangeAt(0);
+        if (!state.editor.contains(range.startContainer)) {
+            return false;
+        }
+
+        // 実パーサーで判定する（ブロック判定の正規表現を重複させない）。
+        // 単一段落＝インラインのみは既定動作に委ねる。
+        const holder = document.createElement('div');
+        holder.innerHTML = markdown.markdownToHtml(utils.normalizeEol(text));
+        const blocks = Array.prototype.slice.call(holder.children);
+        if (blocks.length === 0) {
+            return false;
+        }
+        if (blocks.length === 1 && blocks[0].tagName === 'P') {
+            return false;
+        }
+
+        // 選択範囲は上書き（既定の貼り付けと同じ）。
+        // deleteContents は選択の始端・終端が内側にあったブロックを空の殻として
+        // 残すため（全選択→貼り付けで空見出しや空フェンスが `# ` や ``` として
+        // 直列化されてしまう）、選択に交差していたトップレベルブロックを控えておき、
+        // 挿入後に空になっていたら取り除く。
+        const emptiedShells = [];
+        const didDelete = !range.collapsed;
+        if (didDelete) {
+            Array.prototype.forEach.call(state.editor.children, function (el) {
+                if (range.intersectsNode(el)) {
+                    emptiedShells.push(el);
+                }
+            });
+            range.deleteContents();
+        }
+
+        // 殻の空判定: 見出しの `#` マーク表示用スパン（直列化時に再生成される）は
+        // 本文とみなさない
+        function shellIsEmpty(el) {
+            let text = '';
+            el.childNodes.forEach(function (child) {
+                if (child.nodeType === Node.ELEMENT_NODE &&
+                    child.classList && child.classList.contains('heading-hash')) {
+                    return;
+                }
+                text += child.textContent;
+            });
+            return text.trim() === '';
+        }
+
+        // キャレットを含むトップレベルブロックを特定
+        let block = range.startContainer;
+        while (block && block !== state.editor && block.parentNode !== state.editor) {
+            block = block.parentNode;
+        }
+
+        let anchor;      // このノードの直後へ挿入する（nullなら末尾に追加）
+        let tail = null; // 段落分割で生じた後半
+        let removeBlock = false;
+        if (!block || block === state.editor) {
+            anchor = state.editor.lastElementChild;
+        } else if (block.tagName === 'P') {
+            const after = document.createRange();
+            after.setStart(range.startContainer, range.startOffset);
+            after.setEnd(block, block.childNodes.length);
+            const frag = after.extractContents();
+            if (frag.textContent.trim() !== '') {
+                tail = document.createElement('p');
+                tail.appendChild(frag);
+            }
+            anchor = block;
+            // 前半が空になった段落（空段落への貼り付け含む）は挿入後に取り除く
+            removeBlock = block.textContent.trim() === '';
+        } else {
+            anchor = block;
+        }
+
+        let ref = anchor;
+        blocks.forEach(function (b) {
+            if (ref && ref.parentNode === state.editor) {
+                state.editor.insertBefore(b, ref.nextSibling);
+            } else {
+                state.editor.appendChild(b);
+            }
+            ref = b;
+        });
+        if (tail) {
+            state.editor.insertBefore(tail, ref.nextSibling);
+        }
+        if (removeBlock) {
+            block.remove();
+        }
+        // 選択削除で空になった殻ブロックを取り除く（中身のあるものはそのまま）。
+        // contenteditable=false のウィジェット（数式・Mermaid・テーブル等）は
+        // deleteContents で消えないため textContent では判定せず、対象外とする。
+        emptiedShells.forEach(function (el) {
+            if (el === block || !el.parentNode || el.parentNode !== state.editor) {
+                return;
+            }
+            if (el.tagName === 'HR') {
+                return;
+            }
+            if (el.querySelector &&
+                el.querySelector('.math-block, .math-inline, .mermaid-container, ' +
+                    '.mermaid-source, table, input.task-checkbox, hr, img')) {
+                return;
+            }
+            if (el.textContent.trim() === '') {
+                el.remove();
+            }
+        });
+
+        // キャレット: 後半段落の先頭 → 最後の挿入ブロックの末尾（段落/見出しのとき）
+        // → 構造ブロックで終わるときは直後に空段落を作ってそこへ
+        let caretRange = document.createRange();
+        if (tail) {
+            caretRange.setStart(tail, 0);
+        } else {
+            const last = blocks[blocks.length - 1];
+            if (last.tagName === 'P' || /^H[1-6]$/.test(last.tagName)) {
+                caretRange.selectNodeContents(last);
+                caretRange.collapse(false);
+            } else {
+                const p = document.createElement('p');
+                p.appendChild(document.createElement('br'));
+                state.editor.insertBefore(p, last.nextSibling);
+                caretRange.setStart(p, 0);
+            }
+        }
+        caretRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(caretRange);
+        return true;
+    }
+
     // 公開API
     return {
+        getSelectedMarkdown: getSelectedMarkdown,
+        handleMarkdownPaste: handleMarkdownPaste,
         isHighlightJsReady: isHighlightJsReady,
         applySyntaxHighlighting: applySyntaxHighlighting,
         decorateCodeBlocks: decorateCodeBlocks,

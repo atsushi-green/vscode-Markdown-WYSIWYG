@@ -479,7 +479,10 @@ suite('MarkdownModule', () => {
         test('エスケープした \\$ は数式にならずリテラルの $ になる', () => {
             const html = env.markdown.markdownToHtml('価格は \\$100 と \\$200 です');
             assert.strictEqual(html.includes('math-inline'), false, html);
-            assert.ok(html.includes('価格は $100 と $200 です'), html);
+            // エスケープ由来の $ はゼロ幅スペース付き（$ + ZERO_WIDTH）でDOMに保持される
+            // （編集時の再変換で $…$ が数式化しないための目印。表示上は $ のみ）
+            const ZW = env.state.ZERO_WIDTH;
+            assert.ok(html.includes(`価格は $${ZW}100 と $${ZW}200 です`), html);
         });
 
         test('式に含まれるダブルクォートが属性を壊さない', () => {
@@ -929,6 +932,61 @@ suite('MarkdownModule', () => {
             for (let i = 1; i < nums.length; i++) {
                 assert.ok(nums[i] > nums[i - 1], `not increasing: ${nums}`);
             }
+        });
+    });
+
+    suite('往復の完全一致（コピー＝保存内容の忠実性）', () => {
+        /** 読込→直列化の1往復 */
+        function roundTrip(src: string): string {
+            return env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(src));
+        }
+
+        test('連続する空行（2行）が往復で保持される', () => {
+            const src = '段落1\n\n\n段落2\n';
+            assert.strictEqual(roundTrip(src), src);
+        });
+
+        test('連続する空行（3行）が往復で保持される', () => {
+            const src = '段落1\n\n\n\n段落2\n';
+            assert.strictEqual(roundTrip(src), src);
+        });
+
+        test('見出し・リスト間の複数空行も保持される', () => {
+            // リストマーカーは `* ` へ正規化される仕様のため `* ` で書く
+            const src = '# 見出し\n\n\n* 項目\n';
+            assert.strictEqual(roundTrip(src), src);
+        });
+
+        test('単一の空行区切りは従来どおり（増殖しない）', () => {
+            const src = '段落1\n\n段落2\n';
+            assert.strictEqual(roundTrip(src), src);
+            // 冪等: もう一往復しても変わらない
+            assert.strictEqual(roundTrip(roundTrip(src)), src);
+        });
+
+        test('sample.md 全体が編集イベントを挟んでも完全往復する', function () {
+            // 実ファイルでの完全一致回帰テスト:
+            // 全選択コピー→新規ファイル貼り付けで diff ゼロを保証する
+            const fs = require('fs');
+            const path = require('path');
+            const samplePath = path.resolve(__dirname, '..', '..', '..', 'sample.md');
+            if (!fs.existsSync(samplePath)) {
+                this.skip();
+                return;
+            }
+            const src = String(fs.readFileSync(samplePath, 'utf8')).replace(/\r\n?/g, '\n');
+
+            env.editor.innerHTML = env.markdown.markdownToHtml(src);
+            // 読込直後の往復
+            const afterLoad = env.markdown.htmlToMarkdown(
+                env.markdown.getCleanHtmlFromEditor());
+            assert.strictEqual(afterLoad, src, '読込→直列化で差分が出ている');
+
+            // 編集イベント（input パイプラインの再変換）を挟んだ往復
+            env.commands.applyInlineFormatting();
+            const afterEdit = env.markdown.htmlToMarkdown(
+                env.markdown.getCleanHtmlFromEditor());
+            assert.strictEqual(afterEdit, src, '編集イベント経由で差分が出ている');
         });
     });
 });
