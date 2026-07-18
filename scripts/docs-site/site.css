@@ -1,0 +1,288 @@
+/*
+ * GitHub Pages用の追加スタイル。
+ *
+ * media/editor.css はそのまま（無変更）で読み込む。すべてのルールが `#editor` 配下に
+ * スコープされているため、そこに levels: Markdown WYSIWYGエディタと全く同じ見た目で
+ * 本文がレンダリングされる。
+ *
+ * VS Code Webview内では `--vscode-*` 変数はホスト（VS Code本体）が注入するが、
+ * 単体のWebページであるここでは存在しないため、Light+ / Dark+ 相当の固定値を
+ * このファイルで定義する（editor.css は無変更のまま変数だけ供給する形）。
+ */
+
+:root {
+    color-scheme: light dark;
+
+    --vscode-editor-background: #ffffff;
+    --vscode-editor-foreground: #24292f;
+    --vscode-foreground: #24292f;
+    --vscode-descriptionForeground: #6e7781;
+    --vscode-errorForeground: #cf222e;
+
+    --vscode-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+    --vscode-editor-font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+
+    --vscode-editorGroup-border: #d0d7de;
+    --vscode-editorGroupHeader-tabsBackground: #f6f8fa;
+    --vscode-editorGutter-background: #ffffff;
+    --vscode-editorLineNumber-foreground: #8c959f;
+
+    --vscode-editorWidget-background: #ffffff;
+    --vscode-editorWidget-border: #d0d7de;
+    --vscode-editorWidget-foreground: #24292f;
+
+    --vscode-textCodeBlock-background: #f6f8fa;
+    --vscode-textBlockQuote-background: #f6f8fa;
+    --vscode-textLink-foreground: #0969da;
+
+    --vscode-focusBorder: #0969da;
+
+    --vscode-button-background: #0969da;
+    --vscode-button-foreground: #ffffff;
+    --vscode-button-hoverBackground: #0860ca;
+    --vscode-button-secondaryBackground: #eaeef2;
+    --vscode-button-secondaryForeground: #24292f;
+    --vscode-button-secondaryHoverBackground: #dde3e8;
+
+    --vscode-charts-blue: #218bff;
+    --vscode-charts-green: #1a7f37;
+    --vscode-charts-purple: #8250df;
+    --vscode-charts-red: #cf222e;
+    --vscode-charts-yellow: #9a6700;
+
+    --vscode-checkbox-selectBackground: #0969da;
+
+    --vscode-editor-findMatchBackground: rgba(255, 223, 93, 0.6);
+    --vscode-editor-findMatchBorder: #e6b800;
+    --vscode-editor-findMatchHighlightBackground: rgba(255, 223, 93, 0.3);
+    --vscode-editor-selectionBackground: rgba(9, 105, 218, 0.2);
+
+    --vscode-editorError-foreground: #cf222e;
+    --vscode-editorInfo-foreground: #0969da;
+    --vscode-editorWarning-foreground: #9a6700;
+
+    --vscode-input-background: #ffffff;
+    --vscode-input-border: #d0d7de;
+    --vscode-input-foreground: #24292f;
+    --vscode-inputValidation-errorBackground: #fff0ee;
+    --vscode-inputValidation-errorBorder: #cf222e;
+
+    --vscode-list-activeSelectionBackground: #d7e6fb;
+    --vscode-list-activeSelectionForeground: #24292f;
+    --vscode-list-hoverBackground: #f0f3f6;
+
+    --vscode-menu-background: #ffffff;
+    --vscode-menu-border: #d0d7de;
+    --vscode-menu-foreground: #24292f;
+    --vscode-menu-selectionBackground: #0969da;
+    --vscode-menu-selectionForeground: #ffffff;
+
+    --vscode-notifications-background: #ffffff;
+    --vscode-notifications-foreground: #24292f;
+
+    --vscode-scrollbarSlider-background: rgba(100, 100, 100, 0.3);
+    --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.5);
+
+    --vscode-toolbar-hoverBackground: #eaeef2;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --vscode-editor-background: #1e1e1e;
+        --vscode-editor-foreground: #d4d4d4;
+        --vscode-foreground: #cccccc;
+        --vscode-descriptionForeground: #9d9d9d;
+        --vscode-errorForeground: #f14c4c;
+
+        --vscode-editorGroup-border: #454545;
+        --vscode-editorGroupHeader-tabsBackground: #252526;
+        --vscode-editorGutter-background: #1e1e1e;
+        --vscode-editorLineNumber-foreground: #858585;
+
+        --vscode-editorWidget-background: #252526;
+        --vscode-editorWidget-border: #454545;
+        --vscode-editorWidget-foreground: #cccccc;
+
+        --vscode-textCodeBlock-background: #2b2b2b;
+        --vscode-textBlockQuote-background: rgba(127, 127, 127, 0.1);
+        --vscode-textLink-foreground: #3794ff;
+
+        --vscode-focusBorder: #007fd4;
+
+        --vscode-button-background: #0e639c;
+        --vscode-button-foreground: #ffffff;
+        --vscode-button-hoverBackground: #1177bb;
+        --vscode-button-secondaryBackground: #3a3d41;
+        --vscode-button-secondaryForeground: #ffffff;
+        --vscode-button-secondaryHoverBackground: #45494e;
+
+        --vscode-charts-blue: #3794ff;
+        --vscode-charts-green: #89d185;
+        --vscode-charts-purple: #b180d7;
+        --vscode-charts-red: #f14c4c;
+        --vscode-charts-yellow: #cca700;
+
+        --vscode-checkbox-selectBackground: #3794ff;
+
+        --vscode-editor-findMatchBackground: rgba(234, 92, 0, 0.33);
+        --vscode-editor-findMatchBorder: #9e6a03;
+        --vscode-editor-findMatchHighlightBackground: rgba(234, 92, 0, 0.22);
+        --vscode-editor-selectionBackground: #264f78;
+
+        --vscode-editorError-foreground: #f14c4c;
+        --vscode-editorInfo-foreground: #3794ff;
+        --vscode-editorWarning-foreground: #cca700;
+
+        --vscode-input-background: #3c3c3c;
+        --vscode-input-border: #3c3c3c;
+        --vscode-input-foreground: #cccccc;
+        --vscode-inputValidation-errorBackground: #5a1d1d;
+        --vscode-inputValidation-errorBorder: #be1100;
+
+        --vscode-list-activeSelectionBackground: #04395e;
+        --vscode-list-activeSelectionForeground: #ffffff;
+        --vscode-list-hoverBackground: #2a2d2e;
+
+        --vscode-menu-background: #252526;
+        --vscode-menu-border: #454545;
+        --vscode-menu-foreground: #cccccc;
+        --vscode-menu-selectionBackground: #04395e;
+        --vscode-menu-selectionForeground: #ffffff;
+
+        --vscode-notifications-background: #252526;
+        --vscode-notifications-foreground: #cccccc;
+
+        --vscode-scrollbarSlider-background: rgba(121, 121, 121, 0.4);
+        --vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7);
+
+        --vscode-toolbar-hoverBackground: rgba(90, 93, 94, 0.31);
+    }
+
+    /* editor.css の body.vscode-dark 相当（強調の太字ウェイト）をシステム設定ベースで再現 */
+    #editor strong {
+        font-weight: 800;
+    }
+}
+
+/* ==================== ページレイアウト（#editor の外側） ==================== */
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    /* editor.css の body { flex-direction: column } を、サイドバー付きレイアウト用に上書き */
+    flex-direction: row;
+    font-family: var(--vscode-font-family);
+}
+
+.site-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    border-bottom: 1px solid var(--vscode-editorGroup-border);
+    z-index: 100;
+}
+
+.site-header-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--vscode-foreground);
+    text-decoration: none;
+}
+
+.site-header-spacer {
+    flex: 1;
+}
+
+.site-header-link {
+    font-size: 13px;
+    color: var(--vscode-textLink-foreground);
+    text-decoration: none;
+}
+
+.site-header-link:hover {
+    text-decoration: underline;
+}
+
+.site-body {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    min-width: 0;
+    margin-top: 48px;
+    height: calc(100vh - 48px);
+}
+
+.site-nav {
+    flex: 0 0 240px;
+    overflow-y: auto;
+    padding: 20px 12px;
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    border-right: 1px solid var(--vscode-editorGroup-border);
+}
+
+.site-nav-heading {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--vscode-descriptionForeground);
+    margin: 0 0 8px 8px;
+}
+
+.site-nav ul {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 0;
+}
+
+.site-nav a {
+    display: block;
+    padding: 6px 8px;
+    border-radius: 4px;
+    color: var(--vscode-foreground);
+    text-decoration: none;
+    font-size: 13px;
+}
+
+.site-nav a:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.site-nav a.active {
+    background-color: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground);
+    font-weight: 600;
+}
+
+/* #editor 自体は editor.css 側で flex:1 / padding:20px / overflow-y:auto 済み。
+   本文の可読幅だけここで絞る（左寄せのまま最大幅を持たせる）。 */
+#editor {
+    max-width: 860px;
+}
+
+@media (max-width: 760px) {
+    .site-body {
+        flex-direction: column;
+        height: auto;
+        margin-top: 48px;
+    }
+
+    .site-nav {
+        flex: 0 0 auto;
+        border-right: none;
+        border-bottom: 1px solid var(--vscode-editorGroup-border);
+        max-height: 40vh;
+    }
+
+    #editor {
+        max-width: none;
+    }
+}
