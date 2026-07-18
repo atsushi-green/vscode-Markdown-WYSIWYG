@@ -531,6 +531,31 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * 生Markdown表示中の要素（`span.raw-markdown` / `div.raw-markdown`）から
+     * 生のMarkdownテキストを取り出す。中身は既に生の記法テキストそのもののため、
+     * `$` のエスケープは行わない（そのまま書き戻せば展開前と同一のMarkdownになる）。
+     * contenteditableが改行に対して生成する `<br>` や行divは改行へ戻す
+     * （ブロック数式 `$$ ... $$` の複数行編集を保つため）。
+     * リンク・強調（インライン）・数式（インライン／ブロック）で共有する。
+     */
+    function rawMarkdownText(el) {
+        let text = '';
+        el.childNodes.forEach(node => {
+            if (node.nodeType === Node.TEXT_NODE) {
+                text += stripZeroWidth(node.textContent);
+            } else if (node.nodeName === 'BR') {
+                text += '\n';
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                if (text && !text.endsWith('\n')) {
+                    text += '\n';
+                }
+                text += rawMarkdownText(node);
+            }
+        });
+        return text;
+    }
+
+    /**
      * 単一ノードをインラインMarkdownへ直列化
      */
     function serializeInline(node) {
@@ -579,6 +604,12 @@ window.MarkdownModule = (function() {
                 return `[${serializeInlineChildren(node)}](${href})`;
             }
             case 'SPAN':
+                // 生Markdown表示中のspan（リンク・強調・インライン数式の展開中）は
+                // 中身の生テキストをそのまま返す（`$` もエスケープしない）。
+                // これで展開の前後でMarkdownが変わらない（往復に非影響）。
+                if (node.classList.contains('raw-markdown')) {
+                    return rawMarkdownText(node);
+                }
                 // インライン数式は data-math の生の式から `$...$` を復元する
                 // （KaTeXがレンダリングしたDOMではなく、保持した元の式が唯一の正）
                 if (node.classList.contains('math-inline')) {
@@ -787,6 +818,12 @@ window.MarkdownModule = (function() {
                 return inner.trim() ? inner + '\n\n' : '\n';
             }
             case 'DIV': {
+                // 生Markdown表示中のブロック（ブロック数式 `$$ ... $$` の展開中）は
+                // 中身の生テキストをそのまま返す（`$` もエスケープしない）。
+                if (el.classList && el.classList.contains('raw-markdown')) {
+                    const raw = rawMarkdownText(el);
+                    return raw.trim() ? raw + '\n\n' : '';
+                }
                 // GitHubアラートのdivは `> [!TYPE]` 形式の引用へ復元
                 if (el.classList && el.classList.contains('markdown-alert')) {
                     return serializeAlert(el);
@@ -880,6 +917,71 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * ブロックの直列化文字列から、前後の空行だけを取り除いた「本文行の配列」を返す。
+     * 各ブロックは末尾に `\n\n` を付けて直列化されるため、その空行を落として
+     * 実際に本文が占める行だけにする。全て空なら空配列（＝行を占めないブロック）。
+     */
+    function coreLinesOf(blockMarkdown) {
+        const lines = (blockMarkdown || '').replace(/\r\n?/g, '\n').split('\n');
+        let start = 0;
+        let end = lines.length;
+        while (start < end && lines[start].trim() === '') {
+            start++;
+        }
+        while (end > start && lines[end - 1].trim() === '') {
+            end--;
+        }
+        return lines.slice(start, end);
+    }
+
+    /**
+     * WYSIWYGの各トップレベルブロックが、Markdownソースの何行目から始まるかを求める
+     * （行番号表示 2/3 の中核。純粋関数＝DOM非依存でユニットテスト可能）。
+     *
+     * `finalMarkdown` は `htmlToMarkdown` が出力した確定ソース（唯一の変換規則）、
+     * `blockMarkdowns` は各トップレベルブロックを `serializeBlockElement` で直列化した
+     * 文字列の配列（`finalMarkdown` と同じ順序）。
+     *
+     * 各ブロックの本文行は `finalMarkdown` 内に順番どおり連続して現れるため、
+     * 直前に確定した位置（cursor）から前方一致で探して開始行を確定する。こうすることで
+     * ブロック間の空行の畳み込み（`\n{3,}`→`\n\n`）や先頭空行の除去に依存せず、
+     * 同一本文が複数あっても順序で正しく対応づく。
+     *
+     * 戻り値は各ブロックの1始まりの開始行番号の配列。本文を持たない
+     * （空段落など、ソース上に行を占めない）ブロックは `null`。
+     */
+    function computeBlockStartLines(finalMarkdown, blockMarkdowns) {
+        const docLines = (finalMarkdown || '').replace(/\r\n?/g, '\n').split('\n');
+        const starts = [];
+        let cursor = 0; // 次に探索を始める行インデックス（0始まり）
+
+        (blockMarkdowns || []).forEach(function (blockMd) {
+            const core = coreLinesOf(blockMd);
+            if (core.length === 0) {
+                starts.push(null);
+                return;
+            }
+            // cursor 以降で本文先頭行に一致する行を探す
+            let found = -1;
+            for (let i = cursor; i < docLines.length; i++) {
+                if (docLines[i] === core[0]) {
+                    found = i;
+                    break;
+                }
+            }
+            if (found === -1) {
+                // 想定外（入力が不整合）: 行番号を付けずに次へ
+                starts.push(null);
+                return;
+            }
+            starts.push(found + 1); // 1始まり
+            cursor = found + core.length; // 本文行数だけ進める（間の空行は次回スキップ）
+        });
+
+        return starts;
+    }
+
+    /**
      * テーブルHTML（innerHTML文字列）をMarkdownに変換するヘルパー関数
      */
     function convertTableToMarkdown(tableContent) {
@@ -889,11 +991,18 @@ window.MarkdownModule = (function() {
     }
 
     /**
-     * エディタDOMからクリーンなHTMLを取得（UI要素を除去し、隠されたソースを復元）
+     * エディタDOM（またはそれ相当の要素）をクローンし、UI要素を除去して
+     * 隠されたソースを復元した「クリーンなクローン要素」を返す。
+     * `getCleanHtmlFromEditor`（文書への直列化）と `computeEditorLineMap`
+     * （行番号の対応付け）が同じクリーン結果を共有するために切り出した。
+     * トップレベルの子要素数は、Mermaid（隠し `pre.mermaid-source` を残し
+     * `.mermaid-container` を削除）とテーブル（`.table-container` を `table` へ
+     * アンラップ）を経ても「表示中のライブ要素列」と1対1で対応する。
      */
-    function getCleanHtmlFromEditor() {
+    function getCleanEditorClone(editorEl) {
+        const source = editorEl || state.editor;
         // エディタのDOMをクローン
-        const clone = state.editor.cloneNode(true);
+        const clone = source.cloneNode(true);
 
         // 検索ハイライトのspanをアンラップ（中身のテキストは残す）
         clone.querySelectorAll('span.find-highlight').forEach(span => {
@@ -910,7 +1019,7 @@ window.MarkdownModule = (function() {
             const diagramId = pre.getAttribute('data-mermaid-id');
 
             // 元のエディタから編集中のtextareaの値を取得
-            const originalContainer = state.editor.querySelector(`.mermaid-container[data-mermaid-id="${diagramId}"]`);
+            const originalContainer = source.querySelector(`.mermaid-container[data-mermaid-id="${diagramId}"]`);
             if (originalContainer) {
                 const textarea = originalContainer.querySelector('.mermaid-source-code');
                 if (textarea && textarea.value) {
@@ -960,7 +1069,60 @@ window.MarkdownModule = (function() {
             }
         });
 
-        return clone.innerHTML;
+        return clone;
+    }
+
+    /**
+     * エディタDOMからクリーンなHTMLを取得（UI要素を除去し、隠されたソースを復元）
+     */
+    function getCleanHtmlFromEditor() {
+        return getCleanEditorClone(state.editor).innerHTML;
+    }
+
+    /**
+     * WYSIWYGエディタの「表示中のトップレベルブロック」と、それが対応する
+     * Markdownソースの開始行番号（1始まり）を対応づける（行番号表示 3/3 の橋渡し）。
+     *
+     * クリーンなクローン（`getCleanEditorClone`）からソース全体（`finalMarkdown`）と
+     * 各ブロックの直列化を得て `computeBlockStartLines` で開始行を求め、それを
+     * 「表示中のライブ要素列」（Mermaidの隠し `pre.mermaid-source` を除外）と
+     * インデックスで対応づける。クリーンのトップレベル数と表示中ライブ要素数は
+     * 常に一致する（Mermaidの隠しpre↔可視コンテナ、テーブルのアンラップを経ても）。
+     *
+     * 戻り値は `{ block: ライブ要素, line: 開始行 }` の配列（本文を持たない
+     * ブロック＝開始行 null は除外）。ガター描画（次段）が各 block の `offsetTop` に
+     * 行番号を置くために使う。DOMのみで完結しレイアウト非依存＝ユニットテスト可能。
+     */
+    function computeEditorLineMap(editorEl) {
+        const source = editorEl || state.editor;
+        if (!source) {
+            return [];
+        }
+        const clone = getCleanEditorClone(source);
+        const finalMarkdown = htmlToMarkdown(clone.innerHTML);
+
+        const cleanBlocks = Array.prototype.slice.call(clone.children);
+        const blockMarkdowns = cleanBlocks.map(function (c) {
+            return htmlToMarkdown(c.outerHTML);
+        });
+        const startLines = computeBlockStartLines(finalMarkdown, blockMarkdowns);
+
+        // 位置決め対象は「表示中の」ライブ要素（Mermaidの隠しソースpreは除外）
+        const liveVisible = Array.prototype.slice.call(source.children).filter(function (el) {
+            return !(el.classList && el.classList.contains('mermaid-source'));
+        });
+
+        const map = [];
+        startLines.forEach(function (line, i) {
+            if (line === null) {
+                return;
+            }
+            const block = liveVisible[i];
+            if (block) {
+                map.push({ block: block, line: line });
+            }
+        });
+        return map;
     }
 
     // 公開API
@@ -972,10 +1134,21 @@ window.MarkdownModule = (function() {
         // 展開／復帰の結果が通常のレンダリング結果と食い違わないことを保証する。
         serializeInline: serializeInline,
         convertInline: convertInline,
+        // ブロック数式の生Markdown表示（commands.js）が、復帰時に math-block
+        // コンテナを再生成するために使う（読込時の変換と同じ関数を共有する）。
+        buildMathBlockHtml: buildMathBlockHtml,
+        // 生Markdown表示中の要素から生テキストを取り出す（<br>→改行）。
+        rawMarkdownText: rawMarkdownText,
         escapeHtml: escapeHtml,
         convertTableToMarkdown: convertTableToMarkdown,
+        getCleanEditorClone: getCleanEditorClone,
         getCleanHtmlFromEditor: getCleanHtmlFromEditor,
         slugify: slugify,
-        buildTocMarkdown: buildTocMarkdown
+        buildTocMarkdown: buildTocMarkdown,
+        // 行番号表示（2/3）: 各トップレベルブロックのソース開始行の対応付け。
+        coreLinesOf: coreLinesOf,
+        computeBlockStartLines: computeBlockStartLines,
+        // 行番号表示（3/3 橋渡し）: 表示中ブロック→開始行の対応（DOM／レイアウト非依存）。
+        computeEditorLineMap: computeEditorLineMap
     };
 })();

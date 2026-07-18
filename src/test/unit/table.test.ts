@@ -257,4 +257,72 @@ suite('TableModule', () => {
             env.state.isUpdating = false;
         });
     });
+
+    suite('buildEmptyTableMarkdown', () => {
+        test('ヘッダ1行＋区切り1行＋指定した本文行数を生成する', () => {
+            const md: string = env.table.buildEmptyTableMarkdown(2, 3);
+            const lines = md.trim().split('\n');
+            assert.strictEqual(lines.length, 4, md); // ヘッダ + 区切り + 本文2
+            // 区切り行は各列 --- （3列）
+            assert.ok(/^\|\s*---\s*(\|\s*---\s*)+\|$/.test(lines[1]), lines[1]);
+        });
+
+        test('markdownToHtmlに通すと指定した列数・本文行数のtableになる', () => {
+            const md: string = env.table.buildEmptyTableMarkdown(2, 3);
+            const holder = env.document.createElement('div');
+            holder.innerHTML = env.markdown.markdownToHtml(md);
+            const table = holder.querySelector('table') as HTMLTableElement;
+            assert.ok(table, holder.innerHTML);
+            assert.strictEqual(table.querySelectorAll('thead th').length, 3);
+            assert.strictEqual(table.querySelectorAll('tbody tr').length, 2);
+        });
+
+        test('rows/colsが0以下でも最低1行1列を保証する', () => {
+            const md: string = env.table.buildEmptyTableMarkdown(0, 0);
+            const holder = env.document.createElement('div');
+            holder.innerHTML = env.markdown.markdownToHtml(md);
+            const table = holder.querySelector('table') as HTMLTableElement;
+            assert.ok(table, md);
+            assert.strictEqual(table.querySelectorAll('thead th').length, 1);
+            assert.strictEqual(table.querySelectorAll('tbody tr').length, 1);
+        });
+    });
+
+    suite('insertTable', () => {
+        test('キャレット位置のブロック直後に空テーブルを挿入し即インタラクティブ化する', () => {
+            env.editor.innerHTML = '<p>本文</p>';
+            const p = env.editor.querySelector('p')!;
+            const range = env.document.createRange();
+            range.setStart(p.firstChild!, 0);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            env.table.insertTable(2, 3);
+
+            const container = env.editor.querySelector('.table-container');
+            assert.ok(container, env.editor.innerHTML);
+            const table = container!.querySelector('table');
+            assert.ok(table!.classList.contains('table-rendered'));
+            assert.strictEqual(table!.querySelectorAll('thead th').length, 3);
+            assert.strictEqual(table!.querySelectorAll('tbody tr').length, 2);
+            // 段落の後ろに入っている
+            assert.ok(
+                p.compareDocumentPosition(container!) & env.window.Node.DOCUMENT_POSITION_FOLLOWING
+            );
+        });
+
+        test('キャレットが無ければ末尾へ挿入する', () => {
+            env.editor.innerHTML = '<p>既存</p>';
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+
+            env.table.insertTable(1, 2);
+
+            const table = env.editor.querySelector('.table-container table');
+            assert.ok(table, env.editor.innerHTML);
+            assert.strictEqual(table!.querySelectorAll('thead th').length, 2);
+        });
+    });
 });

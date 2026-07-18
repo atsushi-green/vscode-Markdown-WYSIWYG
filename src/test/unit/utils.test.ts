@@ -62,6 +62,51 @@ suite('EditorUtils', () => {
         });
     });
 
+    suite('countLines（Raw行番号ガター用）', () => {
+        test('空文字・null・undefinedは1行（textareaのカーソル行1に相当）', () => {
+            for (const input of ['', null, undefined]) {
+                assert.strictEqual(env.utils.countLines(input), 1, JSON.stringify(input));
+            }
+        });
+
+        test('改行を含まない1行は1行', () => {
+            assert.strictEqual(env.utils.countLines('# 見出し'), 1);
+        });
+
+        test('N個の改行はN+1行', () => {
+            assert.strictEqual(env.utils.countLines('a\nb\nc'), 3);
+        });
+
+        test('末尾の改行は次の空行を1行として数える', () => {
+            assert.strictEqual(env.utils.countLines('a\n'), 2);
+        });
+
+        test('CRLF/CRも1つの改行として数える', () => {
+            assert.strictEqual(env.utils.countLines('a\r\nb\rc'), 3);
+        });
+    });
+
+    suite('buildLineNumberText（Raw行番号ガター用）', () => {
+        test('1..count を改行区切りで並べる', () => {
+            assert.strictEqual(env.utils.buildLineNumberText(3), '1\n2\n3');
+        });
+
+        test('count=1 は "1"', () => {
+            assert.strictEqual(env.utils.buildLineNumberText(1), '1');
+        });
+
+        test('0以下でも最低1行分（"1"）を返す', () => {
+            assert.strictEqual(env.utils.buildLineNumberText(0), '1');
+            assert.strictEqual(env.utils.buildLineNumberText(-5), '1');
+        });
+
+        test('countLines と組み合わせて本文の行数分の番号になる', () => {
+            const text = 'line1\nline2\nline3\nline4';
+            const n = env.utils.countLines(text);
+            assert.strictEqual(env.utils.buildLineNumberText(n), '1\n2\n3\n4');
+        });
+    });
+
     suite('findAncestor', () => {
         test('条件に一致する祖先要素を返す', () => {
             env.editor.innerHTML = '<pre><code>x</code></pre>';

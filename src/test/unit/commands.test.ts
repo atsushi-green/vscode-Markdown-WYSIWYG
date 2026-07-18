@@ -120,6 +120,74 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('インライン数式のライブ変換（$...$ の入力）', () => {
+        /** math-inline コンテナの data-math（＝保持している生の式）を返す */
+        function mathOf(): string | null {
+            return env.editor.querySelector('.math-inline')?.getAttribute('data-math') ?? null;
+        }
+
+        test('$x$ を入力すると math-inline コンテナへ変換される', () => {
+            env.editor.innerHTML = '<p>式 $x^2$ です</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const span = env.editor.querySelector('.math-inline');
+            assert.ok(span, env.editor.innerHTML);
+            assert.strictEqual(mathOf(), 'x^2', env.editor.innerHTML);
+            // KaTeX描画前なのでコンテナは空・編集不可
+            assert.strictEqual(span!.getAttribute('contenteditable'), 'false');
+            assert.strictEqual(span!.textContent, '');
+        });
+
+        test('数式の中身の _ や ^* は強調・斜体へ化けない', () => {
+            env.editor.innerHTML = '<p>$a_1 + b_2$ と $\\alpha^*$</p>';
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('em'), null, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+            assert.strictEqual(mathOf(), 'a_1 + b_2', env.editor.innerHTML);
+        });
+
+        test('閉じ `$` が無いうちは変換されない（入力途中で式が壊れない）', () => {
+            env.editor.innerHTML = '<p>入力中 $x^2</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('.math-inline'), null, env.editor.innerHTML);
+        });
+
+        test('エスケープした \\$ は数式にならずリテラルの $ になる', () => {
+            env.editor.innerHTML = '<p>価格は \\$100 と \\$200 です</p>';
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('.math-inline'), null, env.editor.innerHTML);
+            assert.ok(env.editor.textContent!.includes('価格は $100 と $200 です'), env.editor.innerHTML);
+        });
+
+        test('インラインコード内の $x$ は数式にならずコードに保持される', () => {
+            env.editor.innerHTML = '<p>`$x$` はコード</p>';
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('.math-inline'), null, env.editor.innerHTML);
+            const code = env.editor.querySelector('code');
+            assert.ok(code, env.editor.innerHTML);
+            assert.strictEqual(code!.textContent, '$x$');
+        });
+
+        test('式に含まれるダブルクォートが属性を壊さない', () => {
+            env.editor.innerHTML = '<p>$\\text{"x"}$</p>';
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(mathOf(), '\\text{"x"}', env.editor.innerHTML);
+        });
+
+        test('markdownToHtml と同じ data-math を生成する（読込時とライブ変換の一致）', () => {
+            const expr = '\\alpha + \\beta';
+            env.editor.innerHTML = `<p>$${expr}$</p>`;
+            env.commands.applyInlineFormatting();
+            const live = mathOf();
+            // 読込パス（markdownToHtml）の data-math と突き合わせる
+            const div = env.document.createElement('div');
+            div.innerHTML = env.markdown.markdownToHtml(`$${expr}$`);
+            const loaded = div.querySelector('.math-inline')?.getAttribute('data-math') ?? null;
+            assert.strictEqual(live, loaded, `live=${live} loaded=${loaded}`);
+        });
+    });
+
     suite('handleHorizontalRule', () => {
         /** エディタに1ブロック置き、キャレットをその先頭に置く */
         function setupBlock(html: string): HTMLElement {
@@ -1056,6 +1124,123 @@ suite('CommandsModule', () => {
             sel.addRange(range);
             assert.strictEqual(env.commands.syncRawMarkdownToCaret(), false, env.editor.innerHTML);
             assert.strictEqual(rawSpan(), span, env.editor.innerHTML);
+        });
+    });
+
+    suite('数式の生Markdown表示（クリックで展開・キャレット離脱で復帰）', () => {
+        /** 指定ノードの指定オフセットにキャレットを置く */
+        function caretIn(node: Node, offset: number): void {
+            const range = env.document.createRange();
+            range.setStart(node, offset);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+        /** 生Markdown表示中の要素を返す（インラインspan / ブロックdiv） */
+        function raw(): HTMLElement | null {
+            return env.editor.querySelector('.raw-markdown');
+        }
+
+        test('インライン数式のクリックで `$式$` の生Markdownへ展開される', () => {
+            env.editor.innerHTML = '<p>前<span class="math-inline" data-math="\\alpha + \\beta" contenteditable="false"></span>後</p>';
+            env.commands.handleMathClick(env.editor.querySelector('.math-inline'));
+            assert.strictEqual(raw()?.textContent, '$\\alpha + \\beta$', env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('.math-inline'), null, env.editor.innerHTML);
+        });
+
+        test('展開後のキャレットは開き `$` の直後に置かれる', () => {
+            env.editor.innerHTML = '<p><span class="math-inline" data-math="x^2" contenteditable="false"></span></p>';
+            env.editor.focus(); // 実機同様、数式をクリックする＝エディタはフォーカス済み
+            env.commands.handleMathClick(env.editor.querySelector('.math-inline'));
+            const range = env.window.getSelection().getRangeAt(0);
+            assert.strictEqual(range.startContainer, raw()!.firstChild, env.editor.innerHTML);
+            assert.strictEqual(range.startOffset, 1, '`$` の直後');
+        });
+
+        test('ブロック数式のクリックで `$$ ... $$` のdivへ展開される', () => {
+            env.editor.innerHTML = '<div class="math-block" data-math="x = \\frac{1}{2}" contenteditable="false"></div>';
+            env.commands.handleMathClick(env.editor.querySelector('.math-block'));
+            const el = raw()!;
+            assert.strictEqual(el.tagName, 'DIV', env.editor.innerHTML);
+            assert.ok(el.classList.contains('raw-math-block'), env.editor.innerHTML);
+            assert.strictEqual(el.textContent, '$$\nx = \\frac{1}{2}\n$$', env.editor.innerHTML);
+        });
+
+        test('展開中の数式は再変換されない（生表示が維持される）', () => {
+            env.editor.innerHTML = '<p><span class="math-inline" data-math="a_1" contenteditable="false"></span></p>';
+            env.commands.handleMathClick(env.editor.querySelector('.math-inline'));
+            env.commands.applyInlineFormatting();
+            assert.ok(raw(), env.editor.innerHTML);
+            // `a_1` の `_` が斜体（<em>）へ化けていないこと
+            assert.strictEqual(env.editor.querySelector('em'), null, env.editor.innerHTML);
+        });
+
+        test('キャレットが外れるとインライン数式コンテナへ戻る', () => {
+            env.editor.innerHTML = '<p><span class="math-inline" data-math="x^2" contenteditable="false"></span>後</p>';
+            env.commands.handleMathClick(env.editor.querySelector('.math-inline'));
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            const changed = env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(changed, true, env.editor.innerHTML);
+            assert.strictEqual(raw(), null, env.editor.innerHTML);
+            const math = env.editor.querySelector('.math-inline') as HTMLElement;
+            assert.ok(math, env.editor.innerHTML);
+            assert.strictEqual(math.getAttribute('data-math'), 'x^2', env.editor.innerHTML);
+        });
+
+        test('キャレットが外れるとブロック数式コンテナへ戻る', () => {
+            env.editor.innerHTML = '<div class="math-block" data-math="x^2" contenteditable="false"></div><p>後</p>';
+            env.commands.handleMathClick(env.editor.querySelector('.math-block'));
+            const tail = env.editor.querySelector('p')!.firstChild as Text;
+            caretIn(tail, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(raw(), null, env.editor.innerHTML);
+            const math = env.editor.querySelector('.math-block') as HTMLElement;
+            assert.ok(math, env.editor.innerHTML);
+            assert.strictEqual(math.getAttribute('data-math'), 'x^2', env.editor.innerHTML);
+        });
+
+        test('展開中に式を編集すると復帰時に data-math へ反映される（インライン）', () => {
+            env.editor.innerHTML = '<p><span class="math-inline" data-math="x" contenteditable="false"></span>後</p>';
+            env.commands.handleMathClick(env.editor.querySelector('.math-inline'));
+            raw()!.textContent = '$y^2$';
+            const tail = env.editor.querySelector('p')!.lastChild as Text;
+            caretIn(tail, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(
+                env.editor.querySelector('.math-inline')!.getAttribute('data-math'), 'y^2',
+                env.editor.innerHTML);
+        });
+
+        test('展開中に式を編集すると復帰時に data-math へ反映される（ブロック）', () => {
+            env.editor.innerHTML = '<div class="math-block" data-math="x" contenteditable="false"></div><p>後</p>';
+            env.commands.handleMathClick(env.editor.querySelector('.math-block'));
+            raw()!.textContent = '$$\ny = mx + b\n$$';
+            const tail = env.editor.querySelector('p')!.firstChild as Text;
+            caretIn(tail, 1);
+            env.commands.syncRawMarkdownToCaret();
+            assert.strictEqual(
+                env.editor.querySelector('.math-block')!.getAttribute('data-math'), 'y = mx + b',
+                env.editor.innerHTML);
+        });
+
+        test('展開してもMarkdownは変わらない（インライン：往復不変）', () => {
+            env.editor.innerHTML = '<p>前<span class="math-inline" data-math="\\alpha^2" contenteditable="false"></span>後</p>';
+            const before = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            env.commands.handleMathClick(env.editor.querySelector('.math-inline'));
+            const after = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(after, before, JSON.stringify(after));
+            assert.ok(/前\$\\alpha\^2\$後/.test(after), JSON.stringify(after));
+        });
+
+        test('展開してもMarkdownは変わらない（ブロック：往復不変）', () => {
+            env.editor.innerHTML = '<div class="math-block" data-math="x = \\frac{1}{2}" contenteditable="false"></div>';
+            const before = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            env.commands.handleMathClick(env.editor.querySelector('.math-block'));
+            const after = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(after, before, JSON.stringify(after));
+            assert.ok(/\$\$\nx = \\frac\{1\}\{2\}\n\$\$/.test(after), JSON.stringify(after));
         });
     });
 

@@ -29,6 +29,34 @@ window.EditorUtils = (function() {
     }
 
     /**
+     * テキストの論理行数を数える（純粋関数）。
+     * textareaの行と一致させるため、行区切りは `\n` のみで数える。
+     * - 空文字は1行（textareaも空でカーソル行1がある）
+     * - 末尾の改行は次の空行を1行として数える（"a\n" は2行）
+     * 呼び出し側は事前に normalizeEol 済みを渡す想定だが、
+     * 保険として `\r\n?` も1つの改行として扱う。
+     */
+    function countLines(text) {
+        if (!text) {
+            return 1;
+        }
+        return normalizeEol(text).split('\n').length;
+    }
+
+    /**
+     * 1..count の行番号を改行区切りで並べた文字列を返す（純粋関数）。
+     * Rawモードの行番号ガター（`white-space: pre` の1要素）へそのまま流し込む。
+     */
+    function buildLineNumberText(count) {
+        const n = Math.max(1, count | 0);
+        const lines = new Array(n);
+        for (let i = 0; i < n; i++) {
+            lines[i] = String(i + 1);
+        }
+        return lines.join('\n');
+    }
+
+    /**
      * トースト通知を表示
      */
     function showToast(message) {
@@ -257,6 +285,8 @@ window.EditorUtils = (function() {
     return {
         normalizeEol: normalizeEol,
         countText: countText,
+        countLines: countLines,
+        buildLineNumberText: buildLineNumberText,
         showToast: showToast,
         saveCursorPosition: saveCursorPosition,
         restoreCursorPosition: restoreCursorPosition,

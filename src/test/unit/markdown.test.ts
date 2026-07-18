@@ -529,6 +529,27 @@ suite('MarkdownModule', () => {
             const back = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(md)).trim();
             assert.strictEqual(back, md);
         });
+
+        test('生Markdown表示中のインライン数式span（`$式$`）は $ をエスケープせず直列化する', () => {
+            // 生Markdown表示（commands.expandMathToRaw）の展開中に書き戻しても
+            // 展開前と同一のMarkdownになること（$ が \$ へ化けない）
+            const html = '<p><span class="raw-markdown">$\\alpha^2$</span></p>';
+            const back = env.markdown.htmlToMarkdown(html).trim();
+            assert.strictEqual(back, '$\\alpha^2$');
+        });
+
+        test('生Markdown表示中のブロック数式div（`$$式$$`）は $ をエスケープせず直列化する', () => {
+            const html = '<div class="raw-markdown raw-math-block">$$\nx = \\frac{1}{2}\n$$</div>';
+            const back = env.markdown.htmlToMarkdown(html).trim();
+            assert.strictEqual(back, '$$\nx = \\frac{1}{2}\n$$');
+        });
+
+        test('ブロック数式divの改行が<br>で表現されていても直列化で改行に戻る', () => {
+            // contenteditableは改行を <br> で表すことがあるため、それも改行として扱う
+            const html = '<div class="raw-markdown raw-math-block">$$<br>x^2<br>$$</div>';
+            const back = env.markdown.htmlToMarkdown(html).trim();
+            assert.strictEqual(back, '$$\nx^2\n$$');
+        });
     });
 
     suite('ラウンドトリップ（Markdown → HTML → Markdown）', () => {
@@ -763,6 +784,151 @@ suite('MarkdownModule', () => {
                 env.markdown.markdownToHtml(original)
             );
             assert.strictEqual(roundTripped.trim(), original.trim());
+        });
+    });
+
+    // env.markdown が返す配列はjsdom側レルムのため、deepStrictEqualの
+    // プロトタイプ照合に通らない。Node側配列へ移し替えてから比較する。
+    const eqArr = (actual: unknown[], expected: unknown[]) =>
+        assert.deepStrictEqual(Array.prototype.slice.call(actual), expected);
+
+    suite('coreLinesOf（行番号表示2/3）', () => {
+        test('見出し・段落は末尾の空行を落として本文行だけ返す', () => {
+            eqArr(env.markdown.coreLinesOf('# 見出し\n\n'), ['# 見出し']);
+            eqArr(env.markdown.coreLinesOf('para1\n\n'), ['para1']);
+        });
+
+        test('複数行ブロック（コードフェンス）は本文行をすべて返す', () => {
+            eqArr(env.markdown.coreLinesOf('```\na\nb\n```\n\n'), ['```', 'a', 'b', '```']);
+        });
+
+        test('前後の空行を落とすが本文中の空行は保つ', () => {
+            eqArr(env.markdown.coreLinesOf('\nl1\n\nl2\n\n'), ['l1', '', 'l2']);
+        });
+
+        test('空だけのブロックは空配列（行を占めない）', () => {
+            eqArr(env.markdown.coreLinesOf('\n'), []);
+            eqArr(env.markdown.coreLinesOf(''), []);
+        });
+    });
+
+    suite('computeBlockStartLines（行番号表示2/3）', () => {
+        test('段落2つは [1, 3]（間に空行1つ）', () => {
+            const final = 'para1\n\npara2\n';
+            const blocks = ['para1\n\n', 'para2\n\n'];
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, 3]);
+        });
+
+        test('見出し＋段落は [1, 3]', () => {
+            const final = '# H\n\npara\n';
+            const blocks = ['# H\n\n', 'para\n\n'];
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, 3]);
+        });
+
+        test('複数行のコードブロックの次の段落は空行分ずれる', () => {
+            const final = '```\na\nb\nc\n```\n\npara\n';
+            const blocks = ['```\na\nb\nc\n```\n\n', 'para\n\n'];
+            // コードは1〜5行目、6行目は空行、段落は7行目
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, 7]);
+        });
+
+        test('本文を持たない空ブロックは null（行を占めない）', () => {
+            const final = 'para\n\np2\n';
+            const blocks = ['para\n\n', '\n', 'p2\n\n'];
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, null, 3]);
+        });
+
+        test('同一本文の段落が並んでも順序（cursor前進）で正しく対応づく', () => {
+            const final = 'foo\n\nfoo\n';
+            const blocks = ['foo\n\n', 'foo\n\n'];
+            eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, 3]);
+        });
+
+        test('computeEditorLineMap: 見出し＋段落は各ライブ要素に開始行を対応づける', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# 見出し\n\n段落A\n\n段落B');
+            const map = env.markdown.computeEditorLineMap(env.editor);
+            assert.strictEqual(map.length, 3, JSON.stringify(map.map((m: any) => m.line)));
+            assert.strictEqual(map[0].line, 1);
+            assert.strictEqual(map[0].block, env.editor.children[0]); // 実要素への参照
+            assert.strictEqual(map[0].block.tagName, 'H1');
+            assert.strictEqual(map[1].line, 3);
+            assert.strictEqual(map[2].line, 5);
+        });
+
+        test('computeEditorLineMap: コードブロックの次の段落は空行分ずれる', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('段落A\n\n```\nx\ny\n```\n\n段落B');
+            const map = env.markdown.computeEditorLineMap(env.editor);
+            const lines = map.map((m: any) => m.line);
+            assert.deepStrictEqual(Array.prototype.slice.call(lines), [1, 3, 8], JSON.stringify(lines));
+            assert.strictEqual(map[1].block.tagName, 'PRE');
+        });
+
+        test('computeEditorLineMap: Mermaidは可視コンテナへ対応し隠しpreは対象外', () => {
+            env.editor.innerHTML =
+                '<p>前</p>' +
+                '<pre class="mermaid-source" data-mermaid-id="m1" style="display:none">' +
+                '<code>graph TD; A--&gt;B</code></pre>' +
+                '<div class="mermaid-container" data-mermaid-id="m1" contenteditable="false">' +
+                '<svg></svg></div>' +
+                '<p>後</p>';
+            const map = env.markdown.computeEditorLineMap(env.editor);
+            const blocks = map.map((m: any) => m.block);
+            // 隠しソースpreは行番号の対象にしない
+            assert.ok(
+                !blocks.some((b: Element) => b.classList.contains('mermaid-source')),
+                'hidden mermaid-source pre must not be a target'
+            );
+            // 可視コンテナが対象に含まれる
+            const container = env.editor.querySelector('.mermaid-container');
+            assert.ok(blocks.indexOf(container) !== -1, 'mermaid-container must be a target');
+            // 前・図・後 の3ブロック、行番号は単調増加
+            assert.strictEqual(map.length, 3, JSON.stringify(map.map((m: any) => m.line)));
+            for (let i = 1; i < map.length; i++) {
+                assert.ok(map[i].line > map[i - 1].line, JSON.stringify(map.map((m: any) => m.line)));
+            }
+        });
+
+        test('computeEditorLineMap: テーブルは .table-container（可視要素）へ対応づける', () => {
+            env.editor.innerHTML =
+                '<p>前</p>' +
+                '<div class="table-container"><table><thead><tr><th>a</th></tr></thead>' +
+                '<tbody><tr><td>1</td></tr></tbody></table></div>';
+            const map = env.markdown.computeEditorLineMap(env.editor);
+            const container = env.editor.querySelector('.table-container');
+            const tableEntry = map.find((m: any) => m.block === container);
+            assert.ok(tableEntry, 'table-container should be a target: ' + JSON.stringify(map.map((m: any) => m.line)));
+            assert.strictEqual(map[0].line, 1);
+        });
+
+        test('実DOM経由: markdownToHtml→各ブロック直列化→開始行が本文行と一致する', () => {
+            const src = '# 見出し\n\n段落A\n\n```\nx\ny\n```\n\n段落B';
+            const html = env.markdown.markdownToHtml(src);
+            const editor = env.document.createElement('div');
+            editor.innerHTML = html;
+
+            const finalMd = env.markdown.htmlToMarkdown(html);
+            // 各トップレベルブロックを個別に直列化（serializeBlockElement相当）
+            const blocks = Array.from(editor.children).map(
+                (c: Element) => env.markdown.htmlToMarkdown(c.outerHTML)
+            );
+
+            const starts = env.markdown.computeBlockStartLines(finalMd, blocks);
+            const docLines = finalMd.split('\n');
+
+            assert.strictEqual(starts[0], 1, finalMd);
+            // 返った各開始行には、そのブロックの本文先頭行が実際に存在する
+            starts.forEach((line: number | null, i: number) => {
+                if (line === null) {
+                    return;
+                }
+                const core = env.markdown.coreLinesOf(blocks[i]);
+                assert.strictEqual(docLines[line - 1], core[0], `block ${i}: ${finalMd}`);
+            });
+            // 開始行は単調増加（順序が保たれる）
+            const nums = starts.filter((n: number | null) => n !== null) as number[];
+            for (let i = 1; i < nums.length; i++) {
+                assert.ok(nums[i] > nums[i - 1], `not increasing: ${nums}`);
+            }
         });
     });
 });

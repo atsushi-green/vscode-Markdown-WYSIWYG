@@ -61,6 +61,199 @@
         wordCountStatusEl.textContent = `単語数: ${c.words} / 文字数: ${c.chars}`;
     }
 
+    // Rawモードの行番号ガター（初期化時に生成）
+    let rawEditorWrap = null;
+    let rawGutterInner = null;
+
+    /**
+     * Rawモードの行番号ガターを生成する（一度だけ）。
+     * `#rawEditor`（textarea）を flex 行のラッパーで包み、その左に行番号ガターを置く。
+     * markdownEditor.ts のHTMLは変えず、単語数バーと同じくJS側で構造を組む。
+     * textarea は `white-space: pre`（非折り返し）にしているため、論理行＝1表示行で
+     * 番号がずれない（VS Codeの既定＝行折り返しオフと同じ挙動。CSSは editor.css）。
+     */
+    function initRawLineGutter() {
+        const ta = state.rawEditor;
+        if (!ta || rawGutterInner) {
+            return;
+        }
+        const wrap = document.createElement('div');
+        wrap.id = 'rawEditorWrap';
+        wrap.className = 'raw-editor-wrap';
+        wrap.style.display = 'none'; // Rawモードに入るまで隠す
+
+        const gutter = document.createElement('div');
+        gutter.className = 'raw-line-gutter';
+        const inner = document.createElement('div');
+        inner.className = 'raw-line-gutter-inner';
+        gutter.appendChild(inner);
+
+        // ラッパーを rawEditor の位置へ挿し、gutter と rawEditor を中へ移す
+        ta.parentNode.insertBefore(wrap, ta);
+        wrap.appendChild(gutter);
+        wrap.appendChild(ta);
+        // 可視制御はラッパー側で行うため、textarea自体は常に表示のままにする
+        ta.style.display = 'block';
+
+        rawEditorWrap = wrap;
+        rawGutterInner = inner;
+
+        // 縦スクロールに追従（横スクロールでは動かさない）。リサイズでも再同期
+        ta.addEventListener('scroll', syncRawGutterScroll);
+        window.addEventListener('resize', syncRawGutterScroll);
+    }
+
+    /**
+     * ガターの番号列を textarea の縦スクロール量だけ上へずらして行位置を合わせる。
+     */
+    function syncRawGutterScroll() {
+        if (rawGutterInner && state.rawEditor) {
+            rawGutterInner.style.transform = 'translateY(' + (-state.rawEditor.scrollTop) + 'px)';
+        }
+    }
+
+    /**
+     * 現在のRaw本文の行数に合わせて行番号を並べ直す。
+     */
+    function updateRawLineGutter() {
+        if (!rawGutterInner || !state.rawEditor) {
+            return;
+        }
+        const count = utils.countLines(state.rawEditor.value || '');
+        rawGutterInner.textContent = utils.buildLineNumberText(count);
+        syncRawGutterScroll();
+    }
+
+    /**
+     * Rawモードに入るときにガター付きラッパーを表示し、行番号を更新する。
+     */
+    function showRawLineGutter() {
+        if (rawEditorWrap) {
+            rawEditorWrap.style.display = 'flex';
+        }
+        updateRawLineGutter();
+    }
+
+    /**
+     * Rawモードを抜けるときにガター付きラッパーを隠す。
+     */
+    function hideRawLineGutter() {
+        if (rawEditorWrap) {
+            rawEditorWrap.style.display = 'none';
+        }
+    }
+
+    // WYSIWYG（プレビュー）モードの行番号ガター（初期化時に生成）
+    let wysiwygEditorWrap = null;
+    let wysiwygGutterInner = null;
+    let wysiwygGutterTimeout = null;
+
+    /**
+     * WYSIWYG側の行番号ガターを生成する（一度だけ）。
+     * `#editor` を flex 行のラッパーで包み、その左に行番号ガターを置く（Rawと同じ方式）。
+     * Rawと違い各ブロックの高さは可変なので、番号は等間隔ではなく
+     * `markdown.computeEditorLineMap` が返す各ブロックの位置（`getBoundingClientRect`）
+     * に合わせて絶対配置する。行位置の厳密な一致はレイアウト依存のため実機で確認する。
+     */
+    function initWysiwygLineGutter() {
+        const ed = state.editor;
+        if (!ed || wysiwygGutterInner) {
+            return;
+        }
+        const wrap = document.createElement('div');
+        wrap.id = 'wysiwygEditorWrap';
+        wrap.className = 'wysiwyg-editor-wrap';
+        // プレビューが既定モードなので初期は表示
+
+        const gutter = document.createElement('div');
+        gutter.className = 'wysiwyg-line-gutter';
+        const inner = document.createElement('div');
+        inner.className = 'wysiwyg-line-gutter-inner';
+        gutter.appendChild(inner);
+
+        // ラッパーを #editor の位置へ挿し、gutter と #editor を中へ移す
+        ed.parentNode.insertBefore(wrap, ed);
+        wrap.appendChild(gutter);
+        wrap.appendChild(ed);
+
+        wysiwygEditorWrap = wrap;
+        wysiwygGutterInner = inner;
+
+        // 縦スクロールに追従（内容・レイアウト変化時のみ再配置＝input/resizeで update）
+        ed.addEventListener('scroll', syncWysiwygGutterScroll);
+        window.addEventListener('resize', updateWysiwygLineGutter);
+
+        updateWysiwygLineGutter();
+    }
+
+    /**
+     * ガターの番号列を #editor の縦スクロール量だけ上へずらして行位置を合わせる。
+     */
+    function syncWysiwygGutterScroll() {
+        if (wysiwygGutterInner && state.editor) {
+            wysiwygGutterInner.style.transform = 'translateY(' + (-state.editor.scrollTop) + 'px)';
+        }
+    }
+
+    /**
+     * 現在のエディタ内容から各ブロックの開始行番号を割り出し、
+     * それぞれのブロックの上端位置へ番号を絶対配置し直す。
+     * Rawモード中・ガター未生成時は何もしない。
+     */
+    function updateWysiwygLineGutter() {
+        if (!wysiwygGutterInner || !state.editor || state.isRawMode) {
+            return;
+        }
+        const lineMap = markdown.computeEditorLineMap(state.editor);
+
+        // 既存の番号要素をクリアして作り直す（差分更新はしない＝単純さ優先）
+        wysiwygGutterInner.textContent = '';
+
+        const editorRect = state.editor.getBoundingClientRect();
+        const scrollTop = state.editor.scrollTop;
+        lineMap.forEach(function (entry) {
+            // ブロックの上端を #editor のスクロール内容座標へ変換（offsetParent非依存）
+            const top = entry.block.getBoundingClientRect().top - editorRect.top + scrollTop;
+            const num = document.createElement('div');
+            num.className = 'wysiwyg-line-number';
+            num.textContent = String(entry.line);
+            num.style.top = top + 'px';
+            wysiwygGutterInner.appendChild(num);
+        });
+
+        syncWysiwygGutterScroll();
+    }
+
+    /**
+     * 行番号ガターの更新をデバウンスして呼ぶ（computeEditorLineMap は
+     * htmlToMarkdown を複数回走らせるため入力ごとの即時実行は重い）。
+     */
+    function scheduleWysiwygGutterUpdate() {
+        if (wysiwygGutterTimeout) {
+            clearTimeout(wysiwygGutterTimeout);
+        }
+        wysiwygGutterTimeout = setTimeout(updateWysiwygLineGutter, 150);
+    }
+
+    /**
+     * プレビューモードに入る（戻る）ときにガター付きラッパーを表示し行番号を更新する。
+     */
+    function showWysiwygLineGutter() {
+        if (wysiwygEditorWrap) {
+            wysiwygEditorWrap.style.display = 'flex';
+        }
+        updateWysiwygLineGutter();
+    }
+
+    /**
+     * Rawモードに入るときにガター付きラッパーを隠す。
+     */
+    function hideWysiwygLineGutter() {
+        if (wysiwygEditorWrap) {
+            wysiwygEditorWrap.style.display = 'none';
+        }
+    }
+
     /**
      * エディタの初期化
      */
@@ -104,11 +297,20 @@
         // Mermaidコンテキストメニューのイベント
         mermaidModule.setupContextMenuEvents();
 
+        // ブロック数式の右クリックメニュー（PNGコピー）
+        mathModule.setupContextMenu(state.editor);
+
         // コードブロック言語セレクタのイベント
         commands.setupCodeLangEvents();
 
         // 単語数・文字数ステータスバーを生成
         initWordCountStatus();
+
+        // Rawモードの行番号ガターを生成（rawEditorをラッパーで包む）
+        initRawLineGutter();
+
+        // WYSIWYGモードの行番号ガターを生成（#editorをラッパーで包む）
+        initWysiwygLineGutter();
 
         console.log('[Editor] Initialized');
     }
@@ -186,6 +388,9 @@
 
             // 単語数・文字数の表示を更新
             updateWordCount();
+
+            // 行番号ガターを更新（変換コストが高いためデバウンス）
+            scheduleWysiwygGutterUpdate();
 
             // 文書への書き戻し（変換コストが高いためデバウンス）
             if (editSyncTimeout) {
@@ -308,6 +513,7 @@
                 state.isUpdating = false;
             }
             state.lastSentMarkdown = incoming;
+            updateRawLineGutter();
             updateWordCount();
             return;
         }
@@ -360,6 +566,9 @@
 
         // 単語数・文字数の表示を更新
         updateWordCount();
+
+        // 行番号ガターを更新（Mermaid/数式/テーブル描画後の高さで再配置）
+        scheduleWysiwygGutterUpdate();
     }
 
     /**
@@ -383,8 +592,8 @@
             const cleanHtml = markdown.getCleanHtmlFromEditor();
             const md = state.lastSentMarkdown || markdown.htmlToMarkdown(cleanHtml);
             state.rawEditor.value = md;
-            state.editor.style.display = 'none';
-            state.rawEditor.style.display = 'block';
+            hideWysiwygLineGutter();
+            showRawLineGutter();
             state.toggleBtn.classList.add('active');
             state.toggleBtn.innerHTML = '👁️ Preview';
             state.toggleBtn.title = 'プレビュー表示に切替 (Ctrl+/)';
@@ -399,8 +608,8 @@
             mermaidModule.render();
             mathModule.render(state.editor);
             tableModule.render();
-            state.rawEditor.style.display = 'none';
-            state.editor.style.display = 'block';
+            hideRawLineGutter();
+            showWysiwygLineGutter();
             state.toggleBtn.classList.remove('active');
             state.toggleBtn.innerHTML = '📄 Raw';
             state.toggleBtn.title = '生マークダウン表示切替 (Ctrl+/)';
@@ -433,6 +642,9 @@
                 type: 'edit',
                 content: md
             });
+
+            // 行番号ガターを更新
+            updateRawLineGutter();
 
             // 単語数・文字数の表示を更新
             updateWordCount();
