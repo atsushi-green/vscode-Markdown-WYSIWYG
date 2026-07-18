@@ -4,6 +4,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
+| 2026-07-18 | 表挿入の中核: `table.buildEmptyTableMarkdown(rows, cols)`（空テーブルMarkdown生成・純粋関数）＋ `table.insertTable(rows, cols)`（キャレット位置の直後＝無ければ末尾へ挿入し `render()` で即インタラクティブ化。挿入方式は `commands.insertToc` と同じ）。ユニットテスト6件。呼び出しUI（右クリックメニュー＋行数・列数ダイアログ）はROADMAPに分割（実機確認前提） | `_______` |
 | 2026-07-18 | 行番号表示 (3/3 描画): WYSIWYGモードの行番号ガター描画とスクロール同期。`#editor` を flex ラッパーで包み、`computeEditorLineMap` の各ブロック上端（`getBoundingClientRect`）へ開始行番号を絶対配置、`transform` で縦スクロール追従。input（デバウンス）/文書更新/リサイズで再配置。`markdownEditor.ts` 非変更。**これで行番号表示（元L項目の3分割）が一通り完了**。ピクセル整列は実機確認前提 | `5c82d73` |
 | 2026-07-18 | 行番号表示 (3/3 橋渡し): ライブ`#editor`から「表示ブロック→開始行」を対応づける `markdown.computeEditorLineMap`。clone整形を `getCleanEditorClone` へ切り出して `getCleanHtmlFromEditor` と共有、Mermaidの隠しpreを除外し可視コンテナ・テーブルの `.table-container` へ対応。jsdomでユニットテスト（元L項目の分割(3/3)前段。残りはガター描画＝実機確認前提） | `092f2a3` |
 | 2026-07-18 | 行番号表示 (2/3): WYSIWYG側「ブロック→ソース開始行」対応付け。純粋関数 `markdown.computeBlockStartLines(finalMarkdown, blockMarkdowns)`＋補助 `coreLinesOf` を追加。各ブロックの本文先頭行を確定ソース内から前方一致で探し1始まりの開始行を返す（空ブロックは `null`・空行畳み込みに非依存）。DOM非依存でユニットテスト（元L項目の分割(2/3)・UIは(3/3)） | `5b72280` |

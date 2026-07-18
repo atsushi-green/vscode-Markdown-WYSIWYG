@@ -519,6 +519,81 @@ window.TableModule = (function() {
     }
 
     /**
+     * 空のMarkdownテーブル文字列を生成する（純粋関数）。
+     * rows = 本文（データ）行数（1以上）、cols = 列数（1以上）。
+     * ヘッダ行＋区切り行（`---`）＋本文行を出力する（セルは空）。
+     * 例: buildEmptyTableMarkdown(2, 3) → ヘッダ1行・区切り1行・本文2行。
+     */
+    function buildEmptyTableMarkdown(rows, cols) {
+        const c = Math.max(1, cols | 0);
+        const r = Math.max(1, rows | 0);
+        const rowLine = (cells) => '| ' + cells.join(' | ') + ' |';
+        const emptyCells = () => {
+            const a = [];
+            for (let i = 0; i < c; i++) {
+                a.push(' ');
+            }
+            return a;
+        };
+        const sepCells = () => {
+            const a = [];
+            for (let i = 0; i < c; i++) {
+                a.push('---');
+            }
+            return a;
+        };
+        const lines = [rowLine(emptyCells()), rowLine(sepCells())];
+        for (let i = 0; i < r; i++) {
+            lines.push(rowLine(emptyCells()));
+        }
+        return lines.join('\n') + '\n';
+    }
+
+    /**
+     * 空のテーブルをキャレット位置（のあるトップレベルブロックの直後、
+     * 無ければ末尾）へ挿入し、即座にインタラクティブ化する。
+     * 挿入方式は commands.insertToc と同じ（読込時と同じ markdownToHtml を通す）。
+     */
+    function insertTable(rows, cols) {
+        const tableMarkdown = buildEmptyTableMarkdown(rows, cols);
+        const temp = document.createElement('div');
+        temp.innerHTML = markdown.markdownToHtml(tableMarkdown);
+        const nodes = Array.prototype.slice.call(temp.childNodes);
+        if (!nodes.length) {
+            return;
+        }
+
+        // 挿入位置（キャレットのあるトップレベルブロックの直後）
+        const selection = window.getSelection();
+        let block = null;
+        if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            if (state.editor.contains(range.startContainer)) {
+                block = utils.findBlockAncestor(range.startContainer);
+                while (block && block.parentNode !== state.editor) {
+                    block = block.parentNode;
+                }
+            }
+        }
+
+        if (block && block.parentNode === state.editor) {
+            let ref = block;
+            nodes.forEach((n) => {
+                ref.after(n);
+                ref = n;
+            });
+        } else {
+            nodes.forEach((n) => state.editor.appendChild(n));
+        }
+
+        // 挿入した表をインタラクティブ化
+        render();
+
+        // 文書へ反映
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    /**
      * テーブルをクリーンアップ
      */
     function cleanup() {
@@ -551,6 +626,8 @@ window.TableModule = (function() {
         deleteColumn: deleteColumn,
         copy: copy,
         cleanup: cleanup,
-        updateDocument: updateDocument
+        updateDocument: updateDocument,
+        buildEmptyTableMarkdown: buildEmptyTableMarkdown,
+        insertTable: insertTable
     };
 })();

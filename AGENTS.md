@@ -18,6 +18,7 @@
   - Excelからのデータ貼り付け（タブ区切りデータ対応）
   - テーブル全体のコピー（Excel等へ貼り付け可能）
   - Markdown形式との自動相互変換
+  - 空テーブルの挿入（中核）: `table.js` の純粋関数 `buildEmptyTableMarkdown(rows, cols)`（ヘッダ＋区切り＋本文rows行の空テーブルMarkdown・0以下は最低1行1列）と `insertTable(rows, cols)`（`markdownToHtml` に通し、キャレットのあるトップレベルブロック直後＝無ければ末尾へ挿入して `render()` で即インタラクティブ化。挿入方式は `commands.insertToc` と同じ）。ユニットテスト済み。呼び出しUI（右クリックメニュー＋行数・列数入力ダイアログ）はROADMAPの別項目（実機確認前提）
 - **タスクリスト**: GFMのタスクリスト記法（`- [ ]` / `- [x]`）をチェックボックスとして表示し、クリックで完了/未完了を切り替え（Markdownソースへ即時反映）。入力中も `- [ ]` / `- []` / `-[]`（スペース有無を問わず）を打った時点でチェックボックスへライブ変換（`commands.js` の `convertTaskLists`）
 - **シンタックスハイライト**: コードブロック内のコードを自動的に色付け。`highlight.min.js`（highlight.js commonビルド）が JavaScript/TypeScript/JSON/YAML/Go/Rust を含む約36言語を登録済みで、加えて PowerShell を個別バンドルで追加。未登録・未指定の言語は自動判定
 - **リアルタイム同期**: WYSIWYGビューとMarkdownソースの双方向同期
