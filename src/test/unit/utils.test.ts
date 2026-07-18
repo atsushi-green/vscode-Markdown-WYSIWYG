@@ -219,6 +219,104 @@ suite('EditorUtils', () => {
             env.window.getSelection().removeAllRanges();
             assert.strictEqual(env.utils.saveCursorPosition(), null);
         });
+
+        test('復元先オフセットに届かず選択も失われている場合、先頭へ飛ばず最寄り末尾へ復元する', () => {
+            // 「編集中に突然キャレットが一番上へ飛ぶ」不具合の回帰テスト。
+            // 保存時オフセット(29)より本文が短くなり(5文字)、かつ直前の innerHTML
+            // 全書き換えで選択が破棄された状況を再現する。
+            env.editor.innerHTML = '<p>0123456789012345678901234567890123</p>';
+            const textNode = env.editor.querySelector('p')!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 29);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            const saved = env.utils.saveCursorPosition();
+            assert.strictEqual(saved.offset, 29);
+
+            // 本文が短くなり、選択が破棄される（=ブラウザが先頭へ描画する状況）
+            env.editor.innerHTML = '<p>short</p>';
+            selection.removeAllRanges();
+
+            env.utils.restoreCursorPosition(saved);
+
+            const restored = env.window.getSelection();
+            assert.strictEqual(restored.rangeCount, 1, 'キャレットが設定されていない');
+            // エディタ先頭（offset 0 / editor直下）へ飛んでいないこと
+            const jumpedToTop = restored.anchorNode === env.editor && restored.anchorOffset === 0;
+            assert.ok(!jumpedToTop, 'キャレットが先頭へ飛んでいる');
+            // 到達できた最寄り＝残っているテキストの末尾（"short" の 5）
+            assert.strictEqual(restored.anchorNode, env.editor.querySelector('p')!.firstChild);
+            assert.strictEqual(restored.anchorOffset, 5);
+        });
+
+        test('復元先オフセットに届かないが妥当な選択が残っている場合はその位置を維持する', () => {
+            // 選択がエディタ内に残っているケースでは従来どおり何も動かさない
+            // （不要にキャレットを末尾へ動かす回帰を防ぐ）。
+            env.editor.innerHTML = '<p>short</p>';
+            const textNode = env.editor.querySelector('p')!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 2);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            // 届かないオフセットで復元を試みる
+            env.utils.restoreCursorPosition({ offset: 999, text: 'x'.repeat(999) });
+
+            const after = env.window.getSelection();
+            assert.strictEqual(after.anchorNode, textNode);
+            assert.strictEqual(after.anchorOffset, 2, '選択位置が動いてしまった');
+        });
+
+        test('innerHTML全書き換え後に選択が(editor,0)へcollapseした場合も先頭に留めず最寄りへ復元する', () => {
+            // 実ブラウザでは innerHTML 全書き換え後、選択が rangeCount=0 ではなく
+            // 「エディタ直下の先頭 (editor, 0)」へ collapse することがある。これは
+            // まさに「先頭へ飛んだ」状態で、放置すると不具合になる。
+            env.editor.innerHTML = '<p>0123456789012345678901234567890123</p>';
+            const textNode = env.editor.querySelector('p')!.firstChild!;
+            const selection = env.window.getSelection();
+            let range = env.document.createRange();
+            range.setStart(textNode, 29);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            const saved = env.utils.saveCursorPosition();
+
+            // 本文が短くなり、選択はエディタ先頭 (editor, 0) へ collapse した状態を再現
+            env.editor.innerHTML = '<p>short</p>';
+            range = env.document.createRange();
+            range.setStart(env.editor, 0);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            env.utils.restoreCursorPosition(saved);
+
+            const restored = env.window.getSelection();
+            assert.strictEqual(restored.rangeCount, 1);
+            // (editor, 0) の先頭状態に留まっていないこと
+            const stillAtTop = restored.anchorNode === env.editor && restored.anchorOffset === 0;
+            assert.ok(!stillAtTop, 'キャレットが先頭 (editor, 0) に留まっている');
+            // 最寄り＝残っているテキストの末尾へ復元される
+            assert.strictEqual(restored.anchorNode, env.editor.querySelector('p')!.firstChild);
+            assert.strictEqual(restored.anchorOffset, 5);
+        });
+
+        test('本文が空でオフセットに届かない場合はエディタ末尾へフォールバックする', () => {
+            env.editor.innerHTML = '';
+            env.window.getSelection().removeAllRanges();
+
+            env.utils.restoreCursorPosition({ offset: 5, text: 'abcde' });
+
+            const restored = env.window.getSelection();
+            assert.strictEqual(restored.rangeCount, 1);
+            // 例外を投げず、エディタを基準にキャレットが設定されていること
+            assert.ok(env.editor.contains(restored.anchorNode) || restored.anchorNode === env.editor);
+        });
     });
 });
 

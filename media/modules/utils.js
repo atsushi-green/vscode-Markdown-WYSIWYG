@@ -109,11 +109,13 @@ window.EditorUtils = (function() {
         try {
             let currentOffset = 0;
             let found = false;
+            let lastTextNode = null; // 走査した最後のテキストノード（フォールバック用）
 
             function findOffset(node) {
                 if (found) return;
 
                 if (node.nodeType === Node.TEXT_NODE) {
+                    lastTextNode = node;
                     const nodeLength = node.textContent.length;
                     if (currentOffset + nodeLength >= position.offset) {
                         range.setStart(node, position.offset - currentOffset);
@@ -135,7 +137,40 @@ window.EditorUtils = (function() {
             if (found) {
                 selection.removeAllRanges();
                 selection.addRange(range);
+                return;
             }
+
+            // 目的オフセットに届かなかった場合（保存時より本文が短くなった等）。
+            // ここでキャレットを一切設定せずに抜けると、直前の `editor.innerHTML = …`
+            // で選択が破棄されている時にブラウザがキャレットをエディタ先頭へ描画し、
+            // 「編集中に突然キャレットが一番上へ飛ぶ」不具合になる。
+            // 既にエディタ内へ妥当な選択が残っているならそれを尊重し（従来動作）、
+            // 選択が失われている時だけ、到達できた最寄り位置（最後のテキストノード末尾、
+            // テキストが無ければエディタ末尾）へフォールバックして先頭飛びを防ぐ。
+            // ただし innerHTML 全書き換え後にブラウザが `(editor, 0)`（エディタ直下の
+            // 先頭）へ collapse した選択を置くことがあり、これはまさに「先頭へ飛んだ」
+            // 状態そのもの。`editor.contains(editor)` は true になり妥当な選択と誤判定
+            // してしまうため、startContainer がエディタ要素自身の場合は妥当とみなさない。
+            const startContainer = selection.rangeCount > 0
+                ? selection.getRangeAt(0).startContainer
+                : null;
+            const hasValidSelection = startContainer !== null &&
+                startContainer !== state.editor &&
+                state.editor.contains(startContainer);
+            if (hasValidSelection) {
+                return;
+            }
+
+            if (lastTextNode) {
+                const end = lastTextNode.textContent.length;
+                range.setStart(lastTextNode, end);
+                range.setEnd(lastTextNode, end);
+            } else {
+                range.selectNodeContents(state.editor);
+                range.collapse(false);
+            }
+            selection.removeAllRanges();
+            selection.addRange(range);
         } catch (e) {
             console.error('Failed to restore cursor position:', e);
         }
