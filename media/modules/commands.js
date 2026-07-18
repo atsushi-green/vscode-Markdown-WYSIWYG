@@ -1719,10 +1719,15 @@ window.CommandsModule = (function() {
         state.editor.normalize();
         const taskResult = convertTaskLists(state.editor);
         const alertResult = convertAlerts(state.editor);
+        // ブロック数式（`$$…$$`）は walkInline より前に変換する（インライン走査が
+        // `$$` 行のテキストへ触れないよう、先に math-block へ畳んでおく）。
+        const mathBlockResult = convertMathBlocks(state.editor);
         const inlineResult = walkInline(state.editor);
         return {
-            didFormat: taskResult.didFormat || alertResult.didFormat || inlineResult.didFormat,
-            caretHandled: taskResult.caretHandled || alertResult.caretHandled || inlineResult.caretHandled
+            didFormat: taskResult.didFormat || alertResult.didFormat ||
+                mathBlockResult.didFormat || inlineResult.didFormat,
+            caretHandled: taskResult.caretHandled || alertResult.caretHandled ||
+                mathBlockResult.caretHandled || inlineResult.caretHandled
         };
     }
 
@@ -1918,6 +1923,114 @@ window.CommandsModule = (function() {
         });
 
         return { didFormat: didFormat, caretHandled: caretHandled };
+    }
+
+    /**
+     * ブロック数式のライブ変換用に「本文だけの平文ブロック」（class無しの P / DIV）か判定する。
+     * 変換済みの math-block やテーブル・Mermaid等のUIコンテナ（class付き）は対象外。
+     */
+    function isPlainMathLineBlock(el) {
+        if (!el) {
+            return false;
+        }
+        const tag = el.tagName;
+        if (tag !== 'P' && tag !== 'DIV') {
+            return false;
+        }
+        if (el.classList && el.classList.length > 0) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * ブロック数式（`$$ … $$`）のライブ変換。
+     *
+     * インライン数式 `$…$` は convertInlineText が入力時に変換するが、複数行にまたがる
+     * `$$…$$` は読込時の markdownToHtml か既存 raw-math-block の collapse でしか math-block
+     * 化されず、WYSIWYG上で新規入力した `$$…$$` は段落のまま残っていた。その状態で書き戻すと
+     * serializeInline が各 `$` を `\$` へエスケープして生ファイルが破損する。これを防ぐため、
+     * 閉じ `$$` を入力した時点で `$$` 行〜`$$` 行のブロック列を math-block へ変換する。
+     *
+     * エディタ直下の平文ブロック（class無しの P / DIV）だけを対象に、単独の `$$` 行を開き、
+     * その先へ現れる次の単独 `$$` 行を閉じとして扱う（間の平文ブロックが式本文。読込時に
+     * markdownToHtml が `$$…$$` を1つの math-block にするのと同じ範囲）。式は生テキストのまま
+     * 集めて `buildMathBlockHtml`（読込時と同じ生成関数）へ渡すため、`$` はエスケープされない。
+     * キャレットが変換範囲内にあれば、`contenteditable="false"` の math-block へは入れないので
+     * 直後へ空段落を1つ挿入してそこへ移す（見出し確定と同じ考え方）。
+     */
+    function convertMathBlocks(root) {
+        const selection = window.getSelection();
+        const anchor = selection && selection.rangeCount > 0
+            ? selection.getRangeAt(0).startContainer
+            : null;
+
+        const blocks = Array.prototype.slice.call(root.children);
+        for (let i = 0; i < blocks.length; i++) {
+            const open = blocks[i];
+            if (!isPlainMathLineBlock(open) || open.textContent.trim() !== '$$') {
+                continue;
+            }
+
+            // 開き `$$` の先へ、平文ブロックが続く限り閉じ `$$` を探す
+            let closeIdx = -1;
+            for (let j = i + 1; j < blocks.length; j++) {
+                if (!isPlainMathLineBlock(blocks[j])) {
+                    break; // 非平文ブロック（テーブル等）に当たったら打ち切り
+                }
+                if (blocks[j].textContent.trim() === '$$') {
+                    closeIdx = j;
+                    break;
+                }
+            }
+            if (closeIdx === -1) {
+                continue; // 閉じ `$$` がまだ無い（入力途中）
+            }
+
+            // 間の平文ブロックの生テキストを式本文として集める（$ はエスケープしない）
+            const lines = [];
+            for (let k = i + 1; k < closeIdx; k++) {
+                lines.push(blocks[k].textContent);
+            }
+            const expr = lines.join('\n').trim();
+
+            const holder = document.createElement('div');
+            holder.innerHTML = markdown.buildMathBlockHtml(expr);
+            const mathBlock = holder.firstElementChild;
+            if (!mathBlock) {
+                continue;
+            }
+
+            const hadCaret = anchor !== null && blocks.slice(i, closeIdx + 1).some(function (b) {
+                return b === anchor || b.contains(anchor);
+            });
+
+            open.parentNode.insertBefore(mathBlock, open);
+            for (let k = i; k <= closeIdx; k++) {
+                blocks[k].remove();
+            }
+            renderMath(mathBlock.parentNode);
+
+            let caretHandled = false;
+            if (hadCaret && selection) {
+                // math-block は contenteditable=false でキャレットを保持できないため、
+                // 直後に空段落を1つ挿入してそこへキャレットを移す
+                const p = document.createElement('p');
+                p.appendChild(document.createElement('br'));
+                mathBlock.parentNode.insertBefore(p, mathBlock.nextSibling);
+                const range = document.createRange();
+                range.setStart(p, 0);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                caretHandled = true;
+            }
+
+            // 1回のinputで1ブロック変換すれば十分（indexがずれるため走査を終える）
+            return { didFormat: true, caretHandled: caretHandled };
+        }
+
+        return { didFormat: false, caretHandled: false };
     }
 
     /**
@@ -2244,7 +2357,9 @@ window.CommandsModule = (function() {
                     '.mermaid-source, table, input.task-checkbox, hr, img')) {
                 return;
             }
-            if (el.textContent.trim() === '') {
+            // 見出しの `# ` マーク表示用スパンは本文とみなさない（shellIsEmpty で除外）。
+            // 生の textContent で判定すると空見出しが `# ` を含むため消えずに残る。
+            if (shellIsEmpty(el)) {
                 el.remove();
             }
         });
@@ -2304,6 +2419,7 @@ window.CommandsModule = (function() {
         handleTaskListEnter: handleTaskListEnter,
         applyInlineFormatting: applyInlineFormatting,
         convertTaskLists: convertTaskLists,
-        convertAlerts: convertAlerts
+        convertAlerts: convertAlerts,
+        convertMathBlocks: convertMathBlocks
     };
 })();

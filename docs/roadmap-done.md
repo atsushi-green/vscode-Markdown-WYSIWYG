@@ -4,6 +4,8 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
+| 2026-07-19 | バグ修正: 全選択への上書き貼り付け（Ctrl+A→Ctrl+V）で先頭に空見出しの殻 `# ` が残る問題。`commands.js` の `handleMarkdownPaste` の殻ブロック掃除が生 `textContent` で空判定していたため、`.heading-hash` スパン（`# `）を含む空見出しが除去されず残っていた。空判定を同関数内の `shellIsEmpty`（heading-hash を本文から除外）へ置換して解消。前サイクルで発見し `/evolve` のテストゲートを落としていた既存失敗テストが解消（回帰テスト1件追加）。`media/modules/` のみ＝統合テスト非対象 | `ec815e5` |
+| 2026-07-19 | バグ修正: ブロック数式（`$$…$$`）を新規入力しても自動レンダリングされず生ファイルが `\$\$` に破損する問題。`commands.js` に `convertMathBlocks` を追加し `applyInlineFormatting`（入力イベント）から `walkInline` 前に実行。エディタ直下の平文ブロック（class無しP/DIV）の単独 `$$` 行を開き・次の単独 `$$` 行を閉じとして、間の平文ブロックの生テキスト（`$` 非エスケープ）を式本文に集め `markdown.buildMathBlockHtml`〈読込時と同じ〉で math-block へ畳む。閉じ `$$` 無しは非変換、キャレットが範囲内なら直後に空段落を挿入して移す（`caretHandled`）。ユニットテスト7件。`media/modules/` のみ＝統合テスト非対象 | `bebed92` |
 | 2026-07-18 | 表挿入の中核: `table.buildEmptyTableMarkdown(rows, cols)`（空テーブルMarkdown生成・純粋関数）＋ `table.insertTable(rows, cols)`（キャレット位置の直後＝無ければ末尾へ挿入し `render()` で即インタラクティブ化。挿入方式は `commands.insertToc` と同じ）。ユニットテスト6件。呼び出しUI（右クリックメニュー＋行数・列数ダイアログ）はROADMAPに分割（実機確認前提） | `78b0295` |
 | 2026-07-18 | 行番号表示 (3/3 描画): WYSIWYGモードの行番号ガター描画とスクロール同期。`#editor` を flex ラッパーで包み、`computeEditorLineMap` の各ブロック上端（`getBoundingClientRect`）へ開始行番号を絶対配置、`transform` で縦スクロール追従。input（デバウンス）/文書更新/リサイズで再配置。`markdownEditor.ts` 非変更。**これで行番号表示（元L項目の3分割）が一通り完了**。ピクセル整列は実機確認前提 | `5c82d73` |
 | 2026-07-18 | 行番号表示 (3/3 橋渡し): ライブ`#editor`から「表示ブロック→開始行」を対応づける `markdown.computeEditorLineMap`。clone整形を `getCleanEditorClone` へ切り出して `getCleanHtmlFromEditor` と共有、Mermaidの隠しpreを除外し可視コンテナ・テーブルの `.table-container` へ対応。jsdomでユニットテスト（元L項目の分割(3/3)前段。残りはガター描画＝実機確認前提） | `092f2a3` |
