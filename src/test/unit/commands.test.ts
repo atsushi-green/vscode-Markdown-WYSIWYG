@@ -1516,6 +1516,89 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('handleHeadingConfirm（見出しのEnter確定）', () => {
+        /** ノードの内容の末尾にキャレットを置く */
+        function placeCaretAtEndOf(node: Node): void {
+            const range = env.document.createRange();
+            range.selectNodeContents(node);
+            range.collapse(false);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        /** テキストノードの指定オフセットにキャレットを置く */
+        function placeCaretInText(textNode: Node, offset: number): void {
+            const range = env.document.createRange();
+            range.setStart(textNode, offset);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('生の`## ああ`段落でEnterすると見出し化し直下に空段落を作る', () => {
+            env.editor.innerHTML = '<p>## ああ</p>';
+            placeCaretAtEndOf(env.editor.querySelector('p') as HTMLElement);
+            const ev = fakeKeyEvent('Enter');
+            const handled = env.commands.handleHeadingConfirm(ev);
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('h2').length, 1, env.editor.innerHTML);
+            const h2 = env.editor.querySelector('h2')!;
+            assert.ok(h2.textContent!.includes('ああ'), env.editor.innerHTML);
+            const nextP = h2.nextElementSibling as HTMLElement;
+            assert.strictEqual(nextP.tagName, 'P', env.editor.innerHTML);
+            assert.strictEqual(nextP.textContent, '', env.editor.innerHTML);
+        });
+
+        test('レンダリング済み見出しの末尾でEnterしても見出しテキストが複製されない', () => {
+            // 再現バグ: `## ああ` 確定後にエンターすると新しい行にも「ああ」が出る
+            env.editor.innerHTML = env.markdown.markdownToHtml('## ああ');
+            placeCaretAtEndOf(env.editor.querySelector('h2') as HTMLElement);
+            const ev = fakeKeyEvent('Enter');
+            const handled = env.commands.handleHeadingConfirm(ev);
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(ev.defaultPrevented, true, 'ブラウザ既定のEnterを抑止していない');
+            // 見出しは1つだけ、テキストは複製されない
+            assert.strictEqual(env.editor.querySelectorAll('h2').length, 1, env.editor.innerHTML);
+            const h2 = env.editor.querySelector('h2')!;
+            assert.strictEqual(h2.textContent, '## ああ', env.editor.innerHTML);
+            // 直下に空の段落が1つ挿入される
+            const nextP = h2.nextElementSibling as HTMLElement;
+            assert.ok(nextP && nextP.tagName === 'P', env.editor.innerHTML);
+            assert.strictEqual(nextP.textContent, '', env.editor.innerHTML);
+            // 文書全体で「ああ」は1回だけ
+            assert.strictEqual((env.editor.textContent!.match(/ああ/g) || []).length, 1, env.editor.innerHTML);
+        });
+
+        test('見出しの途中でEnterすると後半だけが新段落へ移る（テキストは失われない）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('## ああいい');
+            const h2 = env.editor.querySelector('h2')!;
+            const textNode = h2.lastChild as Node; // "ああいい"
+            placeCaretInText(textNode, 2); // "ああ" と "いい" の間
+            const handled = env.commands.handleHeadingConfirm(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('h2')!.textContent, '## ああ', env.editor.innerHTML);
+            const nextP = env.editor.querySelector('h2')!.nextElementSibling as HTMLElement;
+            assert.strictEqual(nextP.tagName, 'P', env.editor.innerHTML);
+            assert.strictEqual(nextP.textContent, 'いい', env.editor.innerHTML);
+        });
+
+        test('見出しでもリスト項目でもない段落ではEnterを処理しない（false）', () => {
+            env.editor.innerHTML = '<p>ふつうの本文</p>';
+            placeCaretAtEndOf(env.editor.querySelector('p') as HTMLElement);
+            const handled = env.commands.handleHeadingConfirm(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, false, env.editor.innerHTML);
+        });
+
+        test('修飾キー付きEnter（Shift+Enter）は処理しない', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('## ああ');
+            placeCaretAtEndOf(env.editor.querySelector('h2') as HTMLElement);
+            const handled = env.commands.handleHeadingConfirm(fakeKeyEvent('Enter', { shiftKey: true }));
+            assert.strictEqual(handled, false, env.editor.innerHTML);
+        });
+    });
+
     suite('convertAlerts（GitHubアラートのライブ変換）', () => {
         test('マーカーのみのblockquoteをアラートboxへ変換する', () => {
             env.editor.innerHTML = '<blockquote>[!NOTE]</blockquote>';
