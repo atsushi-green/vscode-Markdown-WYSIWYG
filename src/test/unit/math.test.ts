@@ -131,4 +131,50 @@ suite('MathModule', () => {
             assert.strictEqual(env.document.querySelector('.mermaid-toast'), null);
         });
     });
+
+    suite('buildMathBlockSvgMarkup（foreignObject SVG マークアップ組み立て）', () => {
+        test('SVG/xhtml名前空間・foreignObject・寸法・内容を正しく埋め込む', () => {
+            const svg = env.math.buildMathBlockSvgMarkup(
+                '<span class="katex">x^2</span>', '.katex{color:#000}', 120, 40, 'transparent'
+            );
+            assert.ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"'), svg);
+            assert.ok(svg.includes('width="120"'), svg);
+            assert.ok(svg.includes('height="40"'), svg);
+            assert.ok(svg.includes('viewBox="0 0 120 40"'), svg);
+            assert.ok(svg.includes('<foreignObject'), svg);
+            assert.ok(svg.includes('<div xmlns="http://www.w3.org/1999/xhtml">'), svg);
+            assert.ok(svg.includes('<style>.katex{color:#000}</style>'), svg);
+            assert.ok(svg.includes('<span class="katex">x^2</span>'), svg);
+            assert.ok(svg.trim().endsWith('</svg>'), svg);
+        });
+
+        test('transparent／未指定では背景の rect を描かない（透過）', () => {
+            const transparent = env.math.buildMathBlockSvgMarkup('x', '', 10, 10, 'transparent');
+            const omitted = env.math.buildMathBlockSvgMarkup('x', '', 10, 10);
+            assert.ok(!transparent.includes('<rect'), transparent);
+            assert.ok(!omitted.includes('<rect'), omitted);
+        });
+
+        test('背景色を指定すると全面塗りの rect を描く', () => {
+            const svg = env.math.buildMathBlockSvgMarkup('x', '', 10, 10, '#ffffff');
+            assert.ok(svg.includes('<rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>'), svg);
+        });
+
+        test('背景色の属性値はエスケープされSVGを壊さない', () => {
+            const svg = env.math.buildMathBlockSvgMarkup('x', '', 10, 10, '"><script>x</script>');
+            assert.ok(!svg.includes('"><script>'), svg);
+            assert.ok(svg.includes('&quot;&gt;&lt;script&gt;'), svg);
+        });
+
+        test('CSS未指定では style要素を出さない', () => {
+            const svg = env.math.buildMathBlockSvgMarkup('x', '', 10, 10);
+            assert.ok(!svg.includes('<style>'), svg);
+        });
+
+        test('寸法は最低1px・切り上げに正規化される', () => {
+            const svg = env.math.buildMathBlockSvgMarkup('x', '', 0, 12.3, 'transparent');
+            assert.ok(svg.includes('width="1"'), svg);
+            assert.ok(svg.includes('height="13"'), svg);
+        });
+    });
 });

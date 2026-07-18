@@ -158,6 +158,52 @@ window.MathModule = (function() {
     }
 
     /**
+     * SVGの属性値に安全に埋め込めるよう最小限のエスケープを施す。
+     * 背景色（`transparent`/`#fff`/`rgb(...)` 等の短い文字列）想定。
+     */
+    function escapeSvgAttr(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    /**
+     * 数式ブロックのHTMLとCSSから、`<foreignObject>` を使ってブラウザ自身の
+     * レンダリングでラスタライズするためのSVGマークアップを組み立てる純粋関数。
+     *
+     * 画像化に使う html2canvas は KaTeX のCSS配置（`.katex` の `vertical-align`・
+     * 負マージン・絶対配置、√の overline 罫線）を再現できず数式画像が崩れるため、
+     * foreignObject 方式（＝ブラウザネイティブ描画）へ移行する。実際の Image→canvas
+     * ラスタライズ・KaTeXフォントの base64 埋め込み・呼び出し側差し替えは別段階(2/2)で行う。
+     *
+     * @param {string} innerHtml  数式ブロックのinnerHTML（KaTeX出力を含む）
+     * @param {string} cssText    SVG内へインラインするCSS（KaTeXのCSS＋@font-face 等）
+     * @param {number} width      描画幅(px)
+     * @param {number} height     描画高(px)
+     * @param {string} [background] 背景色。省略／`'transparent'` は背景塗りなし（透過）
+     * @returns {string} SVG文字列（data-URI化やImageラスタライズは呼び出し側の責務）
+     */
+    function buildMathBlockSvgMarkup(innerHtml, cssText, width, height, background) {
+        const w = Math.max(1, Math.ceil(Number(width) || 0));
+        const h = Math.max(1, Math.ceil(Number(height) || 0));
+        const hasBackground = background && background !== 'transparent';
+        const bgRect = hasBackground
+            ? '<rect x="0" y="0" width="100%" height="100%" fill="' +
+                escapeSvgAttr(background) + '"/>'
+            : '';
+        const style = cssText ? '<style>' + cssText + '</style>' : '';
+        return '<svg xmlns="http://www.w3.org/2000/svg" ' +
+            'width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' +
+            bgRect +
+            '<foreignObject x="0" y="0" width="100%" height="100%">' +
+            '<div xmlns="http://www.w3.org/1999/xhtml">' + style + (innerHtml || '') + '</div>' +
+            '</foreignObject>' +
+            '</svg>';
+    }
+
+    /**
      * ブロック数式（`.math-block`）をPNGのBlobへ変換する。
      * KaTeXの出力はSVGではなくHTML+CSSのため、mermaidのSVG→canvasは使えない。
      * 同梱の html2canvas でHTML要素を直接ラスタライズする。
@@ -276,6 +322,7 @@ window.MathModule = (function() {
         hideContextMenu: hideContextMenu,
         copyBlockAsPng: copyBlockAsPng,
         findMathBlock: findMathBlock,
-        computeMenuPosition: computeMenuPosition
+        computeMenuPosition: computeMenuPosition,
+        buildMathBlockSvgMarkup: buildMathBlockSvgMarkup
     };
 })();
