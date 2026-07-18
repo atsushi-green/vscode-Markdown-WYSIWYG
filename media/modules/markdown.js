@@ -82,9 +82,16 @@ window.MarkdownModule = (function() {
         // エスケープされたドル記号（\$）を退避する。素の $ は数式の開始として扱うため、
         // 通常のドル記号（$100 など）を書きたい場合は \$100 と書く仕様。
         // 先に退避しておくことで \$ が数式の区切りとして拾われるのを防ぐ。
+        // 復元はゼロ幅スペース付きの `$`（$ + ZERO_WIDTH）で行い、DOM上でも
+        // 「エスケープ由来の $」と素の `$` を区別できるようにする。これが無いと、
+        // 同じテキストノードに \$ が2つ以上あるとき、編集時の再変換
+        // （commands.js の convertInlineText）が `$…$` をインライン数式に
+        // 変換してしまい、書き戻しでバックスラッシュが失われる。
+        // ゼロ幅スペースは直列化（serializeInline の stripZeroWidth）で取り除かれ、
+        // `$` は `\$` へ再エスケープされるため、往復でファイルは変わらない。
         const escapedDollars = [];
         html = html.replace(/\\\$/g, function () {
-            escapedDollars.push('$');
+            escapedDollars.push('$' + state.ZERO_WIDTH);
             return '\u0001' + (escapedDollars.length - 1) + '\u0001';
         });
 
@@ -402,8 +409,22 @@ window.MarkdownModule = (function() {
             }
 
             // --- 空行 ---
+            // 連続する空行（2行以上）は2行目以降を空段落として保持する。
+            // ブロック間の区切り1行分は直列化時にブロック自身が `\n\n` を出すため、
+            // 空段落は「余分な空行」1行に対応する（空Pの直列化は `\n` 1つ）。
+            // これで `a\n\n\nb` のような複数空行が往復（コピー・保存）で失われない。
+            // 文書先頭の空行は従来どおり無視する。
             if (!line.trim()) {
-                i++;
+                let run = 0;
+                while (i < lines.length && !lines[i].trim()) {
+                    run++;
+                    i++;
+                }
+                if (out.length > 0) {
+                    for (let k = 0; k < run - 1; k++) {
+                        out.push('<p><br></p>');
+                    }
+                }
                 continue;
             }
 
@@ -903,10 +924,10 @@ window.MarkdownModule = (function() {
         // ノーブレークスペースを通常スペースへ
         markdown = markdown.replace(/\u00a0/g, ' ');
 
-        // 余分な空行を削除
-        markdown = markdown.replace(/\n{3,}/g, '\n\n');
-
         // 先頭の空行を削除、末尾は改行1つに揃える
+        // （かつてはここで `\n{3,}` を `\n\n` に潰していたが、空段落＝意図的な
+        //   連続空行を保持するため行わない。空Pは `\n` 1つに直列化され、
+        //   ブロック区切りの `\n\n` と合わさって空行1行分として現れる）
         markdown = markdown.replace(/^\n+/, '');
         if (!markdown.trim()) {
             return '';

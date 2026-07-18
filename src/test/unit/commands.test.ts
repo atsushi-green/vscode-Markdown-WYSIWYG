@@ -157,7 +157,25 @@ suite('CommandsModule', () => {
             env.editor.innerHTML = '<p>価格は \\$100 と \\$200 です</p>';
             env.commands.applyInlineFormatting();
             assert.strictEqual(env.editor.querySelector('.math-inline'), null, env.editor.innerHTML);
-            assert.ok(env.editor.textContent!.includes('価格は $100 と $200 です'), env.editor.innerHTML);
+            // ゼロ幅スペースを除いた表示は従来どおり素の $（マーカーは不可視）
+            const ZW = new RegExp(env.state.ZERO_WIDTH, 'g');
+            assert.ok(env.editor.textContent!.replace(ZW, '').includes('価格は $100 と $200 です'),
+                env.editor.innerHTML);
+        });
+
+        test('エスケープした \\$ が複数あっても編集イベント（再変換）で数式化・破損しない', () => {
+            // 回帰テスト: 同一テキストノード内に \$ が2つ以上あるとき、input イベントの
+            // 再変換（applyInlineFormatting）で `$…$` がインライン数式へ誤変換され、
+            // 書き戻しでバックスラッシュが失われるデータロスがあった
+            env.editor.innerHTML = env.markdown.markdownToHtml('価格は \\$100 と \\$200 です');
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('.math-inline'), null, env.editor.innerHTML);
+            const back = env.markdown.htmlToMarkdown(env.editor.innerHTML).trim();
+            assert.strictEqual(back, '価格は \\$100 と \\$200 です');
+            // 2回目の再変換でも安定している（冪等）
+            env.commands.applyInlineFormatting();
+            const back2 = env.markdown.htmlToMarkdown(env.editor.innerHTML).trim();
+            assert.strictEqual(back2, '価格は \\$100 と \\$200 です');
         });
 
         test('インラインコード内の $x$ は数式にならずコードに保持される', () => {
@@ -1611,6 +1629,202 @@ suite('CommandsModule', () => {
         test('#で始まらないhrefは無視する', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml('# Title');
             assert.doesNotThrow(() => env.commands.scrollToAnchor('https://example.com'));
+        });
+    });
+
+    suite('getSelectedMarkdown（選択範囲の生Markdownコピー）', () => {
+        /** エディタ全体を選択するRangeを返す */
+        function selectAll(): Range {
+            const range = env.document.createRange();
+            range.selectNodeContents(env.editor);
+            return range;
+        }
+        /** 指定ノードの内容を選択するRangeを返す */
+        function selectContents(node: Node): Range {
+            const range = env.document.createRange();
+            range.selectNodeContents(node);
+            return range;
+        }
+
+        test('全選択すると保存内容（htmlToMarkdown）と一致する生Markdownを返す', () => {
+            const src = '# 見出し\n\n本文です。\n\n- 項目1\n- 項目2\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
+            env.editor.innerHTML = env.markdown.markdownToHtml(src);
+
+            const expected = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            const actual = env.commands.getSelectedMarkdown(selectAll());
+            assert.strictEqual(actual, expected);
+            // レンダリング後のテキストではなく記法が保持されていること
+            assert.ok(actual.includes('| A | B |'), 'テーブル記法が保持されていない');
+            // htmlToMarkdown は箇条書きマーカーを `* ` に正規化する
+            assert.ok(/^[*-] 項目1$/m.test(actual), 'リスト記法が保持されていない');
+        });
+
+        test('テーブル単体の選択でパイプ記法の生Markdownを返す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('| A | B |\n| --- | --- |\n| 1 | 2 |');
+            const table = env.editor.querySelector('table') as Node;
+            const md = env.commands.getSelectedMarkdown(selectContents(table));
+            assert.ok(md && md.split('\n')[0] === '| A | B |', 'テーブルが生Markdown化されていない: ' + md);
+        });
+
+        test('リスト単体の選択で箇条書き記法の生Markdownを返す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('- 項目1\n- 項目2');
+            const list = env.editor.querySelector('ul') as Node;
+            const md = env.commands.getSelectedMarkdown(selectContents(list));
+            assert.ok(md && /^[*-] 項目1/.test(md), 'リストが生Markdown化されていない: ' + md);
+        });
+
+        test('段落／見出しだけの単一ブロックの選択は null（既定のコピーに委ねる）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('ただの段落');
+            const p = env.editor.querySelector('p') as Node;
+            assert.strictEqual(env.commands.getSelectedMarkdown(selectContents(p)), null);
+        });
+
+        test('選択が無い（range=null）場合は null を返す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# Title');
+            assert.strictEqual(env.commands.getSelectedMarkdown(null as unknown as Range), null);
+        });
+
+        test('単一テーブルセル内の選択は null（セルのテキストコピーに委ねる）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('| A | B |\n| --- | --- |\n| 1 | 2 |');
+            const td = env.editor.querySelector('td') as HTMLElement;
+            const range = env.document.createRange();
+            range.selectNodeContents(td);
+            assert.strictEqual(env.commands.getSelectedMarkdown(range), null);
+        });
+
+        test('Mermaidレンダリング済み（隠しpre＋container）でも生Markdownを返す', () => {
+            // mermaid.js の render() が作る実DOMを再現する
+            // （隠し pre.mermaid-source ＋ contenteditable=false の .mermaid-container）
+            const src = '### 状態遷移図\n\n```mermaid\nstateDiagram-v2\n    [*] --> 待機中\n```';
+            env.editor.innerHTML = env.markdown.markdownToHtml(src);
+            const pre = env.editor.querySelector('pre') as HTMLElement;
+            const container = env.document.createElement('div');
+            container.className = 'mermaid-container';
+            container.setAttribute('data-mermaid-id', 'mermaid-diagram-0');
+            container.setAttribute('contenteditable', 'false');
+            container.innerHTML =
+                '<div class="mermaid-toolbar"><span class="mermaid-label">Mermaid</span></div>' +
+                '<div class="mermaid-split-view"><div class="mermaid-preview-panel">' +
+                '<svg class="mermaid-svg"><text>開始</text></svg></div></div>';
+            pre.insertAdjacentElement('afterend', container);
+            pre.style.display = 'none';
+            pre.classList.add('mermaid-source');
+            pre.setAttribute('data-mermaid-id', 'mermaid-diagram-0');
+
+            // 見出しテキスト〜図の内部テキストまでのマウス選択相当
+            const h3 = env.editor.querySelector('h3') as HTMLElement;
+            const svgText = container.querySelector('svg text')!.firstChild as Text;
+            const range = env.document.createRange();
+            range.setStart(h3.firstChild as Node, 0);
+            range.setEnd(svgText, svgText.textContent!.length);
+
+            const md = env.commands.getSelectedMarkdown(range);
+            assert.ok(md, 'Mermaid選択が生Markdown化されていない');
+            assert.ok(md.includes('```mermaid'), 'mermaidフェンスが含まれていない: ' + md);
+            assert.ok(md.includes('stateDiagram-v2'), 'ソースコードが含まれていない: ' + md);
+            assert.ok(!md.includes('Mermaid\n'), 'ツールバーのテキストが混入している: ' + md);
+        });
+    });
+
+    suite('handleMarkdownPaste（ブロックMarkdownの貼り付け変換）', () => {
+        /** 指定ノード内オフセットにキャレットを置く */
+        function setCaret(node: Node, offset: number): void {
+            const range = env.document.createRange();
+            range.setStart(node, offset);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('空の段落へ複数ブロックを貼り付けるとレンダリング済みDOMに変換される', () => {
+            env.editor.innerHTML = '<p><br></p>';
+            const p = env.editor.querySelector('p') as HTMLElement;
+            setCaret(p, 0);
+
+            const handled = env.commands.handleMarkdownPaste('# 見出し\n\n- 項目1\n- 項目2');
+            assert.strictEqual(handled, true);
+            assert.ok(env.editor.querySelector('h1'), '見出しが変換されていない');
+            assert.ok(env.editor.querySelector('ul li'), 'リストが変換されていない');
+            // 空段落は取り除かれている
+            assert.strictEqual(env.editor.querySelectorAll('p:not(:last-child) br').length, 0);
+        });
+
+        test('mermaidフェンスの貼り付けで code[data-lang=mermaid] が生成される', () => {
+            env.editor.innerHTML = '<p><br></p>';
+            setCaret(env.editor.querySelector('p') as HTMLElement, 0);
+
+            const handled = env.commands.handleMarkdownPaste(
+                '```mermaid\nstateDiagram-v2\n    [*] --> 待機中\n```');
+            assert.strictEqual(handled, true);
+            const code = env.editor.querySelector('pre code[data-lang="mermaid"]');
+            assert.ok(code, 'mermaidコードブロックが生成されていない');
+            assert.ok(code!.textContent!.includes('stateDiagram-v2'));
+            // 構造ブロックで終わるため直後に空段落（キャレット位置）ができる
+            const last = env.editor.lastElementChild as HTMLElement;
+            assert.strictEqual(last.tagName, 'P');
+        });
+
+        test('段落の途中への貼り付けは段落を分割して間に挿入する', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('前半後半');
+            const textNode = env.editor.querySelector('p')!.firstChild as Text;
+            setCaret(textNode, 2); // 「前半」と「後半」の間
+
+            const handled = env.commands.handleMarkdownPaste('## 見出し');
+            assert.strictEqual(handled, true);
+            const tags = Array.from(env.editor.children).map(el => el.tagName);
+            assert.deepStrictEqual(tags, ['P', 'H2', 'P']);
+            assert.strictEqual(env.editor.children[0].textContent, '前半');
+            assert.ok(env.editor.children[2].textContent!.includes('後半'));
+        });
+
+        test('インラインのみの単一段落テキストは false（既定の貼り付けに委ねる）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('既存の段落');
+            const before = env.editor.innerHTML;
+            setCaret(env.editor.querySelector('p')!.firstChild as Text, 0);
+
+            const handled = env.commands.handleMarkdownPaste('**太字** のテキスト');
+            assert.strictEqual(handled, false);
+            assert.strictEqual(env.editor.innerHTML, before, 'DOMが変更されてしまっている');
+        });
+
+        test('全選択への上書き貼り付けで空の殻ブロックが残らない（Ctrl+A→Ctrl+V）', () => {
+            // 既存文書を全選択（実ブラウザ同様、端点はテキストノード内）して貼り付ける
+            env.editor.innerHTML = env.markdown.markdownToHtml('# 旧見出し\n\n旧本文\n\n\n旧末尾');
+            const firstText = env.editor.querySelector('h1')!.lastChild as Text;
+            const lastP = env.editor.children[env.editor.children.length - 1];
+            const lastText = lastP.firstChild as Text;
+            const range = env.document.createRange();
+            range.setStart(firstText, 0);
+            range.setEnd(lastText, lastText.textContent!.length);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            const src = '段落1\n\n\n段落2';
+            const handled = env.commands.handleMarkdownPaste(src);
+            assert.strictEqual(handled, true);
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            // 旧内容の殻（空見出し「# 」等）が混ざらず、貼り付け内容だけになる
+            assert.strictEqual(out, '段落1\n\n\n段落2');
+        });
+
+        test('貼り付け後の内容が生Markdownとして往復する', () => {
+            env.editor.innerHTML = '<p><br></p>';
+            setCaret(env.editor.querySelector('p') as HTMLElement, 0);
+            const src = '# タイトル\n\n```js\nconst a = 1;\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
+            env.commands.handleMarkdownPaste(src);
+
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.ok(out.includes('# タイトル'));
+            assert.ok(out.includes('```js'));
+            assert.ok(out.includes('| A | B |'));
         });
     });
 });
