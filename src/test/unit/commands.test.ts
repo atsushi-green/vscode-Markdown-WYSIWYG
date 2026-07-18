@@ -1002,6 +1002,73 @@ suite('CommandsModule', () => {
             assert.strictEqual(after, before, JSON.stringify(after));
             assert.ok(/前\*\*太字\*\*後/.test(after), JSON.stringify(after));
         });
+
+        /** 開始・終了ノードとオフセットで範囲選択を張る（非collapsed） */
+        function selectRange(startNode: Node, startOffset: number, endNode: Node, endOffset: number): void {
+            const range = env.document.createRange();
+            range.setStart(startNode, startOffset);
+            range.setEnd(endNode, endOffset);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('装飾をまたぐ範囲選択中は展開せず選択を保持する（ドラッグ選択の解除防止）', () => {
+            // 「本文をドラッグ選択して装飾（**等）に到達すると選択が解除される」不具合の回帰テスト。
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            const p = env.editor.querySelector('p')!;
+            const before = p.firstChild!;    // "前"
+            const after = p.lastChild!;      // "後"
+            // "前" の先頭から strong をまたいで "後" の末尾まで選択
+            selectRange(before, 0, after, 1);
+
+            const changed = env.commands.syncRawMarkdownToCaret();
+
+            assert.strictEqual(changed, false, env.editor.innerHTML);
+            // 装飾は生Markdownへ展開されない（DOMが書き換わらない）
+            assert.strictEqual(env.editor.querySelector('span.raw-markdown'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('strong'), env.editor.innerHTML);
+            // 選択が破棄されていない（範囲のまま・内容も同じ）
+            const sel = env.window.getSelection();
+            assert.strictEqual(sel.isCollapsed, false, '選択が解除された');
+            assert.strictEqual(sel.toString(), '前太字後', sel.toString());
+        });
+
+        test('選択の開始が装飾の内側にあっても、範囲選択中は展開しない', () => {
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            const strongText = env.editor.querySelector('strong')!.firstChild!; // "太字"
+            const after = env.editor.querySelector('p')!.lastChild!;            // "後"
+            // strong 内の途中から "後" まで選択（開始が装飾の内側）
+            selectRange(strongText, 1, after, 1);
+
+            const changed = env.commands.syncRawMarkdownToCaret();
+
+            assert.strictEqual(changed, false, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('span.raw-markdown'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('strong'), env.editor.innerHTML);
+            assert.strictEqual(env.window.getSelection().isCollapsed, false, env.editor.innerHTML);
+        });
+
+        test('既に展開中のspanは範囲選択中に折り畳まれない（展開テキストのドラッグ編集を維持）', () => {
+            // まずキャレットを装飾内に置いて展開させる
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            const span = rawSpan();
+            assert.ok(span, '前提: 展開されていること ' + env.editor.innerHTML);
+
+            // 展開中の生テキスト（`**太字**`）内で範囲選択する
+            const rawText = span!.firstChild!;
+            selectRange(rawText, 0, rawText, 4);
+
+            const changed = env.commands.syncRawMarkdownToCaret();
+
+            // 範囲選択中は折り畳まれず、展開表示が維持される（＝ドラッグ選択して編集できる）
+            assert.strictEqual(changed, false, env.editor.innerHTML);
+            assert.ok(rawSpan(), '展開中spanが折り畳まれた: ' + env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+            assert.strictEqual(env.window.getSelection().isCollapsed, false, env.editor.innerHTML);
+        });
     });
 
     suite('syncRawMarkdownToCaret（リンク上の生Markdown表示）', () => {

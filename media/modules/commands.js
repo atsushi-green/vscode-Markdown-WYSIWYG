@@ -1288,6 +1288,16 @@ window.CommandsModule = (function() {
      */
     function syncRawMarkdownToCaret() {
         const selection = window.getSelection();
+
+        // 範囲選択（非collapsed）の間は生Markdownの展開・折り畳みを行わない。
+        // 展開／折り畳みはDOMを書き換えて進行中の選択を破棄するため、マウスドラッグで
+        // 装飾（`**太字**` 等）をまたいで本文を選択・コピーしようとすると、装飾に
+        // 到達した瞬間に選択が解除されてしまう。生Markdown表示は「キャレット位置」を
+        // 示す機能であり範囲選択中は不要なので、選択がある間は一切触らない。
+        if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+            return false;
+        }
+
         const start = (selection && selection.rangeCount > 0)
             ? selection.getRangeAt(0).startContainer
             : null;
