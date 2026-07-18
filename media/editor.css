@@ -132,6 +132,48 @@ body {
     outline: none;
 }
 
+/* WYSIWYG（プレビュー）モード: 行番号ガター付きラッパー（JSで#editorを包む） */
+.wysiwyg-editor-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    /* 直接の flex 子だった #editor から min-height:0 を引き継ぐ */
+    min-height: 0;
+}
+
+/* WYSIWYG行番号ガター（左端・固定幅・縦スクロールに追従） */
+.wysiwyg-line-gutter {
+    flex: 0 0 auto;
+    position: relative;
+    overflow: hidden;
+    box-sizing: border-box;
+    min-width: 40px;
+    color: var(--vscode-editorLineNumber-foreground, var(--vscode-descriptionForeground));
+    background-color: var(--vscode-editorGutter-background, var(--vscode-editor-background));
+    border-right: 1px solid var(--vscode-editorGroup-border);
+    user-select: none;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+/* 番号を各ブロックの上端へ絶対配置する内側レイヤ（縦スクロールでtranslate）。
+   各番号の top は #editor の padding(20px) を含んだ座標をJSが直接与えるため、
+   ここではオフセットを持たせない（top:0 が #editor 上端に一致する）。 */
+.wysiwyg-line-gutter-inner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    will-change: transform;
+}
+
+.wysiwyg-line-number {
+    position: absolute;
+    right: 8px;
+    /* top はJSが各ブロックの上端位置に合わせて設定する */
+}
+
 /* エディタ本体 */
 #editor {
     flex: 1;
