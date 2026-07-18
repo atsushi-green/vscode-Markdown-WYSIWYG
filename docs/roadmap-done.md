@@ -4,6 +4,7 @@
 
 | 完了日 | 機能 | コミット |
 |--------|------|----------|
+| 2026-07-18 | 行番号表示 (3/3 橋渡し): ライブ`#editor`から「表示ブロック→開始行」を対応づける `markdown.computeEditorLineMap`。clone整形を `getCleanEditorClone` へ切り出して `getCleanHtmlFromEditor` と共有、Mermaidの隠しpreを除外し可視コンテナ・テーブルの `.table-container` へ対応。jsdomでユニットテスト（元L項目の分割(3/3)前段。残りはガター描画＝実機確認前提） | `_______` |
 | 2026-07-18 | 行番号表示 (2/3): WYSIWYG側「ブロック→ソース開始行」対応付け。純粋関数 `markdown.computeBlockStartLines(finalMarkdown, blockMarkdowns)`＋補助 `coreLinesOf` を追加。各ブロックの本文先頭行を確定ソース内から前方一致で探し1始まりの開始行を返す（空ブロックは `null`・空行畳み込みに非依存）。DOM非依存でユニットテスト（元L項目の分割(2/3)・UIは(3/3)） | `5b72280` |
 | 2026-07-18 | 行番号表示 (1/3): Rawモード（textarea）の行番号ガター。左端にソース行番号を表示、行を揃えるため textarea を `white-space: pre`（折り返しオフ）へ変更。行数/番号列は純粋関数 `utils.countLines`/`buildLineNumberText`（ユニットテスト）、ガターは `transform` で縦スクロール追従。UIは `#rawEditor` をラッパーで包む動的生成で `markdownEditor.ts` 非変更。ユーザー要望（元L項目の分割(1/3)） | `fcf630e` |
 | 2026-07-18 | ブロック数式を右クリックでPNG画像としてクリップボードにコピー。`math.js` に自前コンテキストメニュー（動的生成・`markdownEditor.ts` 非変更）＋`html2canvas` での `math-block`→PNG化（`document.fonts.ready` 待機）を追加。CSSは `.mermaid-context-menu` 系と共有。ユーザー要望 | `44b4031` |

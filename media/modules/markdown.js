@@ -991,11 +991,18 @@ window.MarkdownModule = (function() {
     }
 
     /**
-     * エディタDOMからクリーンなHTMLを取得（UI要素を除去し、隠されたソースを復元）
+     * エディタDOM（またはそれ相当の要素）をクローンし、UI要素を除去して
+     * 隠されたソースを復元した「クリーンなクローン要素」を返す。
+     * `getCleanHtmlFromEditor`（文書への直列化）と `computeEditorLineMap`
+     * （行番号の対応付け）が同じクリーン結果を共有するために切り出した。
+     * トップレベルの子要素数は、Mermaid（隠し `pre.mermaid-source` を残し
+     * `.mermaid-container` を削除）とテーブル（`.table-container` を `table` へ
+     * アンラップ）を経ても「表示中のライブ要素列」と1対1で対応する。
      */
-    function getCleanHtmlFromEditor() {
+    function getCleanEditorClone(editorEl) {
+        const source = editorEl || state.editor;
         // エディタのDOMをクローン
-        const clone = state.editor.cloneNode(true);
+        const clone = source.cloneNode(true);
 
         // 検索ハイライトのspanをアンラップ（中身のテキストは残す）
         clone.querySelectorAll('span.find-highlight').forEach(span => {
@@ -1012,7 +1019,7 @@ window.MarkdownModule = (function() {
             const diagramId = pre.getAttribute('data-mermaid-id');
 
             // 元のエディタから編集中のtextareaの値を取得
-            const originalContainer = state.editor.querySelector(`.mermaid-container[data-mermaid-id="${diagramId}"]`);
+            const originalContainer = source.querySelector(`.mermaid-container[data-mermaid-id="${diagramId}"]`);
             if (originalContainer) {
                 const textarea = originalContainer.querySelector('.mermaid-source-code');
                 if (textarea && textarea.value) {
@@ -1062,7 +1069,60 @@ window.MarkdownModule = (function() {
             }
         });
 
-        return clone.innerHTML;
+        return clone;
+    }
+
+    /**
+     * エディタDOMからクリーンなHTMLを取得（UI要素を除去し、隠されたソースを復元）
+     */
+    function getCleanHtmlFromEditor() {
+        return getCleanEditorClone(state.editor).innerHTML;
+    }
+
+    /**
+     * WYSIWYGエディタの「表示中のトップレベルブロック」と、それが対応する
+     * Markdownソースの開始行番号（1始まり）を対応づける（行番号表示 3/3 の橋渡し）。
+     *
+     * クリーンなクローン（`getCleanEditorClone`）からソース全体（`finalMarkdown`）と
+     * 各ブロックの直列化を得て `computeBlockStartLines` で開始行を求め、それを
+     * 「表示中のライブ要素列」（Mermaidの隠し `pre.mermaid-source` を除外）と
+     * インデックスで対応づける。クリーンのトップレベル数と表示中ライブ要素数は
+     * 常に一致する（Mermaidの隠しpre↔可視コンテナ、テーブルのアンラップを経ても）。
+     *
+     * 戻り値は `{ block: ライブ要素, line: 開始行 }` の配列（本文を持たない
+     * ブロック＝開始行 null は除外）。ガター描画（次段）が各 block の `offsetTop` に
+     * 行番号を置くために使う。DOMのみで完結しレイアウト非依存＝ユニットテスト可能。
+     */
+    function computeEditorLineMap(editorEl) {
+        const source = editorEl || state.editor;
+        if (!source) {
+            return [];
+        }
+        const clone = getCleanEditorClone(source);
+        const finalMarkdown = htmlToMarkdown(clone.innerHTML);
+
+        const cleanBlocks = Array.prototype.slice.call(clone.children);
+        const blockMarkdowns = cleanBlocks.map(function (c) {
+            return htmlToMarkdown(c.outerHTML);
+        });
+        const startLines = computeBlockStartLines(finalMarkdown, blockMarkdowns);
+
+        // 位置決め対象は「表示中の」ライブ要素（Mermaidの隠しソースpreは除外）
+        const liveVisible = Array.prototype.slice.call(source.children).filter(function (el) {
+            return !(el.classList && el.classList.contains('mermaid-source'));
+        });
+
+        const map = [];
+        startLines.forEach(function (line, i) {
+            if (line === null) {
+                return;
+            }
+            const block = liveVisible[i];
+            if (block) {
+                map.push({ block: block, line: line });
+            }
+        });
+        return map;
     }
 
     // 公開API
@@ -1081,12 +1141,14 @@ window.MarkdownModule = (function() {
         rawMarkdownText: rawMarkdownText,
         escapeHtml: escapeHtml,
         convertTableToMarkdown: convertTableToMarkdown,
+        getCleanEditorClone: getCleanEditorClone,
         getCleanHtmlFromEditor: getCleanHtmlFromEditor,
         slugify: slugify,
         buildTocMarkdown: buildTocMarkdown,
         // 行番号表示（2/3）: 各トップレベルブロックのソース開始行の対応付け。
-        // UI（3/3）は各ブロックを serializeBlockElement で直列化して渡す。
         coreLinesOf: coreLinesOf,
-        computeBlockStartLines: computeBlockStartLines
+        computeBlockStartLines: computeBlockStartLines,
+        // 行番号表示（3/3 橋渡し）: 表示中ブロック→開始行の対応（DOM／レイアウト非依存）。
+        computeEditorLineMap: computeEditorLineMap
     };
 })();

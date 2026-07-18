@@ -844,6 +844,62 @@ suite('MarkdownModule', () => {
             eqArr(env.markdown.computeBlockStartLines(final, blocks), [1, 3]);
         });
 
+        test('computeEditorLineMap: 見出し＋段落は各ライブ要素に開始行を対応づける', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# 見出し\n\n段落A\n\n段落B');
+            const map = env.markdown.computeEditorLineMap(env.editor);
+            assert.strictEqual(map.length, 3, JSON.stringify(map.map((m: any) => m.line)));
+            assert.strictEqual(map[0].line, 1);
+            assert.strictEqual(map[0].block, env.editor.children[0]); // 実要素への参照
+            assert.strictEqual(map[0].block.tagName, 'H1');
+            assert.strictEqual(map[1].line, 3);
+            assert.strictEqual(map[2].line, 5);
+        });
+
+        test('computeEditorLineMap: コードブロックの次の段落は空行分ずれる', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('段落A\n\n```\nx\ny\n```\n\n段落B');
+            const map = env.markdown.computeEditorLineMap(env.editor);
+            const lines = map.map((m: any) => m.line);
+            assert.deepStrictEqual(Array.prototype.slice.call(lines), [1, 3, 8], JSON.stringify(lines));
+            assert.strictEqual(map[1].block.tagName, 'PRE');
+        });
+
+        test('computeEditorLineMap: Mermaidは可視コンテナへ対応し隠しpreは対象外', () => {
+            env.editor.innerHTML =
+                '<p>前</p>' +
+                '<pre class="mermaid-source" data-mermaid-id="m1" style="display:none">' +
+                '<code>graph TD; A--&gt;B</code></pre>' +
+                '<div class="mermaid-container" data-mermaid-id="m1" contenteditable="false">' +
+                '<svg></svg></div>' +
+                '<p>後</p>';
+            const map = env.markdown.computeEditorLineMap(env.editor);
+            const blocks = map.map((m: any) => m.block);
+            // 隠しソースpreは行番号の対象にしない
+            assert.ok(
+                !blocks.some((b: Element) => b.classList.contains('mermaid-source')),
+                'hidden mermaid-source pre must not be a target'
+            );
+            // 可視コンテナが対象に含まれる
+            const container = env.editor.querySelector('.mermaid-container');
+            assert.ok(blocks.indexOf(container) !== -1, 'mermaid-container must be a target');
+            // 前・図・後 の3ブロック、行番号は単調増加
+            assert.strictEqual(map.length, 3, JSON.stringify(map.map((m: any) => m.line)));
+            for (let i = 1; i < map.length; i++) {
+                assert.ok(map[i].line > map[i - 1].line, JSON.stringify(map.map((m: any) => m.line)));
+            }
+        });
+
+        test('computeEditorLineMap: テーブルは .table-container（可視要素）へ対応づける', () => {
+            env.editor.innerHTML =
+                '<p>前</p>' +
+                '<div class="table-container"><table><thead><tr><th>a</th></tr></thead>' +
+                '<tbody><tr><td>1</td></tr></tbody></table></div>';
+            const map = env.markdown.computeEditorLineMap(env.editor);
+            const container = env.editor.querySelector('.table-container');
+            const tableEntry = map.find((m: any) => m.block === container);
+            assert.ok(tableEntry, 'table-container should be a target: ' + JSON.stringify(map.map((m: any) => m.line)));
+            assert.strictEqual(map[0].line, 1);
+        });
+
         test('実DOM経由: markdownToHtml→各ブロック直列化→開始行が本文行と一致する', () => {
             const src = '# 見出し\n\n段落A\n\n```\nx\ny\n```\n\n段落B';
             const html = env.markdown.markdownToHtml(src);

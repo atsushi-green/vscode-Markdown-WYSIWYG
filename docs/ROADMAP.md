@@ -20,7 +20,7 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 行番号表示 (3/3): WYSIWYG側の行番号ガター描画と(2)との同期 | M | 分割元: 旧「行番号を表示する」L項目。(2) の純粋関数 `markdown.computeBlockStartLines(finalMarkdown, blockMarkdowns)`（`fcf630e` 以降・実装済み）を使い、`#editor` の左へ固定幅ガターを配置。各トップレベルブロックの `offsetTop`／高さに合わせて開始行番号を絶対配置（複数行ブロックは開始行のみ、折り返し行には出さない＝VS Code本体と同じ）。入力のたびの全体再計算は重いためデバウンス・（可能なら）差分更新。エディタのスクロール・リサイズにも追従。Rawモード(1)とガターの見た目（幅・色・フォント）を統一。UIは動的生成で `markdownEditor.ts` を極力触らない。実装手順: 各トップレベル子要素を `htmlToMarkdown(child.outerHTML)` 相当で直列化して `computeBlockStartLines` に渡し、返った開始行を各ブロックの `offsetTop` に絶対配置する。**依存(2)は完了済み・単独で着手可** |
+| todo | 行番号表示 (3/3 後半): WYSIWYG側の行番号ガター描画とスクロール同期 | M | 分割元: 旧「行番号を表示する」L項目。橋渡しの `markdown.computeEditorLineMap(editorEl)`（`5b72280` 以降・実装済み。`{ block: 表示中要素, line: 開始行 }` を返す）を使い、あとは**描画のみ**。`#editor` の左へ固定幅ガターを置き、`computeEditorLineMap` が返す各 `block.offsetTop` に開始行番号を絶対配置（複数行ブロックは開始行のみ、折り返し行には出さない＝VS Code本体と同じ）。入力のたびの再計算はデバウンス。エディタのスクロール（`transform: translateY(-scrollTop)`）・リサイズに追従。Rawモード(1)のガターと見た目（幅・色・フォント）を統一。UIは動的生成。**注意/難所**: `#editor` は contenteditable なのでガターを内側に入れられない（body等へ置き `getBoundingClientRect` で `#editor` の箱へ重ねるか、`#editor` を flex ラッパーで包む）。`offsetTop` はレイアウト依存のためユニットテスト不可＝**実機（拡張機能開発ホスト）確認が前提**。まず段落・見出し中心の単純ケースから。依存(3/3橋渡し)は完了済み・単独着手可 |
 
 ## 優先度: 中
 

@@ -144,7 +144,7 @@
 - 行数の数え上げは純粋関数 `utils.countLines(text)`（`\n` 区切り。空文字は1行、末尾改行は次の空行を1行として数える）、番号列の生成は `utils.buildLineNumberText(count)`（`1\n2\n…\nN`）が担当し、`src/test/unit/utils.test.ts` で検証。
 - ガターは `white-space: pre` の1要素へ番号列を流し込み、テキストエリアの縦スクロールに合わせて `transform: translateY(-scrollTop)` で追従する（横スクロールでは動かさない）。フォント・行高・上パディング（`20px`）をテキストエリアと厳密に一致させて行位置を合わせる。
 - Rawモードに入るとき／本文編集・文書更新のたびに行番号を更新。UI（ラッパー＋ガター）はWebview内でJSから動的生成し `#rawEditor` をラッパーで包む方式で、拡張機能側のHTMLテンプレート（`markdownEditor.ts`）には手を入れない（単語数バーと同じ設計）。
-- WYSIWYG側の行番号表示は別項目として `docs/ROADMAP.md` に分割済み。中核となる**ブロック→ソース開始行の対応付け**は純粋関数 `markdown.computeBlockStartLines(finalMarkdown, blockMarkdowns)` として実装済み（各トップレベルブロックの本文先頭行を確定ソース内から順に前方一致で探し、1始まりの開始行を返す。空ブロックは `null`。`src/test/unit/markdown.test.ts` で検証）。残るガター描画・同期は次項目（3/3）で本関数を用いて実装する。
+- WYSIWYG側の行番号表示は別項目として `docs/ROADMAP.md` に分割済み。**ブロック→ソース開始行の対応付け**（純粋関数 `markdown.computeBlockStartLines`）と、それをライブのエディタDOMへ橋渡しする **`markdown.computeEditorLineMap(editorEl)`**（`{ block: 表示中のライブ要素, line: 開始行 }` の配列を返す。クリーン化は `getCleanHtmlFromEditor` と `getCleanEditorClone` で共有。Mermaidの隠しソースpreは除外し可視コンテナへ対応、テーブルは `.table-container` へ対応）まで実装・ユニットテスト済み。残るのは各 `block.offsetTop` へ行番号を絶対配置し、スクロール／リサイズへ追従させるガター描画（ブラウザ専用のため別項目・実機確認前提）。
 
 ## 9.5 単語数・文字数のステータス表示
 
