@@ -27,6 +27,7 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
+| todo | Mermaid図の画像コピー／保存時に背景色を選べるようにする（透過・白・黒） | M | ユーザー要望。現状 Mermaid図のPNG化は背景が **白で固定**（`mermaid.js` の `svgToPngBlob` が `ctx = getContext('2d', { alpha: false })` で不透明キャンバスを作り `ctx.fillStyle = '#ffffff'`／`fillRect` で白背景を塗っている, [mermaid.js:442-457](../media/modules/mermaid.js#L442)）。「画像をコピー」（`copyToClipboard`→`svgToPngBlob`）と「PNG画像として保存」（`saveAsPng`→`svgToPngBlob`）の**両方**で背景色を **透過／白／黒** から選べるようにする。**実装方針**: (1) `svgToPngBlob(svgElement, scale, background)` に背景引数を追加。`'transparent'` のときは `getContext('2d', { alpha: true })`（不透明化を外す）で `fillRect` を行わず透過PNGにし、`'white'`/`'black'` のときは従来どおり不透明キャンバスに該当色を塗る。html2canvas 経由の中間ラスタライズ（`backgroundColor: '#ffffff'`, [mermaid.js:421](../media/modules/mermaid.js#L421)）も透過時は `null`／`'transparent'` にする必要がある点に注意（ここで白が焼き込まれると最終段で透過にできない）。(2) 呼び出し側 `copyToClipboard`/`saveAsPng` に背景色を渡す。(3) UIは Mermaid右クリックメニュー（`src/markdownEditor.ts` の `#mermaidContextMenu`＝`data-action="copyImage"`／`"savePng"` の2項目, [markdownEditor.ts:236-238](../src/markdownEditor.ts#L236)）を拡張する。各アクションを背景色つきに増やす（例: 「画像をコピー（白／黒／透過）」のサブメニューまたは3項目）か、メニューに背景色トグルを設けて選択状態を `svgToPngBlob` へ渡す。メニュー項目のクリック配線は `mermaid.js` の `setupContextMenuEvents`（`data-action` 分岐, [mermaid.js:586-600](../media/modules/mermaid.js#L586)）。**注意**: 数式（`math.js` の `blockToPngBlob`）も同様に白背景固定だが本項目のスコープ外（必要なら別途 todo 化）。PNGの見た目・クリップボード/保存はレイアウト・OS依存のため**実機（拡張機能開発ホスト）確認が前提**。ユニットテストは背景引数の分岐（透過時に `fillRect` を呼ばない・`alpha` 設定が切り替わる）を純粋に検証できる範囲で追加 |
 
 ## 優先度: 中
 
