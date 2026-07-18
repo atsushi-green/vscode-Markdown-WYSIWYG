@@ -1598,6 +1598,73 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('convertMathBlocks（ブロック数式のライブ変換）', () => {
+        test('新規入力した $$ / 本文 / $$ の3ブロックを math-block へ変換する', () => {
+            env.editor.innerHTML = '<p>$$</p><p>\\alpha = 2</p><p>$$</p>';
+            const { didFormat } = env.commands.convertMathBlocks(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const math = env.editor.querySelector('.math-block');
+            assert.ok(math, env.editor.innerHTML);
+            assert.strictEqual(math!.getAttribute('data-math'), '\\alpha = 2');
+            // 元の3ブロックは消えている
+            assert.strictEqual(env.editor.querySelectorAll('p').length <= 1, true, env.editor.innerHTML);
+        });
+
+        test('回帰: 変換後は往復で $$…$$ に戻り $ が \\$ へ破損しない', () => {
+            env.editor.innerHTML = '<p>$$</p><p>\\alpha = 2</p><p>$$</p>';
+            env.commands.convertMathBlocks(env.editor);
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(md, '$$\n\\alpha = 2\n$$\n', md);
+            assert.strictEqual(md.includes('\\$'), false, 'ドル記号がエスケープされている: ' + md);
+        });
+
+        test('閉じ $$ がまだ無い入力途中は変換しない', () => {
+            env.editor.innerHTML = '<p>$$</p><p>\\alpha = 2</p>';
+            const { didFormat } = env.commands.convertMathBlocks(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('.math-block'), null);
+        });
+
+        test('複数行の式本文をまとめて1つの math-block にする', () => {
+            env.editor.innerHTML = '<p>$$</p><p>a = 1</p><p>b = 2</p><p>$$</p>';
+            const { didFormat } = env.commands.convertMathBlocks(env.editor);
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('.math-block').length, 1);
+            assert.strictEqual(
+                env.editor.querySelector('.math-block')!.getAttribute('data-math'),
+                'a = 1\nb = 2'
+            );
+        });
+
+        test('class付きコンテナ（テーブル等）に当たったら範囲を打ち切る', () => {
+            env.editor.innerHTML = '<p>$$</p><div class="table-container">x</div><p>$$</p>';
+            const { didFormat } = env.commands.convertMathBlocks(env.editor);
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('.math-block'), null);
+        });
+
+        test('キャレットが変換範囲内にあれば math-block 直後の空段落へ移す', () => {
+            env.editor.innerHTML = '<p>$$</p><p>x</p><p>$$</p>';
+            const closing = env.editor.querySelectorAll('p')[2];
+            placeCaretIn(closing);
+            const { caretHandled } = env.commands.convertMathBlocks(env.editor);
+            assert.strictEqual(caretHandled, true);
+            const math = env.editor.querySelector('.math-block')!;
+            const sel = env.window.getSelection();
+            // キャレットは math-block 自身の外（直後の段落）にある
+            assert.strictEqual(math.contains(sel.anchorNode), false, 'キャレットがmath-block内にある');
+            assert.ok(math.nextSibling && (math.nextSibling as HTMLElement).contains(sel.anchorNode) ||
+                math.nextSibling === sel.anchorNode, 'キャレットがmath-block直後の段落にない');
+        });
+
+        test('applyInlineFormatting経由でも変換される（入力イベントの統合経路）', () => {
+            env.editor.innerHTML = '<p>$$</p><p>E = mc^2</p><p>$$</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('.math-block'), env.editor.innerHTML);
+        });
+    });
+
     suite('scrollToAnchor（TOCアンカーの遷移）', () => {
         test('#slug に対応するid要素へscrollIntoViewする', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml('# Title\n\n## Section A');
