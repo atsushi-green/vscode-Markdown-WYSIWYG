@@ -1880,6 +1880,25 @@ suite('CommandsModule', () => {
             assert.strictEqual(out, '段落1\n\n\n段落2');
         });
 
+        test('見出しの一部だけを選択して貼り付けても、残る見出しテキストは消えない', () => {
+            // 「# 見出しABC」の "BC" 部分を選択して貼り付け（前半 "見出しA" は残す）
+            env.editor.innerHTML = env.markdown.markdownToHtml('# 見出しABC\n\n本文');
+            const h1Text = env.editor.querySelector('h1')!.lastChild as Text; // "見出しABC"
+            const start = h1Text.textContent!.indexOf('B');
+            const range = env.document.createRange();
+            range.setStart(h1Text, start);
+            range.setEnd(h1Text, h1Text.textContent!.length);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            env.commands.handleMarkdownPaste('段落1\n\n段落2');
+            // 見出しは殻ではない（"見出しA" が残る）ため除去されない
+            const h1 = env.editor.querySelector('h1');
+            assert.ok(h1, '見出しが誤って除去された: ' + env.editor.innerHTML);
+            assert.ok(h1!.textContent!.includes('見出しA'), h1!.textContent!);
+        });
+
         test('貼り付け後の内容が生Markdownとして往復する', () => {
             env.editor.innerHTML = '<p><br></p>';
             setCaret(env.editor.querySelector('p') as HTMLElement, 0);

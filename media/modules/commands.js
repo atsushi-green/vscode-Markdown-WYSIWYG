@@ -2357,7 +2357,9 @@ window.CommandsModule = (function() {
                     '.mermaid-source, table, input.task-checkbox, hr, img')) {
                 return;
             }
-            if (el.textContent.trim() === '') {
+            // 見出しの `# ` マーク表示用スパンは本文とみなさない（shellIsEmpty で除外）。
+            // 生の textContent で判定すると空見出しが `# ` を含むため消えずに残る。
+            if (shellIsEmpty(el)) {
                 el.remove();
             }
         });
