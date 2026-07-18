@@ -300,6 +300,26 @@ body {
 body.vscode-dark #editor strong,
 body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     font-weight: 800;
+    /* ウェイトと font-size だけでは太字が強調しきれないので、文字色でも差をつける。
+       ダークテーマの通常文字はグレー系（例: #d4d4d4）で背景とのコントラストに余裕があるので、
+       太字はより明るい純白へ寄せて周囲との差を際立たせる。フォントサイズはこれ以上上げず、
+       コントラストで視認性を確保する。ハイコントラスト系はテーマが規定する前景色を尊重し、
+       この明色化はダークテーマのみに限定する。 */
+}
+
+body.vscode-dark #editor strong {
+    color: #ffffff;
+    /* ダークテーマの太字は文字自体に輪郭（ストローク）を付けて字画を太らせ、周囲との差を明確にする。
+       文字色と同じ白でストロークすることで、フォントサイズを上げずに実効的な字面を
+       太くできる（合成エクストラボールド）。paint-order で塗りをストロークの上に描き、
+       輪郭が字画の内側を削って可読性を落とさないようにする。 */
+    -webkit-text-stroke: 0.4px #ffffff;
+    paint-order: stroke fill;
+    /* 輪郭で字画が太る分、サイズ拡大は控えめにしてレイアウトの破綻を避ける
+       （ライトテーマと同じ 1.05em に戻す）。見出し内の太字も相対的に拡大されるよう em 指定。 */
+    font-size: 1.05em;
+    /* font-size を上げた分、太字を含む行だけ行の高さが伸びないよう 1.6 / 1.05 へ補正する。 */
+    line-height: calc(1.6 / 1.05);
 }
 
 #editor em {
@@ -634,7 +654,7 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) #editor strong {
     margin-left: -1.3em;
 }
 
-#editor li.task-list-item > input.task-checkbox {
+#editor li.task-list-item>input.task-checkbox {
     margin-right: 0.4em;
     vertical-align: middle;
     cursor: pointer;
