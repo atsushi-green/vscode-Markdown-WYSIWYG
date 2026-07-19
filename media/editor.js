@@ -340,6 +340,22 @@
     let editSyncTimeout = null;
 
     /**
+     * 編集内容をVS Codeへ送信する。送信ごとに単調増加する編集シーケンス番号
+     * （`state.editSeq`）を採番して `seq` に載せる。拡張機能側はこの編集を適用して
+     * 返すエコー `update` にこの番号を反映するため、遅れて届いた古いエコーを
+     * `utils.shouldIgnoreStaleUpdate` で無視でき、タイプ中のキャレット巻き戻りを防げる。
+     */
+    function postEdit(content) {
+        state.lastSentMarkdown = content;
+        state.editSeq = state.editSeq + 1;
+        state.vscode.postMessage({
+            type: 'edit',
+            content: content,
+            seq: state.editSeq
+        });
+    }
+
+    /**
      * 現在のエディタ内容をMarkdown化してVS Codeへ送信（変更がある場合のみ）
      */
     function syncEditorToDocument() {
@@ -352,11 +368,7 @@
             return;
         }
 
-        state.lastSentMarkdown = normalized;
-        state.vscode.postMessage({
-            type: 'edit',
-            content: normalized
-        });
+        postEdit(normalized);
     }
 
     /**
@@ -574,6 +586,14 @@
             return;
         }
 
+        // 競合する古いエコーを無視する。タイプ中に送った古い編集のエコーが、より新しい
+        // ローカル編集の後に遅れて届くと、現在の内容を巻き戻してキャレットを乱すため、
+        // エコーが反映する編集の seq が最新の送信 seq より小さければ破棄する。
+        // （拡張機能側が seq を反映するまでは message.seq は undefined＝常に適用＝従来動作）
+        if (utils.shouldIgnoreStaleUpdate(message.seq, state.editSeq)) {
+            return;
+        }
+
         // 改行コードを正規化して比較
         const incoming = utils.normalizeEol(message.content);
 
@@ -616,8 +636,9 @@
         // コードブロックに言語セレクタを付与
         commands.decorateCodeBlocks();
 
-        // Mermaid図をレンダリング
-        mermaidModule.render();
+        // Mermaid図をレンダリング（非同期。描画完了後にキャレットを復元するため
+        // Promiseを受け取る）
+        const mermaidRenderPromise = mermaidModule.render();
 
         // 数式（KaTeX）をレンダリング
         mathModule.render(state.editor);
@@ -625,11 +646,12 @@
         // テーブルをレンダリング
         tableModule.render();
 
-        // カーソル位置を復元
+        // カーソル位置を復元（Mermaidの非同期描画完了後に行う。描画完了前に復元すると
+        // ブロックの高さ・ノード構成が未確定でアンカーがずれ、キャレットが飛ぶため）
         if (savedPosition) {
-            setTimeout(() => {
+            utils.restoreCaretAfterRender(mermaidRenderPromise, () => {
                 utils.restoreCursorPosition(savedPosition);
-            }, 0);
+            });
         }
 
         // 最新状態を記憶
@@ -689,11 +711,7 @@
             state.editor.focus();
 
             // 変更をVS Codeに通知
-            state.lastSentMarkdown = normalized;
-            state.vscode.postMessage({
-                type: 'edit',
-                content: normalized
-            });
+            postEdit(normalized);
         }
 
         // モード切り替え後の内容で単語数・文字数を更新
@@ -710,11 +728,7 @@
             }
 
             const md = utils.normalizeEol(state.rawEditor.value);
-            state.lastSentMarkdown = md;
-            state.vscode.postMessage({
-                type: 'edit',
-                content: md
-            });
+            postEdit(md);
 
             // 行番号ガターを更新
             updateRawLineGutter();

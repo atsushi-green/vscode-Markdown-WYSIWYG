@@ -50,12 +50,22 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         // Webviewの初期HTML設定
         webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
 
+        // Webview が送ってきた編集の seq を、その編集適用に起因するエコー `update`
+        // にだけ反映するための保持枠。Webview 側はこの seq を使って「競合する古い
+        // エコー」（タイプ中に送った古い編集のエコーが、より新しいローカル編集の後に
+        // 遅れて届く）を無視し、キャレットの巻き戻りを防ぐ（utils.shouldIgnoreStaleUpdate）。
+        // 外部編集（Webview 起因でない変更）には seq を付けない＝Webview 側は常に適用する。
+        let pendingEchoSeq: number | undefined;
+
         // ドキュメントの変更をWebviewに反映
         const updateWebview = () => {
             webviewPanel.webview.postMessage({
                 type: 'update',
-                content: document.getText()
+                content: document.getText(),
+                seq: pendingEchoSeq
             });
+            // seq は一度きり消費する（次に来る外部変更へ持ち越さない）
+            pendingEchoSeq = undefined;
         };
 
         // ドキュメント変更時のリスナー
@@ -73,9 +83,19 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         // Webviewからのメッセージを受信
         webviewPanel.webview.onDidReceiveMessage(async e => {
             switch (e.type) {
-                case 'edit':
-                    await this.updateTextDocument(document, e.content);
+                case 'edit': {
+                    // この編集に起因して発火する onDidChangeTextDocument（＝エコー）が
+                    // updateWebview で seq を載せられるよう、適用前に保持する。
+                    // applyEdit は同期的に変更イベントを発火させるため、await の前に設定する。
+                    pendingEchoSeq = typeof e.seq === 'number' ? e.seq : undefined;
+                    const changed = await this.updateTextDocument(document, e.content);
+                    // 内容が同一で変更が起きなかった場合はエコーが発火せず seq が
+                    // 消費されないため、次の外部変更へ誤って持ち越さないようここで消す。
+                    if (!changed) {
+                        pendingEchoSeq = undefined;
+                    }
                     return;
+                }
                 case 'log':
                     console.log('[Markdown WYSIWYG]', e.message);
                     return;
@@ -174,7 +194,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                                style-src ${webview.cspSource} 'unsafe-inline'; 
                                script-src 'nonce-${nonce}' 'unsafe-eval'; 
                                img-src ${webview.cspSource} data: blob:;
-                               font-src ${webview.cspSource};">
+                               font-src ${webview.cspSource} data:;">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <link href="${katexStyleUri}" rel="stylesheet">
                 <link href="${styleUri}" rel="stylesheet">
@@ -283,15 +303,19 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
      * 全文置換ではなく、変更前後で共通する先頭・末尾を除いた最小範囲のみを
      * 置換する。これによりUndo履歴の肥大化と、テキストエディタ側で同じ
      * ファイルを開いている場合のカーソル飛び・スクロール飛びを防ぐ。
+     *
+     * 戻り値は「実際に編集を適用したか」（＝onDidChangeTextDocument が発火するか）。
+     * 内容が同一で変更が起きなかった場合は false を返す（呼び出し側がエコー seq の
+     * 後始末に使う）。
      */
-    private updateTextDocument(document: vscode.TextDocument, content: string) {
+    private updateTextDocument(document: vscode.TextDocument, content: string): Thenable<boolean> {
         // ドキュメント側のEOLに合わせる（ファイルの改行コードを勝手に変えない）
         const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
         const normalized = content.replace(/\r\n?|\n/g, eol);
 
         const oldText = document.getText();
         if (oldText === normalized) {
-            return Promise.resolve(true);
+            return Promise.resolve(false);
         }
 
         // 共通の先頭部分を求める

@@ -1288,6 +1288,16 @@ window.CommandsModule = (function() {
      */
     function syncRawMarkdownToCaret() {
         const selection = window.getSelection();
+
+        // 範囲選択（非collapsed）の間は生Markdownの展開・折り畳みを行わない。
+        // 展開／折り畳みはDOMを書き換えて進行中の選択を破棄するため、マウスドラッグで
+        // 装飾（`**太字**` 等）をまたいで本文を選択・コピーしようとすると、装飾に
+        // 到達した瞬間に選択が解除されてしまう。生Markdown表示は「キャレット位置」を
+        // 示す機能であり範囲選択中は不要なので、選択がある間は一切触らない。
+        if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+            return false;
+        }
+
         const start = (selection && selection.rangeCount > 0)
             ? selection.getRangeAt(0).startContainer
             : null;
@@ -1652,7 +1662,11 @@ window.CommandsModule = (function() {
      * 見出しの確定処理（Enterキーで確定）
      */
     function handleHeadingConfirm(event) {
-        if (event.key !== 'Enter' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        // IME変換確定のEnter（`event.isComposing`）では処理しない。日本語入力で
+        // 「## ああ」の「ああ」を変換確定するEnterでDOMを書き換えると、直後にIMEが
+        // 確定テキストを挿入して見出しテキストが複製される（改行後に「ああ」が重複）。
+        if (event.key !== 'Enter' || event.ctrlKey || event.metaKey ||
+            event.altKey || event.shiftKey || event.isComposing) {
             return false;
         }
 
@@ -1662,6 +1676,24 @@ window.CommandsModule = (function() {
         }
 
         const range = selection.getRangeAt(0);
+
+        // 既にレンダリング済みの見出し（h1〜h6）内でEnterが押された場合の処理。
+        // findBlockAncestor は見出しをブロックとして扱わないため、ここで捕まえないと
+        // ブラウザ既定のEnter処理に委ねられ、見出しテキストが複製されてしまう
+        // （`## ああ` で確定後にエンターすると新しい行にも「ああ」が出るバグ）。
+        const heading = utils.findAncestor(range.startContainer,
+            (el) => /^H[1-6]$/.test(el.tagName));
+        if (heading) {
+            // 見出し内でのEnterは自前で処理する。ブラウザ既定の分割・複製を防ぐため、
+            // 実際に処理できる場合のみ preventDefault する。
+            const done = confirmRenderedHeading(heading, range, selection);
+            if (done) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            return done;
+        }
+
         const block = utils.findBlockAncestor(range.startContainer);
         if (!block) {
             return false;
@@ -1696,6 +1728,46 @@ window.CommandsModule = (function() {
         const br = document.createElement('br');
         newP.appendChild(br);
         h.insertAdjacentElement('afterend', newP);
+
+        const newRange = document.createRange();
+        newRange.setStart(newP, 0);
+        newRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+        state.editor.focus();
+
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+
+        return true;
+    }
+
+    /**
+     * 既にレンダリング済みの見出し要素内でEnterが押されたときの確定処理。
+     * キャレット以降の内容を新しい段落へ切り出し、見出し直下に挿入してから
+     * キャレットをその段落へ移す。キャレットが見出し末尾なら空段落を作る。
+     * ブラウザ既定のEnter処理（見出しの複製・分割）を防ぐために preventDefault する。
+     */
+    function confirmRenderedHeading(heading, range, selection) {
+        // 見出しのアンカー用 `#` スパンより前にはキャレットを置けない扱いにする
+        // （安全のため、切り出しは見出しの範囲内に限定する）。
+        const afterRange = document.createRange();
+        afterRange.setStart(range.startContainer, range.startOffset);
+        afterRange.setEnd(heading, heading.childNodes.length);
+
+        // キャレットが見出しの外を指していた場合は何もしない（保険）。
+        if (!heading.contains(afterRange.startContainer)) {
+            return false;
+        }
+
+        const frag = afterRange.extractContents();
+
+        const newP = document.createElement('p');
+        if (frag.textContent.length > 0) {
+            newP.appendChild(frag);
+        } else {
+            newP.appendChild(document.createElement('br'));
+        }
+        heading.insertAdjacentElement('afterend', newP);
 
         const newRange = document.createRange();
         newRange.setStart(newP, 0);

@@ -335,9 +335,31 @@ window.MermaidModule = (function() {
     }
 
     /**
+     * 画像化の背景指定（`'transparent'`/`'white'`/`'black'`）を、キャンバス／html2canvas
+     * 用の設定へ変換する純粋関数。
+     * - `'transparent'`: alpha 有効のキャンバスにして塗りつぶさない（透過PNG）。html2canvas
+     *   側の中間ラスタライズでも白を焼き込まないよう背景を `null` にする。
+     * - `'white'`/`'black'`: 不透明キャンバスに該当色を塗る（従来と同じ塗りつぶし方式）。
+     * - 未指定・未知の値: `'white'`（従来動作）へフォールバックする。
+     * @param {string} [background]
+     * @returns {{ alpha: boolean, fillColor: (string|null), html2canvasBackground: (string|null) }}
+     */
+    function resolveImageBackground(background) {
+        if (background === 'transparent') {
+            return { alpha: true, fillColor: null, html2canvasBackground: null };
+        }
+        if (background === 'black') {
+            return { alpha: false, fillColor: '#000000', html2canvasBackground: '#000000' };
+        }
+        // 'white' / 未指定 / 未知 → 白（従来動作）
+        return { alpha: false, fillColor: '#ffffff', html2canvasBackground: '#ffffff' };
+    }
+
+    /**
      * SVGをPNG Blobに変換
      */
-    async function svgToPngBlob(svgElement, scale = 4) {
+    async function svgToPngBlob(svgElement, scale = 4, background = 'white') {
+        const bg = resolveImageBackground(background);
         return new Promise(async (resolve, reject) => {
             try {
                 if (typeof html2canvas === 'undefined') {
@@ -418,7 +440,7 @@ window.MermaidModule = (function() {
 
                 const fullCanvas = await html2canvas(tempContainer, {
                     scale: effectiveScale,
-                    backgroundColor: '#ffffff',
+                    backgroundColor: bg.html2canvasBackground,
                     logging: false,
                     useCORS: true,
                     allowTaint: false,
@@ -440,7 +462,7 @@ window.MermaidModule = (function() {
                 trimmedCanvas.height = finalHeight;
 
                 const ctx = trimmedCanvas.getContext('2d', {
-                    alpha: false,
+                    alpha: bg.alpha,
                     desynchronized: false,
                     colorSpace: 'srgb',
                     willReadFrequently: false
@@ -453,8 +475,11 @@ window.MermaidModule = (function() {
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = 'high';
 
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, finalWidth, finalHeight);
+                // 透過（fillColor が null）のときは塗りつぶさず、SVG描画の透明部分を残す。
+                if (bg.fillColor) {
+                    ctx.fillStyle = bg.fillColor;
+                    ctx.fillRect(0, 0, finalWidth, finalHeight);
+                }
 
                 ctx.drawImage(
                     fullCanvas,
@@ -481,7 +506,7 @@ window.MermaidModule = (function() {
     /**
      * クリップボードに画像をコピー
      */
-    async function copyToClipboard(previewPanel) {
+    async function copyToClipboard(previewPanel, background) {
         const svg = previewPanel.querySelector('svg');
         if (!svg) {
             console.error('[Mermaid] No SVG found in preview panel');
@@ -492,7 +517,7 @@ window.MermaidModule = (function() {
         console.log('[Mermaid] Copying to clipboard...');
 
         try {
-            const blob = await svgToPngBlob(svg);
+            const blob = await svgToPngBlob(svg, 4, background);
             await navigator.clipboard.write([
                 new ClipboardItem({
                     'image/png': blob
@@ -508,7 +533,7 @@ window.MermaidModule = (function() {
     /**
      * PNG画像として保存
      */
-    async function saveAsPng(previewPanel) {
+    async function saveAsPng(previewPanel, background) {
         const svg = previewPanel.querySelector('svg');
         if (!svg) {
             console.error('[Mermaid] No SVG found in preview panel');
@@ -519,7 +544,7 @@ window.MermaidModule = (function() {
         console.log('[Mermaid] Saving as PNG...');
 
         try {
-            const blob = await svgToPngBlob(svg);
+            const blob = await svgToPngBlob(svg, 4, background);
             console.log('[Mermaid] Blob created, converting to base64...');
 
             const reader = new FileReader();
@@ -619,6 +644,7 @@ window.MermaidModule = (function() {
         hideContextMenu: hideContextMenu,
         copyToClipboard: copyToClipboard,
         saveAsPng: saveAsPng,
-        setupContextMenuEvents: setupContextMenuEvents
+        setupContextMenuEvents: setupContextMenuEvents,
+        resolveImageBackground: resolveImageBackground
     };
 })();

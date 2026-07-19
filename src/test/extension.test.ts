@@ -188,6 +188,22 @@ suite('MarkdownEditorProvider.updateTextDocument（Webviewからの書き戻し�
         assert.strictEqual(changeCount, 0);
     });
 
+    test('戻り値は「実際に編集を適用したか」を表す（seqエコーの後始末に使う）', async () => {
+        const document = await vscode.workspace.openTextDocument({
+            language: 'markdown',
+            content: 'hello\n'
+        });
+        await vscode.window.showTextDocument(document);
+
+        // 変更あり → true（onDidChangeTextDocument が発火する）
+        const changed = await (provider as any).updateTextDocument(document, 'hello world\n');
+        assert.strictEqual(changed, true);
+
+        // 変更なし（同一内容）→ false（エコーが発火しないので seq を持ち越さないための合図）
+        const unchanged = await (provider as any).updateTextDocument(document, 'hello world\n');
+        assert.strictEqual(unchanged, false);
+    });
+
     test('CRLFドキュメントの改行コードを保持する', async () => {
         const document = await vscode.workspace.openTextDocument({
             language: 'markdown',

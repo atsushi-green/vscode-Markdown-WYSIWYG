@@ -5,13 +5,14 @@ import * as assert from 'assert';
 import { createEditorEnv, EditorEnv } from './helper';
 
 /** handleXxx 系に渡すキーボードイベントの疑似オブジェクトを作る */
-function fakeKeyEvent(key: string, modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) {
+function fakeKeyEvent(key: string, modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean; isComposing: boolean }> = {}) {
     return {
         key,
         ctrlKey: false,
         metaKey: false,
         altKey: false,
         shiftKey: false,
+        isComposing: false,
         ...modifiers,
         defaultPrevented: false,
         preventDefault() { this.defaultPrevented = true; },
@@ -1002,6 +1003,73 @@ suite('CommandsModule', () => {
             assert.strictEqual(after, before, JSON.stringify(after));
             assert.ok(/前\*\*太字\*\*後/.test(after), JSON.stringify(after));
         });
+
+        /** 開始・終了ノードとオフセットで範囲選択を張る（非collapsed） */
+        function selectRange(startNode: Node, startOffset: number, endNode: Node, endOffset: number): void {
+            const range = env.document.createRange();
+            range.setStart(startNode, startOffset);
+            range.setEnd(endNode, endOffset);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('装飾をまたぐ範囲選択中は展開せず選択を保持する（ドラッグ選択の解除防止）', () => {
+            // 「本文をドラッグ選択して装飾（**等）に到達すると選択が解除される」不具合の回帰テスト。
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            const p = env.editor.querySelector('p')!;
+            const before = p.firstChild!;    // "前"
+            const after = p.lastChild!;      // "後"
+            // "前" の先頭から strong をまたいで "後" の末尾まで選択
+            selectRange(before, 0, after, 1);
+
+            const changed = env.commands.syncRawMarkdownToCaret();
+
+            assert.strictEqual(changed, false, env.editor.innerHTML);
+            // 装飾は生Markdownへ展開されない（DOMが書き換わらない）
+            assert.strictEqual(env.editor.querySelector('span.raw-markdown'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('strong'), env.editor.innerHTML);
+            // 選択が破棄されていない（範囲のまま・内容も同じ）
+            const sel = env.window.getSelection();
+            assert.strictEqual(sel.isCollapsed, false, '選択が解除された');
+            assert.strictEqual(sel.toString(), '前太字後', sel.toString());
+        });
+
+        test('選択の開始が装飾の内側にあっても、範囲選択中は展開しない', () => {
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            const strongText = env.editor.querySelector('strong')!.firstChild!; // "太字"
+            const after = env.editor.querySelector('p')!.lastChild!;            // "後"
+            // strong 内の途中から "後" まで選択（開始が装飾の内側）
+            selectRange(strongText, 1, after, 1);
+
+            const changed = env.commands.syncRawMarkdownToCaret();
+
+            assert.strictEqual(changed, false, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('span.raw-markdown'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('strong'), env.editor.innerHTML);
+            assert.strictEqual(env.window.getSelection().isCollapsed, false, env.editor.innerHTML);
+        });
+
+        test('既に展開中のspanは範囲選択中に折り畳まれない（展開テキストのドラッグ編集を維持）', () => {
+            // まずキャレットを装飾内に置いて展開させる
+            env.editor.innerHTML = '<p>前<strong>太字</strong>後</p>';
+            caretInDeepest(env.editor.querySelector('strong') as HTMLElement, 1);
+            env.commands.syncRawMarkdownToCaret();
+            const span = rawSpan();
+            assert.ok(span, '前提: 展開されていること ' + env.editor.innerHTML);
+
+            // 展開中の生テキスト（`**太字**`）内で範囲選択する
+            const rawText = span!.firstChild!;
+            selectRange(rawText, 0, rawText, 4);
+
+            const changed = env.commands.syncRawMarkdownToCaret();
+
+            // 範囲選択中は折り畳まれず、展開表示が維持される（＝ドラッグ選択して編集できる）
+            assert.strictEqual(changed, false, env.editor.innerHTML);
+            assert.ok(rawSpan(), '展開中spanが折り畳まれた: ' + env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('strong'), null, env.editor.innerHTML);
+            assert.strictEqual(env.window.getSelection().isCollapsed, false, env.editor.innerHTML);
+        });
     });
 
     suite('syncRawMarkdownToCaret（リンク上の生Markdown表示）', () => {
@@ -1513,6 +1581,105 @@ suite('CommandsModule', () => {
             const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
             assert.ok(/\* \[Title\]\(#title\)/.test(md), md);
             assert.ok(/ {2}\* \[Sub\]\(#sub\)/.test(md), md);
+        });
+    });
+
+    suite('handleHeadingConfirm（見出しのEnter確定）', () => {
+        /** ノードの内容の末尾にキャレットを置く */
+        function placeCaretAtEndOf(node: Node): void {
+            const range = env.document.createRange();
+            range.selectNodeContents(node);
+            range.collapse(false);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        /** テキストノードの指定オフセットにキャレットを置く */
+        function placeCaretInText(textNode: Node, offset: number): void {
+            const range = env.document.createRange();
+            range.setStart(textNode, offset);
+            range.collapse(true);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        test('生の`## ああ`段落でEnterすると見出し化し直下に空段落を作る', () => {
+            env.editor.innerHTML = '<p>## ああ</p>';
+            placeCaretAtEndOf(env.editor.querySelector('p') as HTMLElement);
+            const ev = fakeKeyEvent('Enter');
+            const handled = env.commands.handleHeadingConfirm(ev);
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('h2').length, 1, env.editor.innerHTML);
+            const h2 = env.editor.querySelector('h2')!;
+            assert.ok(h2.textContent!.includes('ああ'), env.editor.innerHTML);
+            const nextP = h2.nextElementSibling as HTMLElement;
+            assert.strictEqual(nextP.tagName, 'P', env.editor.innerHTML);
+            assert.strictEqual(nextP.textContent, '', env.editor.innerHTML);
+        });
+
+        test('レンダリング済み見出しの末尾でEnterしても見出しテキストが複製されない', () => {
+            // 再現バグ: `## ああ` 確定後にエンターすると新しい行にも「ああ」が出る
+            env.editor.innerHTML = env.markdown.markdownToHtml('## ああ');
+            placeCaretAtEndOf(env.editor.querySelector('h2') as HTMLElement);
+            const ev = fakeKeyEvent('Enter');
+            const handled = env.commands.handleHeadingConfirm(ev);
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(ev.defaultPrevented, true, 'ブラウザ既定のEnterを抑止していない');
+            // 見出しは1つだけ、テキストは複製されない
+            assert.strictEqual(env.editor.querySelectorAll('h2').length, 1, env.editor.innerHTML);
+            const h2 = env.editor.querySelector('h2')!;
+            assert.strictEqual(h2.textContent, '## ああ', env.editor.innerHTML);
+            // 直下に空の段落が1つ挿入される
+            const nextP = h2.nextElementSibling as HTMLElement;
+            assert.ok(nextP && nextP.tagName === 'P', env.editor.innerHTML);
+            assert.strictEqual(nextP.textContent, '', env.editor.innerHTML);
+            // 文書全体で「ああ」は1回だけ
+            assert.strictEqual((env.editor.textContent!.match(/ああ/g) || []).length, 1, env.editor.innerHTML);
+        });
+
+        test('見出しの途中でEnterすると後半だけが新段落へ移る（テキストは失われない）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('## ああいい');
+            const h2 = env.editor.querySelector('h2')!;
+            const textNode = h2.lastChild as Node; // "ああいい"
+            placeCaretInText(textNode, 2); // "ああ" と "いい" の間
+            const handled = env.commands.handleHeadingConfirm(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, true, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('h2')!.textContent, '## ああ', env.editor.innerHTML);
+            const nextP = env.editor.querySelector('h2')!.nextElementSibling as HTMLElement;
+            assert.strictEqual(nextP.tagName, 'P', env.editor.innerHTML);
+            assert.strictEqual(nextP.textContent, 'いい', env.editor.innerHTML);
+        });
+
+        test('見出しでもリスト項目でもない段落ではEnterを処理しない（false）', () => {
+            env.editor.innerHTML = '<p>ふつうの本文</p>';
+            placeCaretAtEndOf(env.editor.querySelector('p') as HTMLElement);
+            const handled = env.commands.handleHeadingConfirm(fakeKeyEvent('Enter'));
+            assert.strictEqual(handled, false, env.editor.innerHTML);
+        });
+
+        test('修飾キー付きEnter（Shift+Enter）は処理しない', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('## ああ');
+            placeCaretAtEndOf(env.editor.querySelector('h2') as HTMLElement);
+            const handled = env.commands.handleHeadingConfirm(fakeKeyEvent('Enter', { shiftKey: true }));
+            assert.strictEqual(handled, false, env.editor.innerHTML);
+        });
+
+        test('IME変換確定のEnter（isComposing）は処理せずDOMも変えない（見出しテキスト重複の防止）', () => {
+            // 日本語入力で「## ああ」の「ああ」を変換確定するEnterでDOMを書き換えると、
+            // 直後にIMEが確定テキストを挿入して見出しテキストが複製される不具合の回帰テスト。
+            env.editor.innerHTML = env.markdown.markdownToHtml('## ああ');
+            placeCaretAtEndOf(env.editor.querySelector('h2') as HTMLElement);
+            const before = env.editor.innerHTML;
+            const ev = fakeKeyEvent('Enter', { isComposing: true });
+            const handled = env.commands.handleHeadingConfirm(ev);
+            assert.strictEqual(handled, false, env.editor.innerHTML);
+            assert.strictEqual(ev.defaultPrevented, false, 'IME確定のEnterで preventDefault してはいけない');
+            // DOMは一切変わらない（新しい段落を作らない＝重複の元を作らない）
+            assert.strictEqual(env.editor.innerHTML, before, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('h2').length, 1, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('p'), null, env.editor.innerHTML);
         });
     });
 
