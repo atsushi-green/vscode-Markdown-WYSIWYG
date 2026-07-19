@@ -6,6 +6,8 @@
  * html2canvas未読込時のフォールバック）を検証する。
  */
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 import { createEditorEnv, EditorEnv } from './helper';
 
 suite('MathModule', () => {
@@ -175,6 +177,123 @@ suite('MathModule', () => {
             const svg = env.math.buildMathBlockSvgMarkup('x', '', 0, 12.3, 'transparent');
             assert.ok(svg.includes('width="1"'), svg);
             assert.ok(svg.includes('height="13"'), svg);
+        });
+    });
+
+    suite('buildKatexFontFaceCss（data: URL の @font-face 組み立て）', () => {
+        test('family/style/weight と base64 から woff2 の @font-face を組み立てる', () => {
+            const css = env.math.buildKatexFontFaceCss([
+                { family: 'KaTeX_Main', style: 'normal', weight: 400, base64: 'AAA' }
+            ]);
+            assert.strictEqual(
+                css,
+                '@font-face{font-family:"KaTeX_Main";font-style:normal;font-weight:400;' +
+                'src:url(data:font/woff2;base64,AAA) format("woff2");}'
+            );
+        });
+
+        test('複数フォントを連結する', () => {
+            const css = env.math.buildKatexFontFaceCss([
+                { family: 'KaTeX_Main', style: 'italic', weight: 700, base64: 'AAA' },
+                { family: 'KaTeX_Math', style: 'italic', weight: 400, base64: 'BBB' }
+            ]);
+            assert.strictEqual((css.match(/@font-face/g) || []).length, 2);
+            assert.ok(css.includes('font-style:italic;font-weight:700'), css);
+            assert.ok(css.includes('base64,BBB'), css);
+        });
+
+        test('base64 が空／未指定のエントリはスキップする（壊れた @font-face を出さない）', () => {
+            const css = env.math.buildKatexFontFaceCss([
+                { family: 'KaTeX_Main', style: 'normal', weight: 400, base64: '' },
+                { family: 'KaTeX_Math', style: 'italic', weight: 400 },
+                { family: 'KaTeX_AMS', style: 'normal', weight: 400, base64: 'CCC' }
+            ]);
+            assert.strictEqual((css.match(/@font-face/g) || []).length, 1);
+            assert.ok(css.includes('KaTeX_AMS'), css);
+        });
+
+        test('style は italic 以外を normal に、weight は非3桁数値を 400 に正規化する', () => {
+            const css = env.math.buildKatexFontFaceCss([
+                { family: 'KaTeX_Main', style: 'oblique', weight: 'bold', base64: 'AAA' }
+            ]);
+            assert.ok(css.includes('font-style:normal'), css);
+            assert.ok(css.includes('font-weight:400'), css);
+        });
+
+        test('family の引用符・バックスラッシュを除去してCSSを壊さない', () => {
+            const css = env.math.buildKatexFontFaceCss([
+                { family: 'Ka"Te\\X', style: 'normal', weight: 400, base64: 'AAA' }
+            ]);
+            assert.ok(css.includes('font-family:"KaTeX"'), css);
+        });
+
+        test('配列でない入力は空文字を返す', () => {
+            assert.strictEqual(env.math.buildKatexFontFaceCss(null), '');
+            assert.strictEqual(env.math.buildKatexFontFaceCss(undefined), '');
+            assert.strictEqual(env.math.buildKatexFontFaceCss('x' as any), '');
+        });
+
+        test('base64 の非base64文字（`)`・空白等）を除去して data: URL を壊さない', () => {
+            const css = env.math.buildKatexFontFaceCss([
+                { family: 'KaTeX_Main', style: 'normal', weight: 400, base64: 'AA)B C\nD=' }
+            ]);
+            assert.ok(css.includes('base64,AABCD=)'), css);
+            // 括弧の早期クローズが無い（data: URL が1つの url(...) に収まる）
+            assert.strictEqual((css.match(/format\("woff2"\)/g) || []).length, 1);
+        });
+
+        test('base64 がサニタイズ後に空になるエントリはスキップする', () => {
+            const css = env.math.buildKatexFontFaceCss([
+                { family: 'KaTeX_Main', style: 'normal', weight: 400, base64: ')))' }
+            ]);
+            assert.strictEqual(css, '');
+        });
+    });
+
+    suite('KATEX_FONT_MANIFEST（埋め込み対象フォント一覧の整合）', () => {
+        test('各エントリの woff2 ファイルが media/katex/fonts/ に実在する', () => {
+            // out/test/unit/ から見たプロジェクトルート
+            const projectRoot = path.resolve(__dirname, '..', '..', '..');
+            const fontsDir = path.join(projectRoot, 'media', 'katex', 'fonts');
+            const manifest = env.math.KATEX_FONT_MANIFEST as Array<{ file: string }>;
+            assert.ok(Array.isArray(manifest) && manifest.length > 0, 'manifest is non-empty');
+            for (const entry of manifest) {
+                const p = path.join(fontsDir, entry.file);
+                assert.ok(fs.existsSync(p), `missing font file: ${entry.file}`);
+            }
+        });
+
+        test('(family, style, weight) の組が重複しない', () => {
+            const manifest = env.math.KATEX_FONT_MANIFEST as Array<{ family: string; style: string; weight: number }>;
+            const keys = manifest.map((e) => `${e.family}|${e.style}|${e.weight}`);
+            assert.strictEqual(new Set(keys).size, keys.length, 'duplicate font descriptor');
+        });
+
+        test('katex.min.css の woff2 @font-face 群を過不足なく網羅する', () => {
+            // マニフェストが katex.min.css の @font-face（woff2）と一致することを保証し、
+            // 将来 CSS 側にフォントが増減してもマニフェストの取りこぼしを検知する。
+            const projectRoot = path.resolve(__dirname, '..', '..', '..');
+            const css = fs.readFileSync(path.join(projectRoot, 'media', 'katex', 'katex.min.css'), 'utf8');
+            const cssKeys = new Set<string>();
+            const faceRe = /@font-face\{([^}]*)\}/g;
+            let m: RegExpExecArray | null;
+            while ((m = faceRe.exec(css)) !== null) {
+                const body = m[1];
+                if (!/url\([^)]*\.woff2\)/.test(body)) {
+                    continue; // woff2 を持たない宣言は埋め込み対象外
+                }
+                const family = (body.match(/font-family:"?([^";]+)"?/) || [])[1];
+                const style = (body.match(/font-style:([a-z]+)/) || [])[1] || 'normal';
+                const weight = (body.match(/font-weight:(\d+)/) || [])[1] || '400';
+                if (family) {
+                    cssKeys.add(`${family}|${style}|${weight}`);
+                }
+            }
+            const manifest = env.math.KATEX_FONT_MANIFEST as Array<{ family: string; style: string; weight: number }>;
+            // KATEX_FONT_MANIFEST は jsdom レルムの配列のため、Array.from で Node レルムの
+            // 配列に materialize してから比較する（deepStrictEqual はプロトタイプも厳密比較する）。
+            const manifestKeys = Array.from(manifest, (e) => `${e.family}|${e.style}|${e.weight}`).sort();
+            assert.deepStrictEqual(manifestKeys, [...cssKeys].sort());
         });
     });
 });

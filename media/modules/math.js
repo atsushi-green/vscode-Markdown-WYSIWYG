@@ -204,6 +204,78 @@ window.MathModule = (function() {
     }
 
     /**
+     * KaTeX が使う woff2 フォントの一覧（`font-family`／`font-style`／`font-weight` と
+     * `media/katex/fonts/` 内のファイル名）。`katex.min.css` の `@font-face` 群と一致する。
+     *
+     * ブロック数式の foreignObject 画像化（(2/2)）では、SVG が隔離コンテキストで描画され
+     * 外部の CSS もフォントも参照できないため、これらの woff2 を base64 化して
+     * `@font-face(src: url(data:font/woff2;base64,…))` として SVG 内 `<style>` へ埋め込む。
+     * 実際の fetch→base64 化と CSS 組み立ての呼び出しは(2/2)の配線側で行い、
+     * ここでは「どのフォントを埋め込むべきか」の静的な正の一覧として持つ。
+     */
+    var KATEX_FONT_MANIFEST = [
+        { family: 'KaTeX_AMS', style: 'normal', weight: 400, file: 'KaTeX_AMS-Regular.woff2' },
+        { family: 'KaTeX_Caligraphic', style: 'normal', weight: 400, file: 'KaTeX_Caligraphic-Regular.woff2' },
+        { family: 'KaTeX_Caligraphic', style: 'normal', weight: 700, file: 'KaTeX_Caligraphic-Bold.woff2' },
+        { family: 'KaTeX_Fraktur', style: 'normal', weight: 400, file: 'KaTeX_Fraktur-Regular.woff2' },
+        { family: 'KaTeX_Fraktur', style: 'normal', weight: 700, file: 'KaTeX_Fraktur-Bold.woff2' },
+        { family: 'KaTeX_Main', style: 'normal', weight: 400, file: 'KaTeX_Main-Regular.woff2' },
+        { family: 'KaTeX_Main', style: 'normal', weight: 700, file: 'KaTeX_Main-Bold.woff2' },
+        { family: 'KaTeX_Main', style: 'italic', weight: 400, file: 'KaTeX_Main-Italic.woff2' },
+        { family: 'KaTeX_Main', style: 'italic', weight: 700, file: 'KaTeX_Main-BoldItalic.woff2' },
+        { family: 'KaTeX_Math', style: 'italic', weight: 400, file: 'KaTeX_Math-Italic.woff2' },
+        { family: 'KaTeX_Math', style: 'italic', weight: 700, file: 'KaTeX_Math-BoldItalic.woff2' },
+        { family: 'KaTeX_SansSerif', style: 'normal', weight: 400, file: 'KaTeX_SansSerif-Regular.woff2' },
+        { family: 'KaTeX_SansSerif', style: 'normal', weight: 700, file: 'KaTeX_SansSerif-Bold.woff2' },
+        { family: 'KaTeX_SansSerif', style: 'italic', weight: 400, file: 'KaTeX_SansSerif-Italic.woff2' },
+        { family: 'KaTeX_Script', style: 'normal', weight: 400, file: 'KaTeX_Script-Regular.woff2' },
+        { family: 'KaTeX_Size1', style: 'normal', weight: 400, file: 'KaTeX_Size1-Regular.woff2' },
+        { family: 'KaTeX_Size2', style: 'normal', weight: 400, file: 'KaTeX_Size2-Regular.woff2' },
+        { family: 'KaTeX_Size3', style: 'normal', weight: 400, file: 'KaTeX_Size3-Regular.woff2' },
+        { family: 'KaTeX_Size4', style: 'normal', weight: 400, file: 'KaTeX_Size4-Regular.woff2' },
+        { family: 'KaTeX_Typewriter', style: 'normal', weight: 400, file: 'KaTeX_Typewriter-Regular.woff2' }
+    ];
+
+    /**
+     * base64 化した woff2 フォントの配列から、`data:` URL を `src` に持つ `@font-face`
+     * CSS を組み立てる純粋関数。foreignObject 画像化用に SVG 内 `<style>` へインラインする。
+     *
+     * `base64` が空／未指定のエントリはスキップする（fetch 失敗時に壊れた `@font-face` を
+     * 出さない）。`family` は CSS を壊さないよう引用符・バックスラッシュを除去し、`style` は
+     * `italic` のみ許可（他は `normal`）、`weight` は3桁の数値文字列のみ許可（他は `400`）へ
+     * 正規化する。
+     *
+     * @param {Array<{family:string, style:string, weight:(number|string), base64:string}>} fonts
+     * @returns {string} `@font-face` 群のCSS文字列（該当なしなら空文字）
+     */
+    function buildKatexFontFaceCss(fonts) {
+        if (!Array.isArray(fonts)) {
+            return '';
+        }
+        return fonts
+            .map(function(f) {
+                if (!f || !f.base64) {
+                    return '';
+                }
+                // base64 は fetch 由来の信頼値だが、family 側と同様に防御的に
+                // base64 アルファベット以外を除去して data: URL を壊さないようにする。
+                var base64 = String(f.base64).replace(/[^A-Za-z0-9+/=]/g, '');
+                if (!base64) {
+                    return '';
+                }
+                var family = String(f.family || '').replace(/["\\]/g, '');
+                var style = f.style === 'italic' ? 'italic' : 'normal';
+                var weightStr = String(f.weight);
+                var weight = /^[1-9]00$/.test(weightStr) ? weightStr : '400';
+                return '@font-face{font-family:"' + family + '";font-style:' + style +
+                    ';font-weight:' + weight +
+                    ';src:url(data:font/woff2;base64,' + base64 + ') format("woff2");}';
+            })
+            .filter(function(rule) { return rule; })
+            .join('');
+    }
+
+    /**
      * ブロック数式（`.math-block`）をPNGのBlobへ変換する。
      * KaTeXの出力はSVGではなくHTML+CSSのため、mermaidのSVG→canvasは使えない。
      * 同梱の html2canvas でHTML要素を直接ラスタライズする。
@@ -323,6 +395,8 @@ window.MathModule = (function() {
         copyBlockAsPng: copyBlockAsPng,
         findMathBlock: findMathBlock,
         computeMenuPosition: computeMenuPosition,
-        buildMathBlockSvgMarkup: buildMathBlockSvgMarkup
+        buildMathBlockSvgMarkup: buildMathBlockSvgMarkup,
+        buildKatexFontFaceCss: buildKatexFontFaceCss,
+        KATEX_FONT_MANIFEST: KATEX_FONT_MANIFEST
     };
 })();
