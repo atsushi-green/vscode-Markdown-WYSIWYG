@@ -5,15 +5,15 @@
   "version": "0.0.1",
   "publisher": "your-publisher-name",
   "author": {
-    "name": "Your Name"
+    "name": "red tea"
   },
-  "license": "MIT",
+  "license": "CC-BY-NC-4.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/markdown-wysiwyg-editor"
+    "url": "https://github.com/atsushi-green/vscode-Markdown-WYSIWYG"
   },
   "engines": {
-    "vscode": "^1.95.0"
+    "vscode": "^1.108.0"
   },
   "categories": [
     "Other"

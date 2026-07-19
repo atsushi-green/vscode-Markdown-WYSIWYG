@@ -4,7 +4,7 @@ VS Code上でMarkdownファイルをWYSIWYG（What You See Is What You Get）形
 
 ![Version](https://img.shields.io/badge/version-0.0.1-blue)
 ![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.108.1-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-CC%20BY--NC%204.0-green)
 
 ## 📖 ドキュメント
 
