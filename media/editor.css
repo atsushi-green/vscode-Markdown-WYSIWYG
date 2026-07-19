@@ -90,7 +90,13 @@ body {
     user-select: none;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
-    line-height: 1.6;
+    /* 行番号を論理行と1対1で揃えるため、textarea(#rawEditor)と全く同じ整数px
+       の行高を使う。以前は unitless の 1.6（=14px×1.6=22.4px の小数）だったが、
+       小数行高では textarea のネイティブな行描画と div の行ボックス丸めが一致せず、
+       行を下るほど番号が実際の行からずれ、下の方で番号が1行ぶんずれて
+       「一部の行に番号が出ない」ように見えた。整数pxに固定すると両者の行送りが
+       完全一致し、ずれが起きない。 */
+    line-height: 22px;
 }
 
 .raw-line-gutter-inner {
@@ -117,7 +123,10 @@ body {
     box-sizing: border-box;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
-    line-height: 1.6;
+    /* 行番号ガター（.raw-line-gutter）と全く同じ整数pxの行高にする。
+       小数の行高（1.6=22.4px）だと textarea のネイティブ行描画と gutter の div の
+       行送りが一致せず、下の行ほど番号がずれて見える不具合になるため。 */
+    line-height: 22px;
     color: var(--vscode-editor-foreground);
     background-color: var(--vscode-editor-background);
     border: none;
