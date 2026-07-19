@@ -49,6 +49,13 @@ window.EditorState = (function() {
         // カーソル・編集状態
         lastCursorPosition: null,
         lastSentMarkdown: '',
+        // Webviewが送信した編集の単調増加シーケンス番号。競合する古い `update`
+        // （＝タイプ中に送った古い編集のエコーが、より新しいローカル編集の後に
+        // 遅れて届く）を無視して、キャレットが巻き戻るのを防ぐために使う。
+        // 送信ごとに +1 し、拡張機能側がエコーの `update` にこの番号を `seq` として
+        // 反映して返す（拡張機能側の配線は別サイクル＝それまでは message.seq は
+        // 常に undefined で本ガードは無効・従来動作のまま）。
+        editSeq: 0,
 
         // リンクダイアログ関連
         // ダイアログの入力欄へフォーカスを移すとエディタの選択が失われるため、
@@ -182,6 +189,9 @@ window.EditorState = (function() {
 
         get lastSentMarkdown() { return state.lastSentMarkdown; },
         set lastSentMarkdown(v) { state.lastSentMarkdown = v; },
+
+        get editSeq() { return state.editSeq; },
+        set editSeq(v) { state.editSeq = v; },
 
         // Mermaid関連
         get mermaidIdCounter() { return state.mermaidIdCounter; },

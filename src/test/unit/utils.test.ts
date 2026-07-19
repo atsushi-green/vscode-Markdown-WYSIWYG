@@ -475,6 +475,27 @@ suite('EditorUtils', () => {
             assert.ok(env.editor.contains(restored.anchorNode) || restored.anchorNode === env.editor);
         });
     });
+
+    suite('shouldIgnoreStaleUpdate（競合する古いエコーの判定）', () => {
+        test('エコーの seq が最新の送信 seq より小さければ無視する（陳腐化）', () => {
+            // 「AB」(seq2) を送った後「ABC」(seq3) を送ると editSeq=3。
+            // 遅れて届いた「AB」のエコー(seq2)は 2 < 3 なので無視する。
+            assert.strictEqual(env.utils.shouldIgnoreStaleUpdate(2, 3), true);
+        });
+
+        test('エコーの seq が最新と同値なら無視しない（最新エコーは内容一致ガードに委ねる）', () => {
+            assert.strictEqual(env.utils.shouldIgnoreStaleUpdate(3, 3), false);
+        });
+
+        test('seq が未指定（外部編集・初期ロード）なら常に適用する', () => {
+            assert.strictEqual(env.utils.shouldIgnoreStaleUpdate(undefined, 5), false);
+            assert.strictEqual(env.utils.shouldIgnoreStaleUpdate(null, 5), false);
+        });
+
+        test('editSeq が初期値0（まだ何も送っていない）なら無視しない', () => {
+            assert.strictEqual(env.utils.shouldIgnoreStaleUpdate(0, 0), false);
+        });
+    });
 });
 
 suite('EditorState', () => {
@@ -506,5 +527,11 @@ suite('EditorState', () => {
         assert.strictEqual(env.state.isEditingTable, false);
         assert.strictEqual(env.state.findMatches.length, 0);
         assert.strictEqual(env.state.currentMatchIndex, -1);
+    });
+
+    test('editSeqは初期値0で、getter/setterで読み書きできる', () => {
+        assert.strictEqual(env.state.editSeq, 0);
+        env.state.editSeq = env.state.editSeq + 1;
+        assert.strictEqual(env.state.editSeq, 1);
     });
 });

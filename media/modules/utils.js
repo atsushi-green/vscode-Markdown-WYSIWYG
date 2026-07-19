@@ -416,6 +416,30 @@ window.EditorUtils = (function() {
         return false;
     }
 
+    /**
+     * 受信した `update` が「競合する古いエコー」かどうかを判定する（純粋関数）。
+     *
+     * Webview は編集を送るたびに単調増加する `editSeq` を採番し、拡張機能側は
+     * その編集を適用して返すエコー `update` に、原因となった編集の `seq` を反映する。
+     * タイプ中に「AB」を送った直後に「ABC」を送ると、遅れて届いた「AB」のエコー
+     * （＝より小さい seq）が現在の「ABC」を巻き戻し、キャレットを乱していた。
+     *
+     * `messageSeq`（エコーが反映する編集の seq）が、Webview が既に送った最新の
+     * `currentEditSeq` より小さければ、その `update` は陳腐化しているので無視する。
+     * `messageSeq` が数値でない（＝外部編集や初期ロードで seq が付かない）場合は
+     * 常に適用する（false を返す）。同値（最新エコー）は無視しない＝内容一致の
+     * 既存ガードに委ねる。
+     *
+     * @param {*} messageSeq 受信した update の seq（未定義なら外部編集扱い）
+     * @param {number} currentEditSeq Webview が最後に送った編集の seq
+     * @returns {boolean} 無視すべきなら true
+     */
+    function shouldIgnoreStaleUpdate(messageSeq, currentEditSeq) {
+        return typeof messageSeq === 'number' &&
+            typeof currentEditSeq === 'number' &&
+            messageSeq < currentEditSeq;
+    }
+
     // 公開API
     return {
         normalizeEol: normalizeEol,
@@ -425,6 +449,7 @@ window.EditorUtils = (function() {
         showToast: showToast,
         saveCursorPosition: saveCursorPosition,
         restoreCursorPosition: restoreCursorPosition,
+        shouldIgnoreStaleUpdate: shouldIgnoreStaleUpdate,
         findAncestor: findAncestor,
         findBlockAncestor: findBlockAncestor,
         getTextBeforeCaret: getTextBeforeCaret,
