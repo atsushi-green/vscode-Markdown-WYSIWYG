@@ -5,13 +5,14 @@ import * as assert from 'assert';
 import { createEditorEnv, EditorEnv } from './helper';
 
 /** handleXxx 系に渡すキーボードイベントの疑似オブジェクトを作る */
-function fakeKeyEvent(key: string, modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) {
+function fakeKeyEvent(key: string, modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean; isComposing: boolean }> = {}) {
     return {
         key,
         ctrlKey: false,
         metaKey: false,
         altKey: false,
         shiftKey: false,
+        isComposing: false,
         ...modifiers,
         defaultPrevented: false,
         preventDefault() { this.defaultPrevented = true; },
@@ -1663,6 +1664,22 @@ suite('CommandsModule', () => {
             placeCaretAtEndOf(env.editor.querySelector('h2') as HTMLElement);
             const handled = env.commands.handleHeadingConfirm(fakeKeyEvent('Enter', { shiftKey: true }));
             assert.strictEqual(handled, false, env.editor.innerHTML);
+        });
+
+        test('IME変換確定のEnter（isComposing）は処理せずDOMも変えない（見出しテキスト重複の防止）', () => {
+            // 日本語入力で「## ああ」の「ああ」を変換確定するEnterでDOMを書き換えると、
+            // 直後にIMEが確定テキストを挿入して見出しテキストが複製される不具合の回帰テスト。
+            env.editor.innerHTML = env.markdown.markdownToHtml('## ああ');
+            placeCaretAtEndOf(env.editor.querySelector('h2') as HTMLElement);
+            const before = env.editor.innerHTML;
+            const ev = fakeKeyEvent('Enter', { isComposing: true });
+            const handled = env.commands.handleHeadingConfirm(ev);
+            assert.strictEqual(handled, false, env.editor.innerHTML);
+            assert.strictEqual(ev.defaultPrevented, false, 'IME確定のEnterで preventDefault してはいけない');
+            // DOMは一切変わらない（新しい段落を作らない＝重複の元を作らない）
+            assert.strictEqual(env.editor.innerHTML, before, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('h2').length, 1, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('p'), null, env.editor.innerHTML);
         });
     });
 

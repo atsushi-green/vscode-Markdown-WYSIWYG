@@ -1662,7 +1662,11 @@ window.CommandsModule = (function() {
      * 見出しの確定処理（Enterキーで確定）
      */
     function handleHeadingConfirm(event) {
-        if (event.key !== 'Enter' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        // IME変換確定のEnter（`event.isComposing`）では処理しない。日本語入力で
+        // 「## ああ」の「ああ」を変換確定するEnterでDOMを書き換えると、直後にIMEが
+        // 確定テキストを挿入して見出しテキストが複製される（改行後に「ああ」が重複）。
+        if (event.key !== 'Enter' || event.ctrlKey || event.metaKey ||
+            event.altKey || event.shiftKey || event.isComposing) {
             return false;
         }
 
