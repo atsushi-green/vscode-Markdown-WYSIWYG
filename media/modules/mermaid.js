@@ -20,19 +20,26 @@ window.MermaidModule = (function() {
     }
 
     /**
+     * 指定テーマでmermaid本体を初期化する（設定は常にここで一元管理）
+     */
+    function initializeMermaid(theme) {
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: theme,
+            securityLevel: 'loose',
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true
+            }
+        });
+    }
+
+    /**
      * Mermaidの初期化
      */
     function init() {
         if (typeof mermaid !== 'undefined') {
-            mermaid.initialize({
-                startOnLoad: false,
-                theme: resolveTheme(),
-                securityLevel: 'loose',
-                flowchart: {
-                    useMaxWidth: true,
-                    htmlLabels: true
-                }
-            });
+            initializeMermaid(resolveTheme());
             console.log('[Mermaid] Initialized with theme:', resolveTheme());
             observeThemeChange();
         }
@@ -54,15 +61,7 @@ window.MermaidModule = (function() {
                 return;
             }
             currentTheme = next;
-            mermaid.initialize({
-                startOnLoad: false,
-                theme: next,
-                securityLevel: 'loose',
-                flowchart: {
-                    useMaxWidth: true,
-                    htmlLabels: true
-                }
-            });
+            initializeMermaid(next);
             // 既存の図を新テーマで再描画
             cleanup();
             render();
@@ -356,6 +355,82 @@ window.MermaidModule = (function() {
     }
 
     /**
+     * 画像化の背景指定に合ったMermaidテーマを解決する純粋関数。
+     * 画面がダークテーマのままのSVGを白／透過背景に載せると「白地に真っ黒なブロック」
+     * になるため、背景が明るい（`'white'`/`'transparent'`）ときは `'default'`（ライト）、
+     * `'black'` のときは `'dark'` を書き出しに使う。
+     * @param {string} [background] 'transparent' | 'white' | 'black'
+     * @returns {string} Mermaidテーマ名（'default' | 'dark'）
+     */
+    function resolveExportTheme(background) {
+        return background === 'black' ? 'dark' : 'default';
+    }
+
+    /**
+     * 画像化用に、背景に合ったテーマのSVGを用意する。
+     * 画面表示のテーマと一致する場合は画面上のSVGをそのまま使い、異なる場合は
+     * ソースコードから一時的に再レンダリングする（画面表示は変更しない）。
+     * @param {HTMLElement} previewPanel 図のプレビューパネル（id = diagramId）
+     * @param {string} background 'transparent' | 'white' | 'black'
+     * @returns {Promise<{ svg: SVGElement, cleanup: function }|null>}
+     */
+    async function createExportSvg(previewPanel, background) {
+        const onScreenSvg = previewPanel.querySelector('svg');
+        if (!onScreenSvg) {
+            return null;
+        }
+
+        const exportTheme = resolveExportTheme(background);
+        const screenTheme = resolveTheme();
+        if (exportTheme === screenTheme) {
+            return { svg: onScreenSvg, cleanup: () => {} };
+        }
+
+        // ソースコードを取得（編集時に同期されている元のコードブロックから）
+        const sourcePre = document.querySelector(`pre.mermaid-source[data-mermaid-id="${previewPanel.id}"] code`);
+        const code = sourcePre ? sourcePre.textContent.trim() : '';
+        if (!code) {
+            console.warn('[Mermaid] Source not found; exporting on-screen SVG as-is');
+            return { svg: onScreenSvg, cleanup: () => {} };
+        }
+
+        const holder = document.createElement('div');
+        holder.style.position = 'absolute';
+        holder.style.left = '-9999px';
+        holder.style.top = '-9999px';
+        holder.style.width = `${previewPanel.clientWidth || 800}px`;
+        document.body.appendChild(holder);
+
+        try {
+            initializeMermaid(exportTheme);
+            const { svg } = await mermaid.render(`mermaid-export-${Date.now()}`, code);
+            holder.innerHTML = svg;
+        } catch (error) {
+            console.error('[Mermaid] Export re-render failed; falling back to on-screen SVG:', error);
+            document.body.removeChild(holder);
+            document.querySelectorAll('[id^="mermaid-export-"], [id^="dmermaid-export-"]').forEach(el => el.remove());
+            return { svg: onScreenSvg, cleanup: () => {} };
+        } finally {
+            // 画面表示用のテーマへ必ず戻す
+            initializeMermaid(screenTheme);
+        }
+
+        const exportSvg = holder.querySelector('svg');
+        if (!exportSvg) {
+            document.body.removeChild(holder);
+            return { svg: onScreenSvg, cleanup: () => {} };
+        }
+        return {
+            svg: exportSvg,
+            cleanup: () => {
+                if (holder.parentElement) {
+                    holder.parentElement.removeChild(holder);
+                }
+            }
+        };
+    }
+
+    /**
      * SVGをPNG Blobに変換
      */
     async function svgToPngBlob(svgElement, scale = 4, background = 'white') {
@@ -507,8 +582,8 @@ window.MermaidModule = (function() {
      * クリップボードに画像をコピー
      */
     async function copyToClipboard(previewPanel, background) {
-        const svg = previewPanel.querySelector('svg');
-        if (!svg) {
+        const exportSvg = await createExportSvg(previewPanel, background);
+        if (!exportSvg) {
             console.error('[Mermaid] No SVG found in preview panel');
             utils.showToast('⚠️ SVG要素が見つかりません');
             return;
@@ -517,7 +592,7 @@ window.MermaidModule = (function() {
         console.log('[Mermaid] Copying to clipboard...');
 
         try {
-            const blob = await svgToPngBlob(svg, 4, background);
+            const blob = await svgToPngBlob(exportSvg.svg, 4, background);
             await navigator.clipboard.write([
                 new ClipboardItem({
                     'image/png': blob
@@ -527,6 +602,8 @@ window.MermaidModule = (function() {
         } catch (error) {
             console.error('[Mermaid] Copy failed:', error);
             utils.showToast(`⚠️ コピーに失敗しました: ${error.message}`);
+        } finally {
+            exportSvg.cleanup();
         }
     }
 
@@ -534,8 +611,8 @@ window.MermaidModule = (function() {
      * PNG画像として保存
      */
     async function saveAsPng(previewPanel, background) {
-        const svg = previewPanel.querySelector('svg');
-        if (!svg) {
+        const exportSvg = await createExportSvg(previewPanel, background);
+        if (!exportSvg) {
             console.error('[Mermaid] No SVG found in preview panel');
             utils.showToast('⚠️ SVG要素が見つかりません');
             return;
@@ -544,7 +621,7 @@ window.MermaidModule = (function() {
         console.log('[Mermaid] Saving as PNG...');
 
         try {
-            const blob = await svgToPngBlob(svg, 4, background);
+            const blob = await svgToPngBlob(exportSvg.svg, 4, background);
             console.log('[Mermaid] Blob created, converting to base64...');
 
             const reader = new FileReader();
@@ -572,6 +649,8 @@ window.MermaidModule = (function() {
         } catch (error) {
             console.error('[Mermaid] Save failed:', error);
             utils.showToast(`⚠️ 保存に失敗しました: ${error.message}`);
+        } finally {
+            exportSvg.cleanup();
         }
     }
 
@@ -674,6 +753,7 @@ window.MermaidModule = (function() {
         saveAsPng: saveAsPng,
         setupContextMenuEvents: setupContextMenuEvents,
         resolveImageBackground: resolveImageBackground,
-        resolveMenuBackground: resolveMenuBackground
+        resolveMenuBackground: resolveMenuBackground,
+        resolveExportTheme: resolveExportTheme
     };
 })();

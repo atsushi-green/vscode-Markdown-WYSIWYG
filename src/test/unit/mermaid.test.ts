@@ -51,6 +51,22 @@ suite('MermaidModule', () => {
         });
     });
 
+    suite('resolveExportTheme（画像化に使うMermaidテーマの解決）', () => {
+        test("明るい背景（'white'/'transparent'）はライトテーマ 'default' で書き出す", () => {
+            assert.strictEqual(env.mermaid.resolveExportTheme('white'), 'default');
+            assert.strictEqual(env.mermaid.resolveExportTheme('transparent'), 'default');
+        });
+
+        test("'black' はダークテーマ 'dark' で書き出す", () => {
+            assert.strictEqual(env.mermaid.resolveExportTheme('black'), 'dark');
+        });
+
+        test("未指定・未知の値は 'default'（白背景のフォールバックと整合）", () => {
+            assert.strictEqual(env.mermaid.resolveExportTheme(undefined), 'default');
+            assert.strictEqual(env.mermaid.resolveExportTheme('rainbow'), 'default');
+        });
+    });
+
     suite('resolveMenuBackground（メニューの背景選択の解決）', () => {
         function buildMenu(activeBg?: string): HTMLElement {
             const menu = env.state.mermaidContextMenu as HTMLElement;
