@@ -636,8 +636,9 @@
         // コードブロックに言語セレクタを付与
         commands.decorateCodeBlocks();
 
-        // Mermaid図をレンダリング
-        mermaidModule.render();
+        // Mermaid図をレンダリング（非同期。描画完了後にキャレットを復元するため
+        // Promiseを受け取る）
+        const mermaidRenderPromise = mermaidModule.render();
 
         // 数式（KaTeX）をレンダリング
         mathModule.render(state.editor);
@@ -645,11 +646,12 @@
         // テーブルをレンダリング
         tableModule.render();
 
-        // カーソル位置を復元
+        // カーソル位置を復元（Mermaidの非同期描画完了後に行う。描画完了前に復元すると
+        // ブロックの高さ・ノード構成が未確定でアンカーがずれ、キャレットが飛ぶため）
         if (savedPosition) {
-            setTimeout(() => {
+            utils.restoreCaretAfterRender(mermaidRenderPromise, () => {
                 utils.restoreCursorPosition(savedPosition);
-            }, 0);
+            });
         }
 
         // 最新状態を記憶

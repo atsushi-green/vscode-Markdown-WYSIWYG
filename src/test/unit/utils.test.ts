@@ -567,6 +567,70 @@ suite('EditorUtils', () => {
             assert.strictEqual(env.utils.shouldIgnoreStaleUpdate(0, 0), false);
         });
     });
+
+    suite('restoreCaretAfterRender（非同期描画完了後のキャレット復元）', () => {
+        test('Promiseが解決してから復元コールバックを呼ぶ（描画完了前には呼ばない）', async () => {
+            let calledBeforeResolve = false;
+            let called = false;
+            let resolveRender: () => void = () => {};
+            const renderPromise = new Promise<void>((resolve) => {
+                resolveRender = resolve;
+            });
+
+            env.utils.restoreCaretAfterRender(renderPromise, () => {
+                called = true;
+            });
+
+            // まだ描画（Promise）が解決していないので復元は走っていない
+            await Promise.resolve();
+            calledBeforeResolve = called;
+
+            resolveRender();
+            await renderPromise;
+            await Promise.resolve();
+
+            assert.strictEqual(calledBeforeResolve, false, '描画完了前に復元してはいけない');
+            assert.strictEqual(called, true, '描画完了後に復元する');
+        });
+
+        test('Promiseが失敗（reject）しても復元は試みる（DOM構造は確定しているため）', async () => {
+            let called = false;
+            const renderPromise = Promise.reject(new Error('render failed'));
+
+            env.utils.restoreCaretAfterRender(renderPromise, () => {
+                called = true;
+            });
+
+            // rejectのハンドリングを待つ
+            await renderPromise.catch(() => {});
+            await Promise.resolve();
+
+            assert.strictEqual(called, true, '描画失敗時も復元を試みる');
+        });
+
+        test('Promiseでない値（同期描画のみ）ならマクロタスクで復元する', (done) => {
+            let called = false;
+
+            env.utils.restoreCaretAfterRender(undefined, () => {
+                called = true;
+            });
+
+            // 同期的には呼ばれない（setTimeout(0)経由）
+            assert.strictEqual(called, false, '同期的には復元しない');
+
+            setTimeout(() => {
+                assert.strictEqual(called, true, 'マクロタスクで復元する');
+                done();
+            }, 0);
+        });
+
+        test('復元コールバックが関数でなければ何もしない（例外を投げない）', () => {
+            assert.doesNotThrow(() => {
+                env.utils.restoreCaretAfterRender(Promise.resolve(), undefined as any);
+                env.utils.restoreCaretAfterRender(undefined, null as any);
+            });
+        });
+    });
 });
 
 suite('EditorState', () => {

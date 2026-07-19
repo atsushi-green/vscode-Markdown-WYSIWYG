@@ -482,6 +482,35 @@ window.EditorUtils = (function() {
             messageSeq < currentEditSeq;
     }
 
+    /**
+     * 非同期描画（Mermaid等）の完了を待ってからキャレット復元を実行するヘルパー。
+     *
+     * Mermaid の再描画は非同期（`mermaidModule.render()` は Promise を返す）で、
+     * `innerHTML` 全書き換え後にキャレットを復元する際、描画完了前に復元すると
+     * ブロックの高さ・ノード構成が未確定なためアンカーがずれてキャレットが飛ぶ。
+     * 描画 Promise の解決（または失敗）を待ってから復元することでこれを防ぐ。
+     * Promise でない値（同期描画のみ／描画対象なし）が渡された場合は、従来どおり
+     * 次のマクロタスクで復元する（`setTimeout(0)` 相当）。描画が失敗しても DOM 構造
+     * 自体は確定しているため、失敗時も復元は試みる。
+     *
+     * @param {*} renderPromise Mermaid等 render() の戻り値（Promise か否かは問わない）
+     * @param {Function} restoreFn キャレット復元を行うコールバック
+     */
+    function restoreCaretAfterRender(renderPromise, restoreFn) {
+        if (typeof restoreFn !== 'function') {
+            return;
+        }
+        if (renderPromise && typeof renderPromise.then === 'function') {
+            renderPromise.then(function() {
+                restoreFn();
+            }, function() {
+                restoreFn();
+            });
+        } else {
+            setTimeout(restoreFn, 0);
+        }
+    }
+
     // 公開API
     return {
         normalizeEol: normalizeEol,
@@ -493,6 +522,7 @@ window.EditorUtils = (function() {
         restoreCursorPosition: restoreCursorPosition,
         blockSignatureOf: blockSignatureOf,
         shouldIgnoreStaleUpdate: shouldIgnoreStaleUpdate,
+        restoreCaretAfterRender: restoreCaretAfterRender,
         findAncestor: findAncestor,
         findBlockAncestor: findBlockAncestor,
         getTextBeforeCaret: getTextBeforeCaret,
