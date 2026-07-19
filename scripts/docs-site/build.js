@@ -103,6 +103,7 @@ ${renderNav(pages, activeOut)}
 <div id="editor">${bodyHtml}</div>
 </div>
 <script src="assets/highlight.min.js"></script>
+<script src="assets/mermaid.min.js"></script>
 <script src="assets/boot.js"></script>
 </body>
 </html>
@@ -118,9 +119,11 @@ function build() {
     fs.rmSync(OUT_DIR, { recursive: true, force: true });
     fs.mkdirSync(path.join(OUT_DIR, 'assets'), { recursive: true });
 
-    // 静的アセット: editor.css / highlight.min.js は無変更でコピー（見た目を完全に一致させるため）
+    // 静的アセット: editor.css / highlight.min.js / mermaid.min.js は無変更でコピー
+    // （エディタ本体と見た目・図の描画を完全に一致させるため）
     fs.copyFileSync(path.join(ROOT, 'media', 'editor.css'), path.join(OUT_DIR, 'assets', 'editor.css'));
     fs.copyFileSync(path.join(ROOT, 'media', 'highlight.min.js'), path.join(OUT_DIR, 'assets', 'highlight.min.js'));
+    fs.copyFileSync(path.join(ROOT, 'media', 'mermaid.min.js'), path.join(OUT_DIR, 'assets', 'mermaid.min.js'));
     fs.copyFileSync(path.join(__dirname, 'site.css'), path.join(OUT_DIR, 'assets', 'site.css'));
     fs.copyFileSync(path.join(__dirname, 'boot.js'), path.join(OUT_DIR, 'assets', 'boot.js'));
 

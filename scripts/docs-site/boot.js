@@ -55,9 +55,58 @@
         });
     }
 
+    /**
+     * ```mermaid コードブロック（data-lang="mermaid"）を図として描画する。
+     * エディタ本体（media/modules/mermaid.js）はツールバー付きのインタラクティブ
+     * コンテナを組むが、このドキュメントサイトは閲覧専用なので、
+     * 元の <pre> を静的なSVGコンテナに置き換えるだけの軽量版にする。
+     */
+    function renderMermaid() {
+        if (typeof mermaid === 'undefined') {
+            return;
+        }
+        var blocks = document.querySelectorAll('#editor pre code[data-lang="mermaid"]');
+        if (!blocks.length) {
+            return;
+        }
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: prefersDark ? 'dark' : 'default',
+            securityLevel: 'loose',
+            flowchart: { useMaxWidth: true, htmlLabels: true }
+        });
+        blocks.forEach(function (block, i) {
+            var pre = block.parentElement;
+            if (!pre) {
+                return;
+            }
+            var code = (block.textContent || '').trim();
+            if (!code) {
+                return;
+            }
+            var container = document.createElement('div');
+            container.className = 'mermaid-container';
+            mermaid.render('docs-mermaid-' + i, code)
+                .then(function (result) {
+                    container.innerHTML = result.svg;
+                    var svg = container.querySelector('svg');
+                    if (svg) {
+                        svg.classList.add('mermaid-svg');
+                    }
+                    pre.replaceWith(container);
+                })
+                .catch(function (error) {
+                    container.innerHTML = '<div class="mermaid-error">⚠️ Mermaidレンダリングエラー: ' + error.message + '</div>';
+                    pre.replaceWith(container);
+                });
+        });
+    }
+
     function init() {
         renderTables();
         highlight();
+        renderMermaid();
     }
 
     if (document.readyState === 'loading') {

@@ -7,8 +7,8 @@ Markdown WYSIWYG Editor 拡張機能の実装内容を機能単位・技術単�
 
 | ドキュメント | 内容 |
 |---|---|
-| [features.md](./features.md) | 実装済み機能のすべて（ユーザーが使える機能を網羅） |
-| [architecture.md](./architecture.md) | 拡張機能本体とWebviewの技術アーキテクチャ、モジュール構成 |
+| [features.md](./features.md) | **できること・操作方法**（ユーザー向け。何ができて、どう使うか） |
+| [architecture.md](./architecture.md) | **内部の仕組み**（開発者向け。全体構成・処理の流れ・変換の仕組みをmermaid図で解説） |
 | [commands-and-shortcuts.md](./commands-and-shortcuts.md) | VS Codeコマンド・キーバインド・キーボードショートカットの一覧 |
 | [changelog.md](./changelog.md) | git履歴に基づく実装の変遷 |
 
