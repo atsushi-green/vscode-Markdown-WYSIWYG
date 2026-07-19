@@ -64,10 +64,10 @@ const FIXTURE_HTML = `<!DOCTYPE html>
 </html>`;
 
 // Webviewと同じ読み込み順（依存関係があるため順序が重要）
-// mermaid.js は mermaid.min.js 本体に依存するため除外。
-// math.js は KaTeX/html2canvas 本体に依存するが、いずれも関数内で参照するだけ
-// （読み込み時は window.MathModule を定義するのみ）なのでテストでも読み込める。
-const MODULE_FILES = ['state.js', 'utils.js', 'markdown.js', 'table.js', 'search.js', 'commands.js', 'math.js'];
+// math.js / mermaid.js は KaTeX/html2canvas/mermaid 本体に依存するが、いずれも
+// 関数内で参照するだけ（読み込み時は window.*Module を定義するのみ）なのでテストでも
+// 読み込める（純粋関数の単体テスト用途）。
+const MODULE_FILES = ['state.js', 'utils.js', 'markdown.js', 'table.js', 'search.js', 'commands.js', 'math.js', 'mermaid.js'];
 
 export interface EditorEnv {
     /** jsdomのwindow（モジュールはここに登録される） */
@@ -87,6 +87,8 @@ export interface EditorEnv {
     commands: any;
     /** window.MathModule */
     math: any;
+    /** window.MermaidModule */
+    mermaid: any;
     /** #editor 要素 */
     editor: HTMLElement;
     /** vscode.postMessage されたメッセージの記録 */
@@ -149,6 +151,7 @@ export function createEditorEnv(): EditorEnv {
         search: window.SearchModule,
         commands: window.CommandsModule,
         math: window.MathModule,
+        mermaid: window.MermaidModule,
         editor: window.document.getElementById('editor'),
         posted,
         copiedTexts
