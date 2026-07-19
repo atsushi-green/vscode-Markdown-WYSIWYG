@@ -390,6 +390,79 @@ suite('EditorUtils', () => {
             assert.strictEqual(restored.anchorOffset, 5);
         });
 
+        test('保存結果はブロック基準アンカー（blockIndex/blockOffset）も持つ', () => {
+            env.editor.innerHTML = '<p>first</p><p>abcdef</p>';
+            const textNode = env.editor.querySelectorAll('p')[1]!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 3);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            const saved = env.utils.saveCursorPosition();
+            // キャレットは2番目のトップレベルブロック（index 1）内のオフセット3
+            assert.strictEqual(saved.blockIndex, 1);
+            assert.strictEqual(saved.blockOffset, 3);
+        });
+
+        test('ノードが消えても、前のブロックの文字量が変わればブロック基準で正確に復元する', () => {
+            // innerHTML 全書き換え経路（保存ノード破棄）の回帰テスト。
+            // キャレットより前のブロック（数式/Mermaid/テーブル相当）が再描画で
+            // 文字量を変えても、キャレットのブロックに閉じたローカルオフセットなので
+            // グローバルオフセット方式のように別ブロックへドリフトしない。
+            env.editor.innerHTML = '<div class="mermaid">short</div><p>abcdef</p>';
+            const textNode = env.editor.querySelector('p')!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 3);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            const saved = env.utils.saveCursorPosition();
+            assert.strictEqual(saved.blockIndex, 1);
+            assert.strictEqual(saved.blockOffset, 3);
+
+            // 全書き換え相当：保存ノードは破棄され、先頭ブロックの文字量が大きく増える
+            env.editor.innerHTML =
+                '<div class="mermaid">MUCH LONGER RENDERED TEXT</div><p>abcdef</p>';
+            assert.ok(!env.editor.contains(saved.node), '前提: 保存ノードは切り離されている');
+
+            env.utils.restoreCursorPosition(saved);
+
+            const restored = env.window.getSelection();
+            // グローバルオフセット（5+3=8文字目）だと先頭ブロック内へずれるが、
+            // ブロック基準なら p の firstChild オフセット3へ正確に戻る
+            assert.strictEqual(
+                restored.anchorNode, env.editor.querySelector('p')!.firstChild,
+                'キャレットのブロックへ戻っていない'
+            );
+            assert.strictEqual(restored.anchorOffset, 3, 'ブロック内オフセットがずれた');
+        });
+
+        test('blockIndexが範囲外（ブロック構造が変わった）ならグローバルオフセット方式へフォールバックする', () => {
+            env.editor.innerHTML = '<p>first</p><p>abcdef</p>';
+            const textNode = env.editor.querySelectorAll('p')[1]!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 3);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            const saved = env.utils.saveCursorPosition();
+            assert.strictEqual(saved.blockIndex, 1);
+
+            // ブロックが1つに減る（index 1 は存在しなくなる）＝グローバルオフセットで復元
+            env.editor.innerHTML = '<p>firstabcdef</p>';
+            env.utils.restoreCursorPosition(saved);
+
+            const restored = env.window.getSelection();
+            // saved.offset は "first"(5) + 3 = 8。単一ブロック内の8文字目へ戻る
+            assert.strictEqual(restored.anchorNode, env.editor.querySelector('p')!.firstChild);
+            assert.strictEqual(restored.anchorOffset, 8);
+        });
+
         test('本文が空でオフセットに届かない場合はエディタ末尾へフォールバックする', () => {
             env.editor.innerHTML = '';
             env.window.getSelection().removeAllRanges();

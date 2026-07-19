@@ -91,14 +91,46 @@ window.EditorUtils = (function() {
         preCaretRange.selectNodeContents(state.editor);
         preCaretRange.setEnd(range.endContainer, range.endOffset);
 
+        // ブロック基準アンカー（第二候補）。キャレットを含むトップレベルブロック
+        // （エディタの直接の子）のインデックスと、そのブロック内でのローカル文字数
+        // オフセットを保持する。innerHTML 全書き換えで保存ノードが消えても、
+        // トップレベルブロックの並びが保たれていれば、このローカルオフセットで
+        // 復元できる。グローバル文字数オフセット（キャレットより前にある別ブロックの
+        // 埋め込みウィジェット＝数式・Mermaid・テーブルが再描画で文字量を変えると
+        // ドリフトする）と違い、キャレットのあるブロックに閉じるぶん頑健。
+        let blockIndex = -1;
+        let blockOffset = 0;
+        if (range.endContainer !== state.editor) {
+            let topBlock = range.endContainer;
+            while (topBlock && topBlock.parentNode !== state.editor) {
+                topBlock = topBlock.parentNode;
+            }
+            if (topBlock && topBlock.parentNode === state.editor) {
+                const children = state.editor.childNodes;
+                for (let i = 0; i < children.length; i++) {
+                    if (children[i] === topBlock) {
+                        blockIndex = i;
+                        break;
+                    }
+                }
+                const blockRange = range.cloneRange();
+                blockRange.selectNodeContents(topBlock);
+                blockRange.setEnd(range.endContainer, range.endOffset);
+                blockOffset = blockRange.toString().length;
+            }
+        }
+
         return {
             // ノード基準アンカー（第一候補）。DOMがインプレースで書き換えられても
             // このノードが生きていれば、文字数オフセットの走査（埋め込みウィジェットの
             // 内部テキスト量や再描画でずれやすい）を経ずに正確な位置へ戻せる。
             node: range.endContainer,
             nodeOffset: range.endOffset,
-            // 文字数オフセット（フォールバック）。innerHTML 全書き換え等で上記ノードが
-            // 消えた場合に使う。
+            // ブロック基準アンカー（第二候補）。全書き換えでノードが消えても、
+            // 同じインデックスのブロックが残っていればブロック内オフセットで戻せる。
+            blockIndex: blockIndex,
+            blockOffset: blockOffset,
+            // 文字数オフセット（最終フォールバック）。上記いずれも使えない場合に使う。
             offset: preCaretRange.toString().length,
             text: preCaretRange.toString()
         };
@@ -140,37 +172,69 @@ window.EditorUtils = (function() {
             }
         }
 
-        const range = document.createRange();
-
-        try {
+        // 指定 root 配下のテキストノードを文書順に走査し、targetOffset 文字目の位置を探す。
+        // { result: {node, offset} | null, lastTextNode } を返す。result が null なら
+        // 目的オフセットに届かなかった（＝本文が短くなった等）。
+        function scanOffset(root, targetOffset) {
             let currentOffset = 0;
-            let found = false;
-            let lastTextNode = null; // 走査した最後のテキストノード（フォールバック用）
+            let result = null;
+            let lastTextNode = null;
 
-            function findOffset(node) {
-                if (found) return;
+            function walk(node) {
+                if (result) return;
 
                 if (node.nodeType === Node.TEXT_NODE) {
                     lastTextNode = node;
                     const nodeLength = node.textContent.length;
-                    if (currentOffset + nodeLength >= position.offset) {
-                        range.setStart(node, position.offset - currentOffset);
-                        range.setEnd(node, position.offset - currentOffset);
-                        found = true;
+                    if (currentOffset + nodeLength >= targetOffset) {
+                        result = { node: node, offset: targetOffset - currentOffset };
                         return;
                     }
                     currentOffset += nodeLength;
                 } else if (node.nodeType === Node.ELEMENT_NODE) {
                     for (let child of node.childNodes) {
-                        findOffset(child);
-                        if (found) return;
+                        walk(child);
+                        if (result) return;
                     }
                 }
             }
 
-            findOffset(state.editor);
+            walk(root);
+            return { result: result, lastTextNode: lastTextNode };
+        }
 
-            if (found) {
+        // ブロック基準で復元を試みる（第二候補）。保存ノードが消えていても、同じ
+        // インデックスのトップレベルブロックが残っていて、そのブロック内でローカル
+        // オフセットに到達できれば復元する。キャレットより前の別ブロック（数式・
+        // Mermaid・テーブル）が再描画で文字量を変えても、キャレットのブロックに閉じた
+        // オフセットなのでドリフトしない。届かなければ下のグローバルオフセット走査へ委ねる。
+        if (typeof position.blockIndex === 'number' && position.blockIndex >= 0) {
+            const block = state.editor.childNodes[position.blockIndex];
+            if (block) {
+                const { result } = scanOffset(block, position.blockOffset || 0);
+                if (result) {
+                    try {
+                        const blockRange = document.createRange();
+                        blockRange.setStart(result.node, result.offset);
+                        blockRange.collapse(true);
+                        selection.removeAllRanges();
+                        selection.addRange(blockRange);
+                        return;
+                    } catch (e) {
+                        // ブロック基準で失敗した場合はグローバルオフセット方式へ委ねる
+                    }
+                }
+            }
+        }
+
+        const range = document.createRange();
+
+        try {
+            const { result, lastTextNode } = scanOffset(state.editor, position.offset);
+
+            if (result) {
+                range.setStart(result.node, result.offset);
+                range.setEnd(result.node, result.offset);
                 selection.removeAllRanges();
                 selection.addRange(range);
                 return;
