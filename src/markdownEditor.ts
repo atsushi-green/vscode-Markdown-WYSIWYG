@@ -167,6 +167,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         // WebviewはCSPで外部CDNを読めないため media/katex/ へ同梱している。
         // katex.min.css がフォントを `fonts/*.woff2` の相対パスで参照するため、
         // フォントは katex.min.css と同じ階層の fonts/ に置く必要がある（CSPは font-src で許可済み）。
+        // また数式の画像化（math.js の loadKatexFontFaceCss）が woff2 を fetch で読んで
+        // SVGへ base64 埋め込みするため、CSP の connect-src も許可が必要。
         const katexUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'katex', 'katex.min.js')
         );
@@ -194,7 +196,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                                style-src ${webview.cspSource} 'unsafe-inline'; 
                                script-src 'nonce-${nonce}' 'unsafe-eval'; 
                                img-src ${webview.cspSource} data: blob:;
-                               font-src ${webview.cspSource} data:;">
+                               font-src ${webview.cspSource} data:;
+                               connect-src ${webview.cspSource};">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <link href="${katexStyleUri}" rel="stylesheet">
                 <link href="${styleUri}" rel="stylesheet">

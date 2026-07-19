@@ -190,6 +190,24 @@ suite('MathModule', () => {
         });
     });
 
+    suite('serializeNodeToXhtml（foreignObject 用の XHTML 直列化）', () => {
+        test('ネストした <svg> に xmlns（SVG名前空間）を付けて直列化する', () => {
+            // KaTeX は √ の記号を span 内のインライン <svg> で描く。outerHTML だと
+            // xmlns が落ち、XML 解釈される foreignObject 内で √ が消える（回帰ガード）。
+            const div = env.window.document.createElement('div');
+            div.innerHTML = '<span class="katex"><svg viewBox="0 0 400000 1080"><path d="M95,702"></path></svg></span>';
+            const xhtml = env.math.serializeNodeToXhtml(div);
+            assert.ok(xhtml.includes('<svg xmlns="http://www.w3.org/2000/svg"'), xhtml);
+        });
+
+        test('HTML要素はXHTML名前空間の宣言付きで直列化される', () => {
+            const div = env.window.document.createElement('div');
+            div.textContent = 'x';
+            const xhtml = env.math.serializeNodeToXhtml(div);
+            assert.ok(xhtml.includes('xmlns="http://www.w3.org/1999/xhtml"'), xhtml);
+        });
+    });
+
     suite('buildKatexFontFaceCss（data: URL の @font-face 組み立て）', () => {
         test('family/style/weight と base64 から woff2 の @font-face を組み立てる', () => {
             const css = env.math.buildKatexFontFaceCss([

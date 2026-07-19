@@ -389,6 +389,21 @@ window.MathModule = (function() {
     }
 
     /**
+     * DOMノードを foreignObject へ埋め込める XHTML 文字列へ直列化する。
+     *
+     * `outerHTML`（HTML直列化）は KaTeX が√の描画に使うネストした `<svg>` に
+     * xmlns を付けないため、`data:image/svg+xml` として XML 解釈されると
+     * `<svg>` が XHTML 名前空間の未知要素扱いになり√記号が消える。
+     * XMLSerializer は名前空間宣言込みで直列化するのでこれを防げる。
+     *
+     * @param {Node} node  直列化するノード
+     * @returns {string} 名前空間宣言付きの XHTML 文字列
+     */
+    function serializeNodeToXhtml(node) {
+        return new XMLSerializer().serializeToString(node);
+    }
+
+    /**
      * SVGマークアップを `<img>`（`data:image/svg+xml`）経由で canvas へ描画し、PNG Blob を返す。
      *
      * **重要（実機確認前提）**: SVG に `<foreignObject>` を含む場合、Chromium は
@@ -487,6 +502,12 @@ window.MathModule = (function() {
         clone.style.margin = '0';
         clone.style.overflow = 'visible';
         clone.style.textAlign = 'left';
+        // `.katex-display` の既定 margin (1em 0) は画像では過大な上下余白になる。
+        // 採寸前に消して wrapper の padding だけを余白にする。
+        var display = clone.querySelector('.katex-display');
+        if (display) {
+            display.style.margin = '0';
+        }
         wrapper.appendChild(clone);
         temp.appendChild(wrapper);
         document.body.appendChild(temp);
@@ -502,7 +523,8 @@ window.MathModule = (function() {
                 // KaTeXのCSS＋フォント埋め込みを順に置く（@font-face は後勝ちのため
                 // data: URL 版が katex.min.css の相対URL版を上書きする）
                 var cssText = collectKatexCssText() + fontCss;
-                var svgMarkup = buildMathBlockSvgMarkup(wrapper.outerHTML, cssText, width, height, bg);
+                var xhtml = serializeNodeToXhtml(wrapper);
+                var svgMarkup = buildMathBlockSvgMarkup(xhtml, cssText, width, height, bg);
                 return await svgMarkupToPngBlob(svgMarkup, width, height, effectiveScale);
             } catch (foErr) {
                 console.warn('[Math] foreignObject rasterize failed, falling back to html2canvas:', foErr);
@@ -591,6 +613,7 @@ window.MathModule = (function() {
         findMathBlock: findMathBlock,
         computeMenuPosition: computeMenuPosition,
         buildMathBlockSvgMarkup: buildMathBlockSvgMarkup,
+        serializeNodeToXhtml: serializeNodeToXhtml,
         buildKatexFontFaceCss: buildKatexFontFaceCss,
         KATEX_FONT_MANIFEST: KATEX_FONT_MANIFEST,
         resolveKatexFontBaseUrl: resolveKatexFontBaseUrl,
