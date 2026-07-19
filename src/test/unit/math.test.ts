@@ -136,6 +136,29 @@ suite('MathModule', () => {
             assert.strictEqual(actives.length, 1, 'only one button stays active');
             assert.strictEqual(menu.style.display, 'block', 'menu stays open after bg toggle');
         });
+
+        test('文字色トグル（自動／黒／白）を持ち既定は自動がactive', () => {
+            env.math.setupContextMenu(env.editor);
+            const menu = env.document.getElementById('mathContextMenu')!;
+            const btns = menu.querySelectorAll('.math-fg-btn');
+            assert.strictEqual(btns.length, 3, 'should have 3 text-color buttons');
+            const active = menu.querySelector('.math-fg-btn.active');
+            assert.ok(active, 'one button should be active by default');
+            assert.strictEqual(active!.getAttribute('data-fg'), 'auto');
+        });
+
+        test('文字色ボタンのクリックは背景トグルの active に影響しない（行が独立）', () => {
+            env.math.setupContextMenu(env.editor);
+            const menu = env.document.getElementById('mathContextMenu')!;
+            const whiteFg = menu.querySelector('.math-fg-btn[data-fg="white"]') as HTMLElement;
+            whiteFg.click();
+
+            // 文字色は white へ移り、背景は既定の white のまま
+            assert.ok(whiteFg.classList.contains('active'), 'clicked fg button becomes active');
+            assert.strictEqual(menu.querySelectorAll('.math-fg-btn.active').length, 1);
+            const bgActive = menu.querySelector('.math-bg-btn.active');
+            assert.strictEqual(bgActive!.getAttribute('data-bg'), 'white', 'bg row unaffected');
+        });
     });
 
     suite('resolveMenuBackground', () => {
@@ -163,6 +186,51 @@ suite('MathModule', () => {
         test('menu が null／querySelector を持たなくても白を返す', () => {
             assert.strictEqual(env.math.resolveMenuBackground(null), 'white');
             assert.strictEqual(env.math.resolveMenuBackground({} as unknown as HTMLElement), 'white');
+        });
+    });
+
+    suite('resolveMenuTextColor', () => {
+        function menuWithActive(fg: string | null): HTMLElement {
+            const menu = env.document.createElement('div');
+            ['auto', 'black', 'white'].forEach((v) => {
+                const btn = env.document.createElement('button');
+                btn.className = 'math-fg-btn' + (v === fg ? ' active' : '');
+                btn.setAttribute('data-fg', v);
+                menu.appendChild(btn);
+            });
+            return menu;
+        }
+
+        test('active な黒／白はその値を返す', () => {
+            assert.strictEqual(env.math.resolveMenuTextColor(menuWithActive('black')), 'black');
+            assert.strictEqual(env.math.resolveMenuTextColor(menuWithActive('white')), 'white');
+        });
+
+        test('active が自動・未選択・不正なら auto を返す', () => {
+            assert.strictEqual(env.math.resolveMenuTextColor(menuWithActive('auto')), 'auto');
+            assert.strictEqual(env.math.resolveMenuTextColor(menuWithActive(null)), 'auto');
+        });
+
+        test('menu が null／querySelector を持たなくても auto を返す', () => {
+            assert.strictEqual(env.math.resolveMenuTextColor(null), 'auto');
+            assert.strictEqual(env.math.resolveMenuTextColor({} as unknown as HTMLElement), 'auto');
+        });
+    });
+
+    suite('resolveTextColor', () => {
+        test("'black'/'white' 指定はその色（16進）で固定する", () => {
+            assert.strictEqual(env.math.resolveTextColor('white', 'black'), '#000000');
+            assert.strictEqual(env.math.resolveTextColor('transparent', 'white'), '#ffffff');
+            assert.strictEqual(env.math.resolveTextColor('black', 'black'), '#000000');
+        });
+
+        test("'auto'（既定）は背景追従＝黒背景のみ白・それ以外は黒", () => {
+            assert.strictEqual(env.math.resolveTextColor('black', 'auto'), '#ffffff');
+            assert.strictEqual(env.math.resolveTextColor('white', 'auto'), '#000000');
+            assert.strictEqual(env.math.resolveTextColor('transparent', 'auto'), '#000000');
+            // textColor 未指定でも auto と同じ（後方互換）
+            assert.strictEqual(env.math.resolveTextColor('black', undefined), '#ffffff');
+            assert.strictEqual(env.math.resolveTextColor('transparent', undefined), '#000000');
         });
     });
 
@@ -245,6 +313,22 @@ suite('MathModule', () => {
             assert.ok(
                 /rgb\(0,\s*0,\s*0\)|#000000|#000\b/i.test(svg),
                 'text color should be black on white background: ' + svg.slice(0, 500)
+            );
+        });
+
+        test("透過背景でも文字色 'white' を選べば白文字になる（ダーク環境向け）", async () => {
+            const cap = captureSvgOnCopy();
+            env.editor.innerHTML =
+                '<div class="math-block" data-math="x^2"><span class="katex">x</span></div>';
+            const block = env.editor.querySelector('.math-block')!;
+
+            await env.math.copyBlockAsPng(block, 'transparent', 'white');
+
+            const svg = cap.get();
+            assert.ok(!svg.includes('<rect'), 'transparent background draws no rect');
+            assert.ok(
+                /rgb\(255,\s*255,\s*255\)|#ffffff|#fff\b/i.test(svg),
+                'text color should be white when explicitly selected: ' + svg.slice(0, 500)
             );
         });
     });

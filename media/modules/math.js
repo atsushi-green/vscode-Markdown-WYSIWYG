@@ -98,9 +98,17 @@ window.MathModule = (function() {
 
     // 画像化の背景色の選択肢（Mermaidメニューと同じ 透過／白／黒。既定は白）。
     const BACKGROUND_OPTIONS = [
-        { bg: 'transparent', label: '透過', title: '透過背景' },
-        { bg: 'white', label: '白', title: '白背景' },
-        { bg: 'black', label: '黒', title: '黒背景' }
+        { value: 'transparent', label: '透過', title: '透過背景' },
+        { value: 'white', label: '白', title: '白背景', active: true },
+        { value: 'black', label: '黒', title: '黒背景' }
+    ];
+
+    // 数式の文字色の選択肢。'auto' は背景に追従（白/透過→黒・黒→白＝従来動作）。
+    // 透過背景をダークな資料へ貼ると既定の黒文字が埋もれるため、白文字を選べるようにする。
+    const TEXT_COLOR_OPTIONS = [
+        { value: 'auto', label: '自動', title: '文字色を背景に合わせる（白/透過→黒・黒→白）', active: true },
+        { value: 'black', label: '黒', title: '黒い文字' },
+        { value: 'white', label: '白', title: '白い文字' }
     ];
 
     /**
@@ -122,10 +130,85 @@ window.MathModule = (function() {
     }
 
     /**
+     * コンテキストメニューで現在選択されている文字色モードを解決する純粋関数。
+     * `.math-fg-btn.active` の `data-fg` を読み、`'black'`／`'white'` のみその値を、
+     * それ以外（未選択・不正値・`'auto'`）は `'auto'`（背景追従＝従来動作）を返す。
+     *
+     * @param {HTMLElement} menu コンテキストメニュー要素
+     * @returns {string} 'auto' | 'black' | 'white'
+     */
+    function resolveMenuTextColor(menu) {
+        if (!menu || typeof menu.querySelector !== 'function') {
+            return 'auto';
+        }
+        const active = menu.querySelector('.math-fg-btn.active');
+        const fg = active && active.getAttribute('data-fg');
+        return (fg === 'black' || fg === 'white') ? fg : 'auto';
+    }
+
+    /**
+     * 背景と文字色モードから、採寸ラッパーへ与える実際の文字色（16進）を決める純粋関数。
+     * `'black'`／`'white'` 指定はその色を、`'auto'`（既定）は背景に追従して
+     * 黒背景なら白・それ以外（白/透過）なら黒を返す（従来動作）。
+     *
+     * @param {string} background 'transparent' | 'white' | 'black'
+     * @param {string} [textColor] 'auto' | 'black' | 'white'
+     * @returns {string} '#000000' | '#ffffff'
+     */
+    function resolveTextColor(background, textColor) {
+        if (textColor === 'black') {
+            return '#000000';
+        }
+        if (textColor === 'white') {
+            return '#ffffff';
+        }
+        return background === 'black' ? '#ffffff' : '#000000';
+    }
+
+    /**
+     * ラベル＋トグルボタン群からなる行を生成する。背景色・文字色の2行で共有する。
+     * クリックで同じ行内の active を1つだけ移す（メニューは閉じず、続けてアクションを選ぶ）。
+     *
+     * @param {string} labelText 行頭ラベル
+     * @param {string} btnClass ボタンのクラス（`math-bg-btn` / `math-fg-btn`）
+     * @param {string} dataAttr 選択値を持たせる属性名（`data-bg` / `data-fg`）
+     * @param {Array<{value:string,label:string,title:string,active?:boolean}>} options
+     * @returns {HTMLElement} 行要素
+     */
+    function buildToggleRow(labelText, btnClass, dataAttr, options) {
+        const row = document.createElement('div');
+        row.className = 'math-menu-bg-row';
+        const label = document.createElement('span');
+        label.className = 'math-menu-bg-label';
+        label.textContent = labelText;
+        row.appendChild(label);
+        options.forEach(function(opt) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = btnClass + (opt.active ? ' active' : '');
+            btn.setAttribute(dataAttr, opt.value);
+            btn.title = opt.title;
+            btn.textContent = opt.label;
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const btns = row.querySelectorAll('.' + btnClass);
+                Array.prototype.forEach.call(btns, function(b) {
+                    b.classList.remove('active');
+                });
+                btn.classList.add('active');
+            });
+            row.appendChild(btn);
+        });
+        return row;
+    }
+
+    /**
      * コンテキストメニュー（無ければ生成）を返す。
      * 見た目は mermaid のメニューと共有（editor.css の `.math-context-menu` 系は
      * `.mermaid-context-menu` 系と同じルールを参照する）。
-     * 上部に背景色トグル（透過／白／黒）を持ち、その下に「画像としてコピー」を置く。
+     * 上部に背景色トグル（透過／白／黒）と文字色トグル（自動／黒／白）を持ち、
+     * その下に「画像としてコピー」を置く。
      */
     function ensureContextMenu() {
         if (contextMenuEl && document.body.contains(contextMenuEl)) {
@@ -137,32 +220,8 @@ window.MathModule = (function() {
         menu.style.display = 'none';
         menu.style.position = 'fixed';
 
-        // 背景色トグル行。クリックで active を移すだけ（メニューは閉じず、続けてアクションを選ぶ）。
-        const bgRow = document.createElement('div');
-        bgRow.className = 'math-menu-bg-row';
-        const bgLabel = document.createElement('span');
-        bgLabel.className = 'math-menu-bg-label';
-        bgLabel.textContent = '背景';
-        bgRow.appendChild(bgLabel);
-        BACKGROUND_OPTIONS.forEach(function(opt) {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'math-bg-btn' + (opt.bg === 'white' ? ' active' : '');
-            btn.setAttribute('data-bg', opt.bg);
-            btn.title = opt.title;
-            btn.textContent = opt.label;
-            btn.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                const btns = menu.querySelectorAll('.math-bg-btn');
-                Array.prototype.forEach.call(btns, function(b) {
-                    b.classList.remove('active');
-                });
-                btn.classList.add('active');
-            });
-            bgRow.appendChild(btn);
-        });
-        menu.appendChild(bgRow);
+        menu.appendChild(buildToggleRow('背景', 'math-bg-btn', 'data-bg', BACKGROUND_OPTIONS));
+        menu.appendChild(buildToggleRow('文字', 'math-fg-btn', 'data-fg', TEXT_COLOR_OPTIONS));
 
         const item = document.createElement('div');
         item.className = 'math-menu-item';
@@ -173,9 +232,10 @@ window.MathModule = (function() {
             e.stopPropagation();
             const block = currentBlock;
             const background = resolveMenuBackground(menu);
+            const textColor = resolveMenuTextColor(menu);
             hideContextMenu();
             if (block) {
-                copyBlockAsPng(block, background);
+                copyBlockAsPng(block, background, textColor);
             }
         });
         menu.appendChild(item);
@@ -523,8 +583,9 @@ window.MathModule = (function() {
      * @param {HTMLElement} block  対象の `.math-block`
      * @param {number} [scale]     解像度倍率（既定4×devicePixelRatio）
      * @param {string} [background] 背景色（既定 'white'。'transparent' で透過）
+     * @param {string} [textColor] 文字色モード（既定 'auto'＝背景追従。'black'/'white' で固定）
      */
-    async function blockToPngBlob(block, scale, background) {
+    async function blockToPngBlob(block, scale, background, textColor) {
         // KaTeXのWebフォント読み込み完了を待つ（画面表示スタイルの安定化）
         if (document.fonts && document.fonts.ready) {
             try {
@@ -550,9 +611,10 @@ window.MathModule = (function() {
         wrapper.style.display = 'inline-block';
         wrapper.style.padding = '16px 24px';
         // KaTeX は色を明示せず currentColor を継承するため、文字色は wrapper で決める。
-        // 黒背景では黒文字だと数式が見えなくなるので白文字へ反転する
-        // （白・透過背景は従来どおり黒文字）。
-        wrapper.style.color = (bg === 'black') ? '#ffffff' : '#000000';
+        // 既定（'auto'）は背景追従で、黒背景では黒文字だと見えないため白へ反転する
+        // （白・透過背景は黒文字）。'black'/'white' 指定時はその色で固定する。
+        // 透過背景をダーク環境へ貼るときは 'white' を選べば埋もれない。
+        wrapper.style.color = resolveTextColor(bg, textColor);
         wrapper.style.textAlign = 'left';
 
         var clone = block.cloneNode(true);
@@ -617,13 +679,14 @@ window.MathModule = (function() {
      *
      * @param {HTMLElement} block  対象の `.math-block`
      * @param {string} [background] 背景色（既定 'white'。'transparent' で透過、'black' で黒）
+     * @param {string} [textColor] 文字色モード（既定 'auto'＝背景追従。'black'/'white' で固定）
      */
-    async function copyBlockAsPng(block, background) {
+    async function copyBlockAsPng(block, background, textColor) {
         if (!block) {
             return;
         }
         try {
-            const blob = await blockToPngBlob(block, undefined, background);
+            const blob = await blockToPngBlob(block, undefined, background, textColor);
             await navigator.clipboard.write([
                 new ClipboardItem({ 'image/png': blob })
             ]);
@@ -672,6 +735,8 @@ window.MathModule = (function() {
         copyBlockAsPng: copyBlockAsPng,
         findMathBlock: findMathBlock,
         resolveMenuBackground: resolveMenuBackground,
+        resolveMenuTextColor: resolveMenuTextColor,
+        resolveTextColor: resolveTextColor,
         computeMenuPosition: computeMenuPosition,
         buildMathBlockSvgMarkup: buildMathBlockSvgMarkup,
         serializeNodeToXhtml: serializeNodeToXhtml,

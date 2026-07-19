@@ -1142,7 +1142,8 @@ body.vscode-dark #editor strong {
 }
 
 .mermaid-bg-btn,
-.math-bg-btn {
+.math-bg-btn,
+.math-fg-btn {
     flex: 1;
     padding: 3px 6px;
     font-size: 12px;
@@ -1155,12 +1156,14 @@ body.vscode-dark #editor strong {
 }
 
 .mermaid-bg-btn:hover,
-.math-bg-btn:hover {
+.math-bg-btn:hover,
+.math-fg-btn:hover {
     background-color: var(--vscode-menu-selectionBackground, #04395e);
 }
 
 .mermaid-bg-btn.active,
-.math-bg-btn.active {
+.math-bg-btn.active,
+.math-fg-btn.active {
     background-color: var(--vscode-button-background, #0e639c);
     color: var(--vscode-button-foreground, #ffffff);
     border-color: var(--vscode-button-background, #0e639c);
