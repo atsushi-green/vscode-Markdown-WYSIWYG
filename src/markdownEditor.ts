@@ -194,7 +194,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                                style-src ${webview.cspSource} 'unsafe-inline'; 
                                script-src 'nonce-${nonce}' 'unsafe-eval'; 
                                img-src ${webview.cspSource} data: blob:;
-                               font-src ${webview.cspSource};">
+                               font-src ${webview.cspSource} data:;">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <link href="${katexStyleUri}" rel="stylesheet">
                 <link href="${styleUri}" rel="stylesheet">

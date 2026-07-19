@@ -276,18 +276,187 @@ window.MathModule = (function() {
     }
 
     /**
-     * ブロック数式（`.math-block`）をPNGのBlobへ変換する。
-     * KaTeXの出力はSVGではなくHTML+CSSのため、mermaidのSVG→canvasは使えない。
-     * 同梱の html2canvas でHTML要素を直接ラスタライズする。
-     * Webフォント（KaTeXのwoff2）の読み込み完了前だと文字が崩れるため、
-     * `document.fonts.ready` を待ってから描画する。
+     * 読み込まれた `katex.min.css` の href から、フォント（`fonts/*.woff2`）を置く
+     * ディレクトリのベースURLを導く純粋関数。CSS と同じ階層の `fonts/` を指す。
+     * 例: `https://…/media/katex/katex.min.css` → `https://…/media/katex/fonts/`
+     *
+     * @param {string} katexCssHref  katex.min.css の絶対URL（webview URI）
+     * @returns {string} フォントディレクトリのベースURL（末尾スラッシュ付き）。href が空なら空文字
      */
-    async function blockToPngBlob(block, scale) {
-        if (typeof html2canvas === 'undefined') {
-            throw new Error('html2canvas library not loaded');
+    function resolveKatexFontBaseUrl(katexCssHref) {
+        if (!katexCssHref) {
+            return '';
         }
+        var slash = String(katexCssHref).lastIndexOf('/');
+        var base = slash >= 0 ? String(katexCssHref).slice(0, slash + 1) : '';
+        return base + 'fonts/';
+    }
 
-        // KaTeXのWebフォント読み込み完了を待つ（未完了だと字形が崩れる）
+    /**
+     * ArrayBuffer（woff2バイナリ）を base64 文字列へ変換する。
+     * バイト列は 0–255 なので `btoa(String.fromCharCode(...))` で安全に符号化できる。
+     * 大きなバッファでもスタック超過しないよう分割して連結する。
+     *
+     * @param {ArrayBuffer} buffer
+     * @returns {string} base64 文字列
+     */
+    function arrayBufferToBase64(buffer) {
+        var bytes = new Uint8Array(buffer);
+        var binary = '';
+        var chunk = 0x8000;
+        for (var i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+        }
+        return btoa(binary);
+    }
+
+    // foreignObject 画像化用の @font-face CSS（fetch→base64 は初回のみ・以降キャッシュ）
+    var katexFontFaceCssCache = null;
+
+    /**
+     * KaTeXフォント（woff2）を webview URI から fetch→base64 化し、`buildKatexFontFaceCss`
+     * で `@font-face` CSS を組み立てて返す。一度計算したらキャッシュする。個別のフォントの
+     * fetch 失敗はスキップ（そのフォントだけ埋め込まれず、他は使える）。
+     * @returns {Promise<string>} `@font-face` 群のCSS（フォントが1つも取れなければ空文字）
+     */
+    async function loadKatexFontFaceCss() {
+        if (katexFontFaceCssCache !== null) {
+            return katexFontFaceCssCache;
+        }
+        var link = document.querySelector('link[href*="katex.min.css"]');
+        var baseUrl = resolveKatexFontBaseUrl(link ? link.href : '');
+        if (!baseUrl) {
+            katexFontFaceCssCache = '';
+            return katexFontFaceCssCache;
+        }
+        var fonts = [];
+        await Promise.all(KATEX_FONT_MANIFEST.map(async function(entry) {
+            try {
+                var res = await fetch(baseUrl + entry.file);
+                if (!res || !res.ok) {
+                    return;
+                }
+                var buf = await res.arrayBuffer();
+                fonts.push({
+                    family: entry.family,
+                    style: entry.style,
+                    weight: entry.weight,
+                    base64: arrayBufferToBase64(buf)
+                });
+            } catch (e) {
+                // このフォントは埋め込めない（他フォントは続行）
+            }
+        }));
+        var css = buildKatexFontFaceCss(fonts);
+        // 全フォントを取得できたときのみキャッシュする。一過性の fetch 失敗で
+        // 部分的（または空の）結果を恒久キャッシュしてしまわないよう、部分失敗時は
+        // キャッシュせず次回リトライさせる。
+        if (fonts.length === KATEX_FONT_MANIFEST.length) {
+            katexFontFaceCssCache = css;
+        }
+        return css;
+    }
+
+    /**
+     * 読み込み済みの KaTeX スタイルシート（`katex.min.css`）の CSS ルールを文字列化する。
+     * foreignObject は隔離コンテキストで描画され外部CSSを参照できないため、`.katex` の
+     * 配置ルールを SVG 内 `<style>` へインラインする必要がある。読めないシート
+     * （クロスオリジン等で `cssRules` 参照が投げる）はスキップする。
+     * @returns {string} KaTeX の CSS テキスト
+     */
+    function collectKatexCssText() {
+        var out = '';
+        var sheets = document.styleSheets;
+        for (var i = 0; i < sheets.length; i++) {
+            var sheet = sheets[i];
+            if (String(sheet.href || '').indexOf('katex') === -1) {
+                continue;
+            }
+            var rules;
+            try {
+                rules = sheet.cssRules;
+            } catch (e) {
+                continue; // 読めないシートはスキップ
+            }
+            if (!rules) {
+                continue;
+            }
+            for (var j = 0; j < rules.length; j++) {
+                out += rules[j].cssText;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * SVGマークアップを `<img>`（`data:image/svg+xml`）経由で canvas へ描画し、PNG Blob を返す。
+     *
+     * **重要（実機確認前提）**: SVG に `<foreignObject>` を含む場合、Chromium は
+     * セキュリティ上 canvas を "taint" することがあり、`canvas.toBlob()` が SecurityError を
+     * 投げうる。その場合は呼び出し側（`blockToPngBlob`）が html2canvas へフォールバックする。
+     */
+    function svgMarkupToPngBlob(svgMarkup, width, height, scale) {
+        return new Promise(function(resolve, reject) {
+            var url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgMarkup);
+            var img = new Image();
+            var settled = false;
+            // 画像読み込みが load/error のどちらも発火せず止まる事故に備えた保険。
+            // 発火すればフォールバック（html2canvas）へ回れる。
+            var timer = setTimeout(function() {
+                finish(reject, new Error('SVG image load timed out'));
+            }, 15000);
+            function finish(fn, arg) {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearTimeout(timer);
+                fn(arg);
+            }
+            img.onload = function() {
+                try {
+                    var canvas = document.createElement('canvas');
+                    canvas.width = Math.max(1, Math.round(width * scale));
+                    canvas.height = Math.max(1, Math.round(height * scale));
+                    var ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    canvas.toBlob(function(blob) {
+                        if (blob) {
+                            finish(resolve, blob);
+                        } else {
+                            finish(reject, new Error('Failed to create PNG blob'));
+                        }
+                    }, 'image/png');
+                } catch (e) {
+                    finish(reject, e); // taint による toBlob の SecurityError 等
+                }
+            };
+            img.onerror = function() {
+                finish(reject, new Error('Failed to load SVG image'));
+            };
+            img.src = url;
+        });
+    }
+
+    /**
+     * ブロック数式（`.math-block`）をPNGのBlobへ変換する。
+     *
+     * KaTeXの出力はSVGではなくHTML+CSSのため、まず `<foreignObject>`（ブラウザ
+     * ネイティブ描画）でラスタライズし、html2canvas が再現できない `.katex` のCSS配置
+     * （`vertical-align`・負マージン・絶対配置・√overline）を正確に画像化する。
+     * foreignObject は隔離コンテキストのため、KaTeXのCSSを `<style>` へインラインし、
+     * フォントは `loadKatexFontFaceCss` が base64 で `@font-face` として埋め込む。
+     *
+     * **フォールバック**: foreignObject 経路が失敗（Chromium の canvas taint による
+     * `toBlob` の SecurityError、画像読み込み失敗など）した場合は、従来の html2canvas 方式へ
+     * 退避する（画像は崩れうるが最低限の出力は保つ＝無リグレッション）。
+     *
+     * @param {HTMLElement} block  対象の `.math-block`
+     * @param {number} [scale]     解像度倍率（既定4×devicePixelRatio）
+     * @param {string} [background] 背景色（既定 'white'。'transparent' で透過）
+     */
+    async function blockToPngBlob(block, scale, background) {
+        // KaTeXのWebフォント読み込み完了を待つ（画面表示スタイルの安定化）
         if (document.fonts && document.fonts.ready) {
             try {
                 await document.fonts.ready;
@@ -296,42 +465,68 @@ window.MathModule = (function() {
             }
         }
 
-        const devicePixelRatio = window.devicePixelRatio || 1;
-        const effectiveScale = (scale || 4) * Math.max(1, devicePixelRatio);
+        var devicePixelRatio = window.devicePixelRatio || 1;
+        var effectiveScale = (scale || 4) * Math.max(1, devicePixelRatio);
+        var bg = background || 'white';
 
-        // 画面外の一時コンテナへクローンを置き、余白付き・白背景で切り出す。
+        // 画面外に余白付き・左寄せのラッパーを置いて実寸を採寸する。
         // エディタ用の中央寄せ・横スクロールを外し、式全体が欠けないようにする。
-        const temp = document.createElement('div');
+        var temp = document.createElement('div');
         temp.style.position = 'absolute';
         temp.style.left = '-9999px';
         temp.style.top = '-9999px';
         temp.style.display = 'inline-block';
-        temp.style.padding = '16px 24px';
-        temp.style.background = '#ffffff';
-        temp.style.color = '#000000';
 
-        const clone = block.cloneNode(true);
+        var wrapper = document.createElement('div');
+        wrapper.style.display = 'inline-block';
+        wrapper.style.padding = '16px 24px';
+        wrapper.style.color = '#000000';
+        wrapper.style.textAlign = 'left';
+
+        var clone = block.cloneNode(true);
         clone.style.margin = '0';
         clone.style.overflow = 'visible';
         clone.style.textAlign = 'left';
-        temp.appendChild(clone);
+        wrapper.appendChild(clone);
+        temp.appendChild(wrapper);
         document.body.appendChild(temp);
 
         try {
-            const canvas = await html2canvas(temp, {
-                scale: effectiveScale,
-                backgroundColor: '#ffffff',
-                logging: false
-            });
-            return await new Promise(function(resolve, reject) {
-                canvas.toBlob(function(blob) {
-                    if (blob) {
-                        resolve(blob);
-                    } else {
-                        reject(new Error('Failed to create PNG blob'));
-                    }
-                }, 'image/png');
-            });
+            var rect = wrapper.getBoundingClientRect();
+            var width = Math.ceil(rect.width);
+            var height = Math.ceil(rect.height);
+
+            // まず foreignObject 方式を試みる
+            try {
+                var fontCss = await loadKatexFontFaceCss();
+                // KaTeXのCSS＋フォント埋め込みを順に置く（@font-face は後勝ちのため
+                // data: URL 版が katex.min.css の相対URL版を上書きする）
+                var cssText = collectKatexCssText() + fontCss;
+                var svgMarkup = buildMathBlockSvgMarkup(wrapper.outerHTML, cssText, width, height, bg);
+                return await svgMarkupToPngBlob(svgMarkup, width, height, effectiveScale);
+            } catch (foErr) {
+                console.warn('[Math] foreignObject rasterize failed, falling back to html2canvas:', foErr);
+                if (typeof html2canvas === 'undefined') {
+                    throw foErr;
+                }
+                // フォールバック: 従来の html2canvas 方式（白背景・余白付き）
+                var h2cBg = (bg === 'transparent') ? null : (bg === 'black' ? '#000000' : '#ffffff');
+                wrapper.style.background = h2cBg || 'transparent';
+                var canvas = await html2canvas(wrapper, {
+                    scale: effectiveScale,
+                    backgroundColor: h2cBg,
+                    logging: false
+                });
+                return await new Promise(function(resolve, reject) {
+                    canvas.toBlob(function(blob) {
+                        if (blob) {
+                            resolve(blob);
+                        } else {
+                            reject(new Error('Failed to create PNG blob'));
+                        }
+                    }, 'image/png');
+                });
+            }
         } finally {
             document.body.removeChild(temp);
         }
@@ -397,6 +592,9 @@ window.MathModule = (function() {
         computeMenuPosition: computeMenuPosition,
         buildMathBlockSvgMarkup: buildMathBlockSvgMarkup,
         buildKatexFontFaceCss: buildKatexFontFaceCss,
-        KATEX_FONT_MANIFEST: KATEX_FONT_MANIFEST
+        KATEX_FONT_MANIFEST: KATEX_FONT_MANIFEST,
+        resolveKatexFontBaseUrl: resolveKatexFontBaseUrl,
+        arrayBufferToBase64: arrayBufferToBase64,
+        loadKatexFontFaceCss: loadKatexFontFaceCss
     };
 })();

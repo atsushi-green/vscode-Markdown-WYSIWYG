@@ -116,8 +116,18 @@ suite('MathModule', () => {
     });
 
     suite('copyBlockAsPng', () => {
-        test('html2canvas 未読込でも例外を投げず、トーストで失敗を知らせる', async () => {
-            // jsdomには html2canvas が無いため、この経路がフォールバックを通る
+        test('foreignObject 経路が失敗し html2canvas も無い場合、例外を投げずトーストで失敗を知らせる', async () => {
+            // jsdom は SVG 画像を実際に読み込めない（Image が load/error を発火しない）ため、
+            // onerror を発火する Image スタブで foreignObject 経路の失敗を再現する。
+            // html2canvas も未読込なのでフォールバックも失敗し、copyBlockAsPng が例外を
+            // 外へ投げずトーストで知らせることを検証する。
+            env.window.Image = class {
+                onload: (() => void) | null = null;
+                onerror: (() => void) | null = null;
+                set src(_v: string) {
+                    setTimeout(() => { if (this.onerror) { this.onerror(); } }, 0);
+                }
+            };
             env.editor.innerHTML = '<div class="math-block" data-math="x^2">x</div>';
             const block = env.editor.querySelector('.math-block')!;
 
@@ -294,6 +304,136 @@ suite('MathModule', () => {
             // 配列に materialize してから比較する（deepStrictEqual はプロトタイプも厳密比較する）。
             const manifestKeys = Array.from(manifest, (e) => `${e.family}|${e.style}|${e.weight}`).sort();
             assert.deepStrictEqual(manifestKeys, [...cssKeys].sort());
+        });
+    });
+
+    suite('resolveKatexFontBaseUrl（フォントディレクトリのベースURL導出）', () => {
+        test('katex.min.css の href と同階層の fonts/ を指す', () => {
+            assert.strictEqual(
+                env.math.resolveKatexFontBaseUrl('https://host/media/katex/katex.min.css'),
+                'https://host/media/katex/fonts/'
+            );
+        });
+
+        test('クエリ無しの webview URI でも末尾ファイル名だけを置換する', () => {
+            assert.strictEqual(
+                env.math.resolveKatexFontBaseUrl('vscode-webview://x/a/b/katex.min.css'),
+                'vscode-webview://x/a/b/fonts/'
+            );
+        });
+
+        test('スラッシュを含まない入力は fonts/ を返す', () => {
+            assert.strictEqual(env.math.resolveKatexFontBaseUrl('katex.min.css'), 'fonts/');
+        });
+
+        test('末尾にクエリが付く href でもディレクトリ部分を正しく取り出す', () => {
+            // asWebviewUri は通常クエリを付けないが、付いてもファイル名側に載るため
+            // 最後の / までを基準にすれば fonts/ ベースは壊れない。
+            assert.strictEqual(
+                env.math.resolveKatexFontBaseUrl('https://host/media/katex/katex.min.css?v=1'),
+                'https://host/media/katex/fonts/'
+            );
+        });
+
+        test('空・未指定は空文字を返す', () => {
+            assert.strictEqual(env.math.resolveKatexFontBaseUrl(''), '');
+            assert.strictEqual(env.math.resolveKatexFontBaseUrl(undefined as any), '');
+            assert.strictEqual(env.math.resolveKatexFontBaseUrl(null as any), '');
+        });
+    });
+
+    suite('arrayBufferToBase64（woff2バイナリのbase64符号化）', () => {
+        test('バイト列を base64 へ符号化する', () => {
+            // "Hi" = [72, 105] → "SGk="
+            const buf = new Uint8Array([72, 105]).buffer;
+            assert.strictEqual(env.math.arrayBufferToBase64(buf), 'SGk=');
+        });
+
+        test('空バッファは空文字を返す', () => {
+            assert.strictEqual(env.math.arrayBufferToBase64(new Uint8Array([]).buffer), '');
+        });
+
+        test('全バイト値(0–255)を含む大きめのバッファでもスタック超過せず符号化できる', () => {
+            const n = 0x8000 * 2 + 5; // チャンク境界をまたぐサイズ
+            const bytes = new Uint8Array(n);
+            for (let i = 0; i < n; i++) {
+                bytes[i] = i % 256;
+            }
+            const b64 = env.math.arrayBufferToBase64(bytes.buffer);
+            // ラウンドトリップで一致すること（Node の Buffer でデコード）
+            const decoded = Buffer.from(b64, 'base64');
+            assert.strictEqual(decoded.length, n);
+            assert.strictEqual(decoded[0], 0);
+            assert.strictEqual(decoded[255], 255);
+            assert.strictEqual(decoded[n - 1], (n - 1) % 256);
+        });
+    });
+
+    suite('loadKatexFontFaceCss（フォントを fetch→base64→@font-face 化）', () => {
+        // katex.min.css の link と fetch をスタブして、実描画に依存せず
+        // フォント取得オーケストレーション（成功組み立て・部分失敗スキップ・キャッシュ）を検証する。
+        function addKatexLink() {
+            const link = env.document.createElement('link');
+            link.setAttribute('rel', 'stylesheet');
+            link.setAttribute('href', 'https://host/media/katex/katex.min.css');
+            env.document.head.appendChild(link);
+        }
+        function stubFetch(handler: (url: string) => { ok: boolean; bytes?: number[] }) {
+            const calls: string[] = [];
+            env.window.fetch = (url: string) => {
+                calls.push(url);
+                const r = handler(url);
+                if (!r.ok) {
+                    return Promise.resolve({ ok: false, arrayBuffer: () => Promise.reject(new Error('no body')) });
+                }
+                return Promise.resolve({
+                    ok: true,
+                    arrayBuffer: () => Promise.resolve(new Uint8Array(r.bytes || [1, 2, 3]).buffer)
+                });
+            };
+            return calls;
+        }
+
+        test('katex link が無ければ空文字を返し fetch しない', async () => {
+            const calls = stubFetch(() => ({ ok: true }));
+            const css = await env.math.loadKatexFontFaceCss();
+            assert.strictEqual(css, '');
+            assert.strictEqual(calls.length, 0);
+        });
+
+        test('全フォントを fetch→base64 化して @font-face を組み立てる', async () => {
+            addKatexLink();
+            const calls = stubFetch(() => ({ ok: true, bytes: [72, 105] }));
+            const manifest = env.math.KATEX_FONT_MANIFEST as unknown[];
+            const css = await env.math.loadKatexFontFaceCss();
+            assert.strictEqual((css.match(/@font-face/g) || []).length, manifest.length);
+            assert.ok(css.includes('base64,SGk=)'), css); // [72,105] = "Hi" → "SGk="
+            assert.strictEqual(calls.length, manifest.length);
+            // フォントは fonts/ ベースから取得している
+            assert.ok(calls.every((u) => u.startsWith('https://host/media/katex/fonts/')), calls[0]);
+        });
+
+        test('全フォント取得成功時は結果をキャッシュし2回目は再 fetch しない', async () => {
+            addKatexLink();
+            const calls = stubFetch(() => ({ ok: true, bytes: [1] }));
+            const manifest = env.math.KATEX_FONT_MANIFEST as unknown[];
+            const first = await env.math.loadKatexFontFaceCss();
+            const second = await env.math.loadKatexFontFaceCss();
+            assert.strictEqual(first, second);
+            assert.strictEqual(calls.length, manifest.length, 'キャッシュ後は再 fetch しない');
+        });
+
+        test('一部フォントの取得失敗は該当分をスキップし、部分結果はキャッシュせず次回リトライする', async () => {
+            addKatexLink();
+            const manifest = env.math.KATEX_FONT_MANIFEST as Array<{ file: string }>;
+            const failFile = manifest[0].file;
+            const calls = stubFetch((url) => ({ ok: !url.endsWith(failFile), bytes: [1] }));
+            const css = await env.math.loadKatexFontFaceCss();
+            // 失敗した1件を除いた数だけ @font-face が出る
+            assert.strictEqual((css.match(/@font-face/g) || []).length, manifest.length - 1);
+            // 部分失敗はキャッシュされないため、2回目は再度 fetch される
+            await env.math.loadKatexFontFaceCss();
+            assert.strictEqual(calls.length, manifest.length * 2);
         });
     });
 });
