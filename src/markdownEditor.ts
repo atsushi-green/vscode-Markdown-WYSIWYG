@@ -254,6 +254,12 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 </div>
                 <!-- Mermaidコンテキストメニュー -->
                 <div id="mermaidContextMenu" class="mermaid-context-menu" style="display: none;">
+                    <div class="mermaid-menu-bg-row">
+                        <span class="mermaid-menu-bg-label">背景</span>
+                        <button type="button" class="mermaid-bg-btn" data-bg="transparent" title="透過背景">透過</button>
+                        <button type="button" class="mermaid-bg-btn active" data-bg="white" title="白背景">白</button>
+                        <button type="button" class="mermaid-bg-btn" data-bg="black" title="黒背景">黒</button>
+                    </div>
                     <div class="mermaid-menu-item" data-action="copyImage">📋 画像をコピー</div>
                     <div class="mermaid-menu-item" data-action="savePng">💾 PNG画像として保存</div>
                 </div>

@@ -1114,6 +1114,44 @@ body.vscode-dark #editor strong {
     color: var(--vscode-menu-selectionForeground, #ffffff);
 }
 
+/* Mermaid画像化の背景色トグル（コンテキストメニュー上部） */
+.mermaid-menu-bg-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px 8px;
+    border-bottom: 1px solid var(--vscode-menu-separatorBackground, #454545);
+    margin-bottom: 4px;
+}
+
+.mermaid-menu-bg-label {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground, #999999);
+    margin-right: 4px;
+}
+
+.mermaid-bg-btn {
+    flex: 1;
+    padding: 3px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--vscode-menu-foreground, #cccccc);
+    background-color: transparent;
+    border: 1px solid var(--vscode-menu-border, #454545);
+    border-radius: 3px;
+    transition: background-color 0.1s, border-color 0.1s;
+}
+
+.mermaid-bg-btn:hover {
+    background-color: var(--vscode-menu-selectionBackground, #04395e);
+}
+
+.mermaid-bg-btn.active {
+    background-color: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #ffffff);
+    border-color: var(--vscode-button-background, #0e639c);
+}
+
 /* トースト通知 */
 .mermaid-toast {
     position: fixed;

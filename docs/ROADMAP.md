@@ -21,12 +21,6 @@
 | todo | **要実機確認** ブロック数式コピー: foreignObject 経路が canvas taint で機能しない場合の対処（MathJax SVG出力への切替検討） | M | 配線は実装済み（`(未付与)`＝blockToPngBlob を foreignObject 方式へ差し替え・fetchフォント埋め込み・html2canvas フォールバック）だが、**Chromium は `<foreignObject>` を含む SVG を `<img>`→canvas に `drawImage` すると canvas を taint し `toBlob()` が SecurityError を投げる**という長年の挙動があり、これが VS Code webview（Electron/Chromium）でも起きると新経路は毎回 catch されて html2canvas フォールバック（＝従来の崩れた画像）へ落ち、**崩れ修正が実際には発現しない**恐れがある。**まず実機（拡張機能開発ホスト）で、数式ブロックを右クリック「画像としてコピー」した際に (a) 崩れが直った画像がコピーされるか (b) DevTools コンソールに `foreignObject rasterize failed, falling back to html2canvas` の警告が出て taint しているか、を確認する**。taint するなら本 todo に着手: 代替として **数式レンダラを MathJax(SVG出力) へ差し替える**（純粋な SVG になり foreignObject 不要＝taint 回避で画像化が自明。ただし影響大＝インライン/ブロック数式の描画・往復・生Markdown表示の全経路に波及するため、まず S/M へ分割）。taint しない（＝修正が効いている）なら本 todo は close。 |
 | todo | 行番号がすべての行に表示されない（行番号ガターの欠落）※優先度低め | S | Raw モードの行番号ガター（`fcf630e` で実装）で、一部の行に行番号が表示されない。全論理行に対して番号が振られるべき。原因候補: ガターの行番号生成が textarea の実際の行数とずれている（末尾行・空行の扱い、あるいはミラー測定の高さずれ）。ユーザー申告により**優先度は低め**でよい。まず実機で再現確認 |
 
-## 優先度: 高
-
-| 状態 | 機能 | サイズ | メモ |
-|------|------|--------|------|
-| todo | Mermaid図の画像コピー／保存時に背景色を選べる（透過・白・黒）— UI配線（2/2・実機確認前提） | M | **中核(1/2)は実装済み（`9e8ea82`）**: `mermaid.js` に純粋関数 `resolveImageBackground(background)`（`'transparent'`→alpha有効・塗りつぶし無し・html2canvas背景 null／`'white'`/`'black'`→不透明＋該当色／未指定・未知→白フォールバック）を追加し、`svgToPngBlob(svg, scale, background='white')` がこれを使って `getContext('2d',{alpha})`・`fillRect` 有無・html2canvas の `backgroundColor` を切り替えるようにした。`copyToClipboard(previewPanel, background)`／`saveAsPng(previewPanel, background)` も背景を受けて渡す（**既定は 'white' で従来動作のまま**）。ユニットテスト5件（背景解決の全分岐）。**残る(2/2)＝呼び出しUIの配線**: Mermaid右クリックメニュー（`src/markdownEditor.ts` の `#mermaidContextMenu`＝`data-action="copyImage"`／`"savePng"` の2項目, [markdownEditor.ts:236-238](../src/markdownEditor.ts#L236)）を拡張し、背景色（透過／白／黒）を選んで `copyToClipboard`/`saveAsPng` の第2引数へ渡す。案: 各アクションを3背景ぶんに増やす（`data-action="copyImage" data-bg="transparent|white|black"` 等）か背景トグルを設ける。クリック配線は `mermaid.js` の `setupContextMenuEvents`（`data-action` 分岐, [mermaid.js:611-625](../media/modules/mermaid.js#L611)）。`src/markdownEditor.ts` を触るため統合テスト対象サイクル。**PNGの透過/白/黒の見た目・クリップボード/保存は実機（拡張機能開発ホスト）でしか検証できない**ため実機確認が必須（特に html2canvas が透過時に白を焼き込まないかを実機で確認）。**注意**: 数式（`math.js` の `blockToPngBlob`）も白背景固定だが本項目のスコープ外（`resolveImageBackground` を共有して同様対応できる。必要なら別 todo 化） |
-
 ## 優先度: 中
 
 | 状態 | 機能 | サイズ | メモ |

@@ -602,11 +602,38 @@ window.MermaidModule = (function() {
     }
 
     /**
+     * コンテキストメニューで現在選択されている背景色を解決する純粋関数。
+     * `.mermaid-bg-btn.active` の `data-bg` を読み、`'transparent'`／`'black'` のみ
+     * その値を、それ以外（未選択・不正値）は `'white'`（従来動作）を返す。
+     *
+     * @param {HTMLElement} menu コンテキストメニュー要素
+     * @returns {string} 'transparent' | 'white' | 'black'
+     */
+    function resolveMenuBackground(menu) {
+        if (!menu || typeof menu.querySelector !== 'function') {
+            return 'white';
+        }
+        const active = menu.querySelector('.mermaid-bg-btn.active');
+        const bg = active && active.getAttribute('data-bg');
+        return (bg === 'transparent' || bg === 'black') ? bg : 'white';
+    }
+
+    /**
      * コンテキストメニューのイベント設定
      */
     function setupContextMenuEvents() {
         const menu = state.mermaidContextMenu;
         if (!menu) return;
+
+        // 背景色トグル: クリックで active を移す（メニューは閉じない＝この後アクションを選ぶ）
+        menu.querySelectorAll('.mermaid-bg-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                menu.querySelectorAll('.mermaid-bg-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
 
         menu.querySelectorAll('.mermaid-menu-item').forEach(item => {
             item.addEventListener('click', async (e) => {
@@ -614,11 +641,12 @@ window.MermaidModule = (function() {
                 e.stopPropagation();
 
                 const action = item.getAttribute('data-action');
+                const background = resolveMenuBackground(menu);
                 if (state.currentMermaidTarget) {
                     if (action === 'copyImage') {
-                        await copyToClipboard(state.currentMermaidTarget);
+                        await copyToClipboard(state.currentMermaidTarget, background);
                     } else if (action === 'savePng') {
-                        await saveAsPng(state.currentMermaidTarget);
+                        await saveAsPng(state.currentMermaidTarget, background);
                     }
                 }
                 hideContextMenu();
@@ -645,6 +673,7 @@ window.MermaidModule = (function() {
         copyToClipboard: copyToClipboard,
         saveAsPng: saveAsPng,
         setupContextMenuEvents: setupContextMenuEvents,
-        resolveImageBackground: resolveImageBackground
+        resolveImageBackground: resolveImageBackground,
+        resolveMenuBackground: resolveMenuBackground
     };
 })();
