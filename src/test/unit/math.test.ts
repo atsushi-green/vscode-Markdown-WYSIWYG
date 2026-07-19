@@ -113,6 +113,57 @@ suite('MathModule', () => {
             item.click();
             assert.strictEqual(menu.style.display, 'none');
         });
+
+        test('背景色トグル（透過／白／黒）を持ち既定は白がactive', () => {
+            env.math.setupContextMenu(env.editor);
+            const menu = env.document.getElementById('mathContextMenu')!;
+            const btns = menu.querySelectorAll('.math-bg-btn');
+            assert.strictEqual(btns.length, 3, 'should have 3 background buttons');
+            const active = menu.querySelector('.math-bg-btn.active');
+            assert.ok(active, 'one button should be active by default');
+            assert.strictEqual(active!.getAttribute('data-bg'), 'white');
+        });
+
+        test('背景ボタンのクリックで active が移り、メニューは閉じない', () => {
+            env.math.setupContextMenu(env.editor);
+            const menu = env.document.getElementById('mathContextMenu')!;
+            menu.style.display = 'block';
+            const blackBtn = menu.querySelector('.math-bg-btn[data-bg="black"]') as HTMLElement;
+            blackBtn.click();
+
+            assert.ok(blackBtn.classList.contains('active'), 'clicked button becomes active');
+            const actives = menu.querySelectorAll('.math-bg-btn.active');
+            assert.strictEqual(actives.length, 1, 'only one button stays active');
+            assert.strictEqual(menu.style.display, 'block', 'menu stays open after bg toggle');
+        });
+    });
+
+    suite('resolveMenuBackground', () => {
+        function menuWithActive(bg: string | null): HTMLElement {
+            const menu = env.document.createElement('div');
+            ['transparent', 'white', 'black'].forEach((v) => {
+                const btn = env.document.createElement('button');
+                btn.className = 'math-bg-btn' + (v === bg ? ' active' : '');
+                btn.setAttribute('data-bg', v);
+                menu.appendChild(btn);
+            });
+            return menu;
+        }
+
+        test('active な透過／黒はその値を返す', () => {
+            assert.strictEqual(env.math.resolveMenuBackground(menuWithActive('transparent')), 'transparent');
+            assert.strictEqual(env.math.resolveMenuBackground(menuWithActive('black')), 'black');
+        });
+
+        test('active が白・未選択・不正なら白を返す', () => {
+            assert.strictEqual(env.math.resolveMenuBackground(menuWithActive('white')), 'white');
+            assert.strictEqual(env.math.resolveMenuBackground(menuWithActive(null)), 'white');
+        });
+
+        test('menu が null／querySelector を持たなくても白を返す', () => {
+            assert.strictEqual(env.math.resolveMenuBackground(null), 'white');
+            assert.strictEqual(env.math.resolveMenuBackground({} as unknown as HTMLElement), 'white');
+        });
     });
 
     suite('copyBlockAsPng', () => {
@@ -141,6 +192,60 @@ suite('MathModule', () => {
         test('block が null でも何もせず例外を投げない', async () => {
             await env.math.copyBlockAsPng(null);
             assert.strictEqual(env.document.querySelector('.mermaid-toast'), null);
+        });
+
+        // 選んだ背景が PNG 生成（foreignObject SVG）まで伝播することを、Image に渡る
+        // data:URL を捕捉して検証する。黒背景では黒地に黒文字で数式が消えないよう
+        // 文字色を白へ反転していること（A-1 回帰防止）もここで確認する。
+        function captureSvgOnCopy(): { get: () => string } {
+            let capturedSrc = '';
+            env.window.Image = class {
+                onload: (() => void) | null = null;
+                onerror: (() => void) | null = null;
+                set src(v: string) {
+                    capturedSrc = v;
+                    // 実描画はできないので onerror で後段（フォールバック）へ落とす。
+                    // SVG マークアップは src セット時点で既に組み上がっている。
+                    setTimeout(() => { if (this.onerror) { this.onerror(); } }, 0);
+                }
+            };
+            return {
+                get: () => decodeURIComponent(
+                    capturedSrc.replace(/^data:image\/svg\+xml;charset=utf-8,/, '')
+                )
+            };
+        }
+
+        test('黒背景を選ぶと数式の文字色を白へ反転する（黒地に黒文字を防ぐ）', async () => {
+            const cap = captureSvgOnCopy();
+            env.editor.innerHTML =
+                '<div class="math-block" data-math="x^2"><span class="katex">x</span></div>';
+            const block = env.editor.querySelector('.math-block')!;
+
+            await env.math.copyBlockAsPng(block, 'black');
+
+            const svg = cap.get();
+            assert.ok(svg.includes('fill="black"'), 'black background rect should be drawn');
+            assert.ok(
+                /rgb\(255,\s*255,\s*255\)|#ffffff|#fff\b/i.test(svg),
+                'text color should be white on black background: ' + svg.slice(0, 500)
+            );
+        });
+
+        test('白背景では文字色は黒のまま（既定動作を維持）', async () => {
+            const cap = captureSvgOnCopy();
+            env.editor.innerHTML =
+                '<div class="math-block" data-math="x^2"><span class="katex">x</span></div>';
+            const block = env.editor.querySelector('.math-block')!;
+
+            await env.math.copyBlockAsPng(block, 'white');
+
+            const svg = cap.get();
+            assert.ok(svg.includes('fill="white"'), 'white background rect should be drawn');
+            assert.ok(
+                /rgb\(0,\s*0,\s*0\)|#000000|#000\b/i.test(svg),
+                'text color should be black on white background: ' + svg.slice(0, 500)
+            );
         });
     });
 

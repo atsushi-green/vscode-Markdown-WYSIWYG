@@ -1123,8 +1123,9 @@ body.vscode-dark #editor strong {
     color: var(--vscode-menu-selectionForeground, #ffffff);
 }
 
-/* Mermaid画像化の背景色トグル（コンテキストメニュー上部） */
-.mermaid-menu-bg-row {
+/* 画像化の背景色トグル（コンテキストメニュー上部）。Mermaid／数式で共有 */
+.mermaid-menu-bg-row,
+.math-menu-bg-row {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -1133,13 +1134,15 @@ body.vscode-dark #editor strong {
     margin-bottom: 4px;
 }
 
-.mermaid-menu-bg-label {
+.mermaid-menu-bg-label,
+.math-menu-bg-label {
     font-size: 12px;
     color: var(--vscode-descriptionForeground, #999999);
     margin-right: 4px;
 }
 
-.mermaid-bg-btn {
+.mermaid-bg-btn,
+.math-bg-btn {
     flex: 1;
     padding: 3px 6px;
     font-size: 12px;
@@ -1151,11 +1154,13 @@ body.vscode-dark #editor strong {
     transition: background-color 0.1s, border-color 0.1s;
 }
 
-.mermaid-bg-btn:hover {
+.mermaid-bg-btn:hover,
+.math-bg-btn:hover {
     background-color: var(--vscode-menu-selectionBackground, #04395e);
 }
 
-.mermaid-bg-btn.active {
+.mermaid-bg-btn.active,
+.math-bg-btn.active {
     background-color: var(--vscode-button-background, #0e639c);
     color: var(--vscode-button-foreground, #ffffff);
     border-color: var(--vscode-button-background, #0e639c);

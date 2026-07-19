@@ -96,10 +96,36 @@ window.MathModule = (function() {
         return { left: left, top: top };
     }
 
+    // 画像化の背景色の選択肢（Mermaidメニューと同じ 透過／白／黒。既定は白）。
+    const BACKGROUND_OPTIONS = [
+        { bg: 'transparent', label: '透過', title: '透過背景' },
+        { bg: 'white', label: '白', title: '白背景' },
+        { bg: 'black', label: '黒', title: '黒背景' }
+    ];
+
+    /**
+     * コンテキストメニューで現在選択されている背景色を解決する純粋関数。
+     * `.math-bg-btn.active` の `data-bg` を読み、`'transparent'`／`'black'` のみ
+     * その値を、それ以外（未選択・不正値）は `'white'`（従来動作）を返す。
+     * Mermaid メニューの `resolveMenuBackground` と同じ契約。
+     *
+     * @param {HTMLElement} menu コンテキストメニュー要素
+     * @returns {string} 'transparent' | 'white' | 'black'
+     */
+    function resolveMenuBackground(menu) {
+        if (!menu || typeof menu.querySelector !== 'function') {
+            return 'white';
+        }
+        const active = menu.querySelector('.math-bg-btn.active');
+        const bg = active && active.getAttribute('data-bg');
+        return (bg === 'transparent' || bg === 'black') ? bg : 'white';
+    }
+
     /**
      * コンテキストメニュー（無ければ生成）を返す。
-     * 見た目は mermaid のメニューと共有（editor.css の `.math-context-menu` は
-     * `.mermaid-context-menu` と同じルールを参照する）。
+     * 見た目は mermaid のメニューと共有（editor.css の `.math-context-menu` 系は
+     * `.mermaid-context-menu` 系と同じルールを参照する）。
+     * 上部に背景色トグル（透過／白／黒）を持ち、その下に「画像としてコピー」を置く。
      */
     function ensureContextMenu() {
         if (contextMenuEl && document.body.contains(contextMenuEl)) {
@@ -111,6 +137,33 @@ window.MathModule = (function() {
         menu.style.display = 'none';
         menu.style.position = 'fixed';
 
+        // 背景色トグル行。クリックで active を移すだけ（メニューは閉じず、続けてアクションを選ぶ）。
+        const bgRow = document.createElement('div');
+        bgRow.className = 'math-menu-bg-row';
+        const bgLabel = document.createElement('span');
+        bgLabel.className = 'math-menu-bg-label';
+        bgLabel.textContent = '背景';
+        bgRow.appendChild(bgLabel);
+        BACKGROUND_OPTIONS.forEach(function(opt) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'math-bg-btn' + (opt.bg === 'white' ? ' active' : '');
+            btn.setAttribute('data-bg', opt.bg);
+            btn.title = opt.title;
+            btn.textContent = opt.label;
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const btns = menu.querySelectorAll('.math-bg-btn');
+                Array.prototype.forEach.call(btns, function(b) {
+                    b.classList.remove('active');
+                });
+                btn.classList.add('active');
+            });
+            bgRow.appendChild(btn);
+        });
+        menu.appendChild(bgRow);
+
         const item = document.createElement('div');
         item.className = 'math-menu-item';
         item.setAttribute('data-action', 'copyImage');
@@ -119,9 +172,10 @@ window.MathModule = (function() {
             e.preventDefault();
             e.stopPropagation();
             const block = currentBlock;
+            const background = resolveMenuBackground(menu);
             hideContextMenu();
             if (block) {
-                copyBlockAsPng(block);
+                copyBlockAsPng(block, background);
             }
         });
         menu.appendChild(item);
@@ -495,7 +549,10 @@ window.MathModule = (function() {
         var wrapper = document.createElement('div');
         wrapper.style.display = 'inline-block';
         wrapper.style.padding = '16px 24px';
-        wrapper.style.color = '#000000';
+        // KaTeX は色を明示せず currentColor を継承するため、文字色は wrapper で決める。
+        // 黒背景では黒文字だと数式が見えなくなるので白文字へ反転する
+        // （白・透過背景は従来どおり黒文字）。
+        wrapper.style.color = (bg === 'black') ? '#ffffff' : '#000000';
         wrapper.style.textAlign = 'left';
 
         var clone = block.cloneNode(true);
@@ -557,13 +614,16 @@ window.MathModule = (function() {
     /**
      * ブロック数式をPNGへ変換し、クリップボードへ画像としてコピーする。
      * 失敗しても例外は投げず、トーストで結果を知らせる（mermaidのコピーと同じ方針）。
+     *
+     * @param {HTMLElement} block  対象の `.math-block`
+     * @param {string} [background] 背景色（既定 'white'。'transparent' で透過、'black' で黒）
      */
-    async function copyBlockAsPng(block) {
+    async function copyBlockAsPng(block, background) {
         if (!block) {
             return;
         }
         try {
-            const blob = await blockToPngBlob(block);
+            const blob = await blockToPngBlob(block, undefined, background);
             await navigator.clipboard.write([
                 new ClipboardItem({ 'image/png': blob })
             ]);
@@ -611,6 +671,7 @@ window.MathModule = (function() {
         hideContextMenu: hideContextMenu,
         copyBlockAsPng: copyBlockAsPng,
         findMathBlock: findMathBlock,
+        resolveMenuBackground: resolveMenuBackground,
         computeMenuPosition: computeMenuPosition,
         buildMathBlockSvgMarkup: buildMathBlockSvgMarkup,
         serializeNodeToXhtml: serializeNodeToXhtml,
