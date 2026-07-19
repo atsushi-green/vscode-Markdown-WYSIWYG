@@ -441,6 +441,56 @@ suite('EditorUtils', () => {
             assert.strictEqual(restored.anchorOffset, 3, 'ブロック内オフセットがずれた');
         });
 
+        test('ブロックが前に挿入されてindexがずれても、署名が一意一致すれば正しいブロックへ復元する', () => {
+            // 全書き換えでキャレットのブロックより前に別ブロックが挿入され、
+            // blockIndex が指す位置が別ブロックになっても、内容の署名で辿って正しく戻す。
+            env.editor.innerHTML = '<p>alpha</p><p>target</p>';
+            const textNode = env.editor.querySelectorAll('p')[1]!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 3);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            const saved = env.utils.saveCursorPosition();
+            assert.strictEqual(saved.blockIndex, 1);
+            assert.strictEqual(saved.blockSignature, 'target');
+
+            // 全書き換え：先頭に新しいブロックが挿入され、"target" は index 2 へ移動
+            env.editor.innerHTML = '<p>alpha</p><p>inserted</p><p>target</p>';
+            env.utils.restoreCursorPosition(saved);
+
+            const restored = env.window.getSelection();
+            // index 1（"inserted"）ではなく、署名一致の "target"（index 2）へ戻る
+            assert.strictEqual(
+                restored.anchorNode, env.editor.querySelectorAll('p')[2]!.firstChild,
+                '署名一致ブロックへ戻っていない'
+            );
+            assert.strictEqual(restored.anchorOffset, 3);
+        });
+
+        test('キャレットのブロック自体が編集され署名が変わった場合はblockIndexで引く', () => {
+            env.editor.innerHTML = '<p>alpha</p><p>target</p>';
+            const textNode = env.editor.querySelectorAll('p')[1]!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 3);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            const saved = env.utils.saveCursorPosition();
+
+            // キャレットのブロックが編集されて署名が変化（index は不変）
+            env.editor.innerHTML = '<p>alpha</p><p>targetXYZ</p>';
+            env.utils.restoreCursorPosition(saved);
+
+            const restored = env.window.getSelection();
+            // 署名一致は無い → blockIndex=1 で引き、ブロック内オフセット3へ
+            assert.strictEqual(restored.anchorNode, env.editor.querySelectorAll('p')[1]!.firstChild);
+            assert.strictEqual(restored.anchorOffset, 3);
+        });
+
         test('blockIndexが範囲外（ブロック構造が変わった）ならグローバルオフセット方式へフォールバックする', () => {
             env.editor.innerHTML = '<p>first</p><p>abcdef</p>';
             const textNode = env.editor.querySelectorAll('p')[1]!.firstChild!;
@@ -473,6 +523,27 @@ suite('EditorUtils', () => {
             assert.strictEqual(restored.rangeCount, 1);
             // 例外を投げず、エディタを基準にキャレットが設定されていること
             assert.ok(env.editor.contains(restored.anchorNode) || restored.anchorNode === env.editor);
+        });
+    });
+
+    suite('blockSignatureOf（ブロック署名）', () => {
+        test('要素の先頭テキストを空白畳み込みして返す', () => {
+            env.editor.innerHTML = '<p>  hello   world  </p>';
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.utils.blockSignatureOf(p), 'hello world');
+        });
+
+        test('64文字を超えるテキストは先頭64文字に丸める', () => {
+            const long = 'a'.repeat(100);
+            env.editor.innerHTML = `<p>${long}</p>`;
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.utils.blockSignatureOf(p).length, 64);
+        });
+
+        test('null・空要素は空文字を返す', () => {
+            assert.strictEqual(env.utils.blockSignatureOf(null), '');
+            env.editor.innerHTML = '<p></p>';
+            assert.strictEqual(env.utils.blockSignatureOf(env.editor.querySelector('p')), '');
         });
     });
 

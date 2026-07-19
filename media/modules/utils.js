@@ -80,6 +80,19 @@ window.EditorUtils = (function() {
     /**
      * カーソル位置を保存
      */
+    /**
+     * トップレベルブロックの署名（先頭テキスト）を返す。ブロックの挿入・並べ替えで
+     * `blockIndex` がずれても、署名が一意に一致するブロックを内容で辿って復元できる
+     * ようにするための軽量な識別子。空白は畳んで先頭64文字に丸める。
+     */
+    function blockSignatureOf(node) {
+        if (!node) {
+            return '';
+        }
+        const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+        return text.slice(0, 64);
+    }
+
     function saveCursorPosition() {
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0) {
@@ -100,6 +113,7 @@ window.EditorUtils = (function() {
         // ドリフトする）と違い、キャレットのあるブロックに閉じるぶん頑健。
         let blockIndex = -1;
         let blockOffset = 0;
+        let blockSignature = '';
         if (range.endContainer !== state.editor) {
             let topBlock = range.endContainer;
             while (topBlock && topBlock.parentNode !== state.editor) {
@@ -117,6 +131,7 @@ window.EditorUtils = (function() {
                 blockRange.selectNodeContents(topBlock);
                 blockRange.setEnd(range.endContainer, range.endOffset);
                 blockOffset = blockRange.toString().length;
+                blockSignature = blockSignatureOf(topBlock);
             }
         }
 
@@ -128,8 +143,11 @@ window.EditorUtils = (function() {
             nodeOffset: range.endOffset,
             // ブロック基準アンカー（第二候補）。全書き換えでノードが消えても、
             // 同じインデックスのブロックが残っていればブロック内オフセットで戻せる。
+            // ブロックが挿入・並べ替えされてインデックスがずれた場合に備え、内容の
+            // 署名（先頭テキスト）も保持して一意に一致するブロックを辿れるようにする。
             blockIndex: blockIndex,
             blockOffset: blockOffset,
+            blockSignature: blockSignature,
             // 文字数オフセット（最終フォールバック）。上記いずれも使えない場合に使う。
             offset: preCaretRange.toString().length,
             text: preCaretRange.toString()
@@ -209,7 +227,31 @@ window.EditorUtils = (function() {
         // Mermaid・テーブル）が再描画で文字量を変えても、キャレットのブロックに閉じた
         // オフセットなのでドリフトしない。届かなければ下のグローバルオフセット走査へ委ねる。
         if (typeof position.blockIndex === 'number' && position.blockIndex >= 0) {
-            const block = state.editor.childNodes[position.blockIndex];
+            const children = state.editor.childNodes;
+            let block = null;
+
+            // ブロックの挿入・並べ替えで blockIndex がずれても、署名（先頭テキスト）が
+            // 一意に一致するブロックがあればそれを優先する。一致が無い（＝キャレットの
+            // ブロック自体が編集されて署名が変わった）／複数一致で曖昧な場合は、従来
+            // どおり blockIndex で引く。
+            const sig = position.blockSignature;
+            if (typeof sig === 'string' && sig.length > 0) {
+                let matched = null;
+                let matchCount = 0;
+                for (let i = 0; i < children.length; i++) {
+                    if (blockSignatureOf(children[i]) === sig) {
+                        matched = children[i];
+                        matchCount++;
+                    }
+                }
+                if (matchCount === 1) {
+                    block = matched;
+                }
+            }
+            if (!block) {
+                block = children[position.blockIndex];
+            }
+
             if (block) {
                 const { result } = scanOffset(block, position.blockOffset || 0);
                 if (result) {
@@ -449,6 +491,7 @@ window.EditorUtils = (function() {
         showToast: showToast,
         saveCursorPosition: saveCursorPosition,
         restoreCursorPosition: restoreCursorPosition,
+        blockSignatureOf: blockSignatureOf,
         shouldIgnoreStaleUpdate: shouldIgnoreStaleUpdate,
         findAncestor: findAncestor,
         findBlockAncestor: findBlockAncestor,
