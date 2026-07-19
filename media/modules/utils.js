@@ -92,6 +92,13 @@ window.EditorUtils = (function() {
         preCaretRange.setEnd(range.endContainer, range.endOffset);
 
         return {
+            // ノード基準アンカー（第一候補）。DOMがインプレースで書き換えられても
+            // このノードが生きていれば、文字数オフセットの走査（埋め込みウィジェットの
+            // 内部テキスト量や再描画でずれやすい）を経ずに正確な位置へ戻せる。
+            node: range.endContainer,
+            nodeOffset: range.endOffset,
+            // 文字数オフセット（フォールバック）。innerHTML 全書き換え等で上記ノードが
+            // 消えた場合に使う。
             offset: preCaretRange.toString().length,
             text: preCaretRange.toString()
         };
@@ -104,6 +111,35 @@ window.EditorUtils = (function() {
         if (!position) return;
 
         const selection = window.getSelection();
+
+        // まずノード基準で復元を試みる。保存時のノードがまだエディタ内に生きていれば
+        // （＝インプレースでのDOM変更）、文字数オフセットの走査を経ずに正確な位置へ戻せる。
+        // これにより、埋め込みウィジェット（数式・Mermaid・テーブル）の内部テキスト量が
+        // 変わっても、キャレットが本来と別の場所（先頭や最寄り）へずれる不具合を避けられる。
+        // ノードが消えている場合（innerHTML 全書き換え等）は下のオフセット方式へ委ねる。
+        //
+        // 対象はテキストノードのみに限定する。要素コンテナ（キャレットが子ノードの
+        // 境界にある場合）では nodeOffset は childNodes のインデックスであり、子が
+        // インプレースで増減すると古いインデックスが別の境界を指してしまう。要素境界は
+        // 従来どおりオフセット方式に委ねた方が安全（文字カレット＝offsetずれの本丸のみ救う）。
+        if (position.node &&
+            position.node.nodeType === Node.TEXT_NODE &&
+            state.editor.contains(position.node)) {
+            try {
+                const node = position.node;
+                const nodeOffset = Math.min(
+                    Math.max(position.nodeOffset || 0, 0), node.textContent.length);
+                const nodeRange = document.createRange();
+                nodeRange.setStart(node, nodeOffset);
+                nodeRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(nodeRange);
+                return;
+            } catch (e) {
+                // ノード基準で失敗した場合は従来のオフセット方式へフォールバックする
+            }
+        }
+
         const range = document.createRange();
 
         try {

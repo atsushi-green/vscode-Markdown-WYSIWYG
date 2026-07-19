@@ -220,6 +220,90 @@ suite('EditorUtils', () => {
             assert.strictEqual(env.utils.saveCursorPosition(), null);
         });
 
+        test('保存結果はノード基準アンカー（node/nodeOffset）も持つ', () => {
+            env.editor.innerHTML = '<p>abcdef</p>';
+            const textNode = env.editor.querySelector('p')!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 3);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            const saved = env.utils.saveCursorPosition();
+            assert.strictEqual(saved.node, textNode);
+            assert.strictEqual(saved.nodeOffset, 3);
+            assert.strictEqual(saved.offset, 3);
+        });
+
+        test('ノードが生きていれば、前方の文字数が変わっても正確な位置へ復元する', () => {
+            // 「編集中にキャレットが別の場所へずれる」根本原因（文字数オフセット方式）への
+            // ノード基準アンカーの回帰テスト。埋め込みウィジェット等の再描画で
+            // キャレット前の文字数が変わっても、ノードが生きていれば正しい位置に戻る。
+            env.editor.innerHTML = '<span class="w">XXXX</span><p>abcdef</p>';
+            const textNode = env.editor.querySelector('p')!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 3);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            const saved = env.utils.saveCursorPosition();
+            // キャレットより前のノードのテキスト量を増やす（オフセット方式なら +8 ずれる）
+            (env.editor.querySelector('.w')!.firstChild as Text).textContent = 'XXXXXXXXXXXX';
+
+            env.utils.restoreCursorPosition(saved);
+
+            const restored = env.window.getSelection();
+            assert.strictEqual(restored.anchorNode, textNode, '同じノードへ戻っていない');
+            assert.strictEqual(restored.anchorOffset, 3, 'ノード内オフセットがずれた');
+        });
+
+        test('保存ノードが消えている場合はオフセット方式へフォールバックする', () => {
+            env.editor.innerHTML = '<p>abcdef</p>';
+            const textNode = env.editor.querySelector('p')!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 3);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            const saved = env.utils.saveCursorPosition();
+
+            // innerHTML 全書き換えで保存ノードは切り離される（別ノードの同内容）
+            env.editor.innerHTML = '<p>abcdef</p>';
+            assert.ok(!env.editor.contains(saved.node), '前提: 保存ノードは切り離されている');
+
+            env.utils.restoreCursorPosition(saved);
+
+            const restored = env.window.getSelection();
+            // 新しいノードのオフセット3へ復元される
+            assert.strictEqual(restored.anchorNode, env.editor.querySelector('p')!.firstChild);
+            assert.strictEqual(restored.anchorOffset, 3);
+        });
+
+        test('ノードは生きているが nodeOffset が範囲外なら長さへクランプする（例外を投げない）', () => {
+            env.editor.innerHTML = '<p>abcdef</p>';
+            const textNode = env.editor.querySelector('p')!.firstChild!;
+            const selection = env.window.getSelection();
+            const range = env.document.createRange();
+            range.setStart(textNode, 6);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            const saved = env.utils.saveCursorPosition();
+
+            // ノードは同一のまま短くする（nodeOffset 6 は範囲外になる）
+            (textNode as Text).textContent = 'ab';
+
+            env.utils.restoreCursorPosition(saved);
+
+            const restored = env.window.getSelection();
+            assert.strictEqual(restored.anchorNode, textNode);
+            assert.strictEqual(restored.anchorOffset, 2, '長さ(2)へクランプされていない');
+        });
+
         test('復元先オフセットに届かず選択も失われている場合、先頭へ飛ばず最寄り末尾へ復元する', () => {
             // 「編集中に突然キャレットが一番上へ飛ぶ」不具合の回帰テスト。
             // 保存時オフセット(29)より本文が短くなり(5文字)、かつ直前の innerHTML
