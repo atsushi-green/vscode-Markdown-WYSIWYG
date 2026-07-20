@@ -212,6 +212,7 @@
         // 縦スクロールに追従（内容・レイアウト変化時のみ再配置＝input/resizeで update）
         ed.addEventListener('scroll', syncWysiwygGutterScroll);
         window.addEventListener('resize', updateWysiwygLineGutter);
+        window.addEventListener('resize', updateHeadingBreadcrumb);
 
         updateWysiwygLineGutter();
     }
@@ -284,6 +285,116 @@
         }
     }
 
+    // 見出しパンくずバー（初期化時に生成。#editor の直前へ挿入）
+    let headingBreadcrumbBar = null;
+    let headingBreadcrumbRafPending = false;
+
+    /**
+     * スクロール位置パンくずバーを生成する（一度だけ）。ツールバー直下・
+     * `#editor`（行番号ガターのラッパーを含む）の直前に挿入し、通常のflowで
+     * 常に表示位置を保つ（`#editor` 自身がスクロールしてもバーは動かない）。
+     */
+    function initHeadingBreadcrumb() {
+        const ed = state.editor;
+        if (!ed || headingBreadcrumbBar) {
+            return;
+        }
+        const bar = document.createElement('div');
+        bar.className = 'heading-breadcrumb-bar';
+        bar.style.display = 'none';
+        ed.parentNode.insertBefore(bar, ed);
+        headingBreadcrumbBar = bar;
+
+        ed.addEventListener('scroll', scheduleHeadingBreadcrumbUpdate);
+        updateHeadingBreadcrumb();
+    }
+
+    /**
+     * スクロールイベントの間引き（rAF）。スクロール中に何度も呼ばれても
+     * 1フレームにつき1回だけ再計算する。
+     */
+    function scheduleHeadingBreadcrumbUpdate() {
+        if (headingBreadcrumbRafPending) {
+            return;
+        }
+        headingBreadcrumbRafPending = true;
+        window.requestAnimationFrame(function () {
+            headingBreadcrumbRafPending = false;
+            updateHeadingBreadcrumb();
+        });
+    }
+
+    /**
+     * 現在のスクロール位置から「いま見ている見出し」の祖先チェーンを求め、
+     * パンくずバーへ描画する。見出しが無い／まだどの見出しも通過していない
+     * （文書先頭）場合はバーを隠す。Rawモード中は何もしない。
+     */
+    function updateHeadingBreadcrumb() {
+        if (!headingBreadcrumbBar || !state.editor || state.isRawMode) {
+            return;
+        }
+        const headings = commands.collectHeadings(state.editor);
+        if (!headings.length) {
+            headingBreadcrumbBar.style.display = 'none';
+            return;
+        }
+
+        const editorRect = state.editor.getBoundingClientRect();
+        const scrollTop = state.editor.scrollTop;
+        const tops = headings.map(function (h) {
+            return h.el.getBoundingClientRect().top - editorRect.top + scrollTop;
+        });
+        const currentIndex = commands.findCurrentHeadingIndex(tops, scrollTop);
+        if (currentIndex < 0) {
+            headingBreadcrumbBar.style.display = 'none';
+            return;
+        }
+
+        const chain = commands.buildBreadcrumbChain(headings, currentIndex);
+        renderHeadingBreadcrumb(chain);
+    }
+
+    /**
+     * パンくずチェーンをバーへ描画する。各セグメントをクリックすると
+     * 該当見出しへスクロールする（`commands.scrollToAnchor` と同じidベース遷移）。
+     */
+    function renderHeadingBreadcrumb(chain) {
+        const bar = headingBreadcrumbBar;
+        bar.textContent = '';
+        chain.forEach(function (heading, index) {
+            if (index > 0) {
+                const sep = document.createElement('span');
+                sep.className = 'heading-breadcrumb-sep';
+                sep.textContent = '›';
+                bar.appendChild(sep);
+            }
+            const item = document.createElement('span');
+            item.className = 'heading-breadcrumb-item';
+            item.textContent = '#'.repeat(heading.level) + ' ' + heading.text;
+            // idが無い見出し（execCommandによる見出し化・入力直後の変換等はidを付与しない。
+            // idはmarkdownToHtmlの再パース時のみ付く）はスクロール遷移できないため、
+            // クリック可能に見えないよう装飾（cursor/hover）ごとクラスで分ける。
+            if (heading.id) {
+                item.classList.add('heading-breadcrumb-item-clickable');
+                item.title = heading.text;
+                item.addEventListener('click', function () {
+                    commands.scrollToAnchor('#' + heading.id);
+                });
+            }
+            bar.appendChild(item);
+        });
+        bar.style.display = 'flex';
+    }
+
+    /**
+     * Rawモードに入るときにパンくずバーを隠す。
+     */
+    function hideHeadingBreadcrumb() {
+        if (headingBreadcrumbBar) {
+            headingBreadcrumbBar.style.display = 'none';
+        }
+    }
+
     /**
      * エディタの初期化
      */
@@ -345,6 +456,11 @@
 
         // Rawモードの行番号ガターを生成（rawEditorをラッパーで包む）
         initRawLineGutter();
+
+        // 見出しパンくずバーを生成（ツールバー直下・#editorの直前）。
+        // #editor がまだ行番号ガターのラッパーで包まれる前（親がbody直下）に挿す必要があるため、
+        // 次の initWysiwygLineGutter より必ず先に呼ぶ（後だと親がラッパー内になり縦積みが崩れる）。
+        initHeadingBreadcrumb();
 
         // WYSIWYGモードの行番号ガターを生成（#editorをラッパーで包む）
         initWysiwygLineGutter();
@@ -443,6 +559,9 @@
 
             // 行番号ガターを更新（変換コストが高いためデバウンス）
             scheduleWysiwygGutterUpdate();
+
+            // 見出しパンくずバーを更新（見出しの追加・削除・移動に追従）
+            updateHeadingBreadcrumb();
 
             // 文書への書き戻し（変換コストが高いためデバウンス）
             if (editSyncTimeout) {
@@ -772,6 +891,9 @@
 
         // 行番号ガターを更新（Mermaid/数式/テーブル描画後の高さで再配置）
         scheduleWysiwygGutterUpdate();
+
+        // 見出しパンくずバーを更新（外部編集での見出し変化に追従）
+        updateHeadingBreadcrumb();
     }
 
     /**
@@ -796,6 +918,7 @@
             const md = state.lastSentMarkdown || markdown.htmlToMarkdown(cleanHtml);
             state.rawEditor.value = md;
             hideWysiwygLineGutter();
+            hideHeadingBreadcrumb();
             showRawLineGutter();
             state.toggleBtn.classList.add('active');
             state.toggleBtn.innerHTML = '👁️ Preview';
@@ -814,6 +937,7 @@
             resolveLocalImages(state.editor);
             hideRawLineGutter();
             showWysiwygLineGutter();
+            updateHeadingBreadcrumb();
             state.toggleBtn.classList.remove('active');
             state.toggleBtn.innerHTML = '📄 Raw';
             state.toggleBtn.title = '生マークダウン表示切替 (Ctrl+/)';

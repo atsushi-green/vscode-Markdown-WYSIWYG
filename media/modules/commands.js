@@ -497,6 +497,61 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * スクロール位置パンくず用に、エディタ内の見出し要素を出現順の階層情報配列へ変換する。
+     * `id` は markdownToHtml が付与したスラッグ（scrollToAnchor と同じ規則で遷移できる）。
+     */
+    function collectHeadings(editor) {
+        const headings = [];
+        editor.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => {
+            headings.push({
+                level: Number(h.tagName[1]),
+                id: h.id || '',
+                text: headingText(h),
+                el: h
+            });
+        });
+        return headings;
+    }
+
+    /**
+     * 見出しの上端位置（配列。出現順＝昇順）とスクロール位置から、
+     * 「いま見ている位置」に対応する見出しのインデックスを求める（純粋関数）。
+     * スクロール位置以前の最後の見出し＝現在読んでいる節の見出しとみなす。
+     * 最初の見出しより手前（まだどの見出しも通過していない）なら -1。
+     */
+    function findCurrentHeadingIndex(tops, scrollTop) {
+        let result = -1;
+        for (let i = 0; i < tops.length; i++) {
+            if (tops[i] <= scrollTop) {
+                result = i;
+            } else {
+                break;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 現在の見出しインデックスから、祖先の階層すべてを連ねたパンくずチェーンを組み立てる（純粋関数）。
+     * currentIndexの見出し自身を末尾に置き、そこから手前へ辿ってレベルが
+     * それまでの最小値より小さい見出しだけを先頭へ積み上げる（レベル飛び＝存在するものだけ）。
+     */
+    function buildBreadcrumbChain(headings, currentIndex) {
+        if (!headings || currentIndex < 0 || currentIndex >= headings.length) {
+            return [];
+        }
+        const chain = [headings[currentIndex]];
+        let minLevel = headings[currentIndex].level;
+        for (let i = currentIndex - 1; i >= 0 && minLevel > 1; i--) {
+            if (headings[i].level < minLevel) {
+                chain.unshift(headings[i]);
+                minLevel = headings[i].level;
+            }
+        }
+        return chain;
+    }
+
+    /**
      * コマンドの実行
      */
     function executeCommand(command) {
@@ -2569,6 +2624,9 @@ window.CommandsModule = (function() {
         findClipboardImageItem: findClipboardImageItem,
         insertImageMarkdown: insertImageMarkdown,
         scrollToAnchor: scrollToAnchor,
+        collectHeadings: collectHeadings,
+        findCurrentHeadingIndex: findCurrentHeadingIndex,
+        buildBreadcrumbChain: buildBreadcrumbChain,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,
         handleHorizontalRule: handleHorizontalRule,

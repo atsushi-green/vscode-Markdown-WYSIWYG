@@ -1894,6 +1894,85 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('見出しパンくず（スクロール位置の見出し階層表示）', () => {
+        suite('collectHeadings', () => {
+            test('エディタ内の見出しを出現順にlevel/id/textへ変換する', () => {
+                env.editor.innerHTML = env.markdown.markdownToHtml(
+                    '# タイトル\n\n## 節A\n\n### 詳細'
+                );
+                const headings = env.commands.collectHeadings(env.editor);
+                assert.strictEqual(headings.length, 3);
+                // headings/mapはjsdomレルムの配列を返すため、deepStrictEqualの
+                // プロトタイプ不一致を避けてArray.fromでNodeレルムへ変換して比較する
+                assert.deepStrictEqual(Array.from(headings, (h: any) => h.level), [1, 2, 3]);
+                assert.deepStrictEqual(Array.from(headings, (h: any) => h.text), ['タイトル', '節A', '詳細']);
+                assert.ok(headings[0].id, 'idが付与されている');
+                assert.strictEqual(headings[0].el.tagName, 'H1');
+            });
+
+            test('見出しが無ければ空配列を返す', () => {
+                env.editor.innerHTML = '<p>本文だけ</p>';
+                assert.deepStrictEqual(Array.from(env.commands.collectHeadings(env.editor)), []);
+            });
+        });
+
+        suite('findCurrentHeadingIndex', () => {
+            test('スクロール位置以前の最後の見出しのインデックスを返す', () => {
+                const tops = [0, 100, 250];
+                assert.strictEqual(env.commands.findCurrentHeadingIndex(tops, 0), 0);
+                assert.strictEqual(env.commands.findCurrentHeadingIndex(tops, 150), 1);
+                assert.strictEqual(env.commands.findCurrentHeadingIndex(tops, 999), 2);
+            });
+
+            test('最初の見出しより手前（文書先頭）なら-1', () => {
+                const tops = [100, 250];
+                assert.strictEqual(env.commands.findCurrentHeadingIndex(tops, 50), -1);
+            });
+
+            test('見出しが無ければ-1', () => {
+                assert.strictEqual(env.commands.findCurrentHeadingIndex([], 100), -1);
+            });
+        });
+
+        suite('buildBreadcrumbChain', () => {
+            const H1 = { level: 1, id: 'doc', text: 'ドキュメント' };
+            const H2 = { level: 2, id: 'sec', text: '機能テスト' };
+            const H3 = { level: 3, id: 'detail', text: '詳細' };
+
+            // buildBreadcrumbChainはjsdomレルムで実行され返り値のArrayもjsdomレルム
+            // となるため、deepStrictEqualのプロトタイプ不一致を避けてArray.fromで
+            // Nodeレルムへ変換してから比較する。
+
+            test('現在位置の見出しと、その上位すべての祖先を連ねる', () => {
+                const chain = env.commands.buildBreadcrumbChain([H1, H2, H3], 2);
+                assert.deepStrictEqual(Array.from(chain), [H1, H2, H3]);
+            });
+
+            test('途中のレベルが飛んでいる場合は存在するものだけを並べる（h1の次がh3）', () => {
+                const H3only = { level: 3, id: 'detail', text: '詳細' };
+                const chain = env.commands.buildBreadcrumbChain([H1, H3only], 1);
+                assert.deepStrictEqual(Array.from(chain), [H1, H3only]);
+            });
+
+            test('同レベルや自分より深いレベルの手前の見出しは祖先に含めない', () => {
+                const H2b = { level: 2, id: 'sec-b', text: '節B' };
+                // H1 > H2(節A) > H2b(節B) の並びで、現在位置がH2bなら祖先はH1のみ
+                const chain = env.commands.buildBreadcrumbChain([H1, H2, H2b], 2);
+                assert.deepStrictEqual(Array.from(chain), [H1, H2b]);
+            });
+
+            test('currentIndexが範囲外なら空配列を返す', () => {
+                assert.deepStrictEqual(Array.from(env.commands.buildBreadcrumbChain([H1], -1)), []);
+                assert.deepStrictEqual(Array.from(env.commands.buildBreadcrumbChain([H1], 5)), []);
+            });
+
+            test('見出しが1つ（h1のみ）ならその見出しだけを返す', () => {
+                const chain = env.commands.buildBreadcrumbChain([H1], 0);
+                assert.deepStrictEqual(Array.from(chain), [H1]);
+            });
+        });
+    });
+
     suite('getSelectedMarkdown（選択範囲の生Markdownコピー）', () => {
         /** エディタ全体を選択するRangeを返す */
         function selectAll(): Range {

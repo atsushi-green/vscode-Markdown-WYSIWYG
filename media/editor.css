@@ -200,6 +200,43 @@ body {
     outline: none;
 }
 
+/* 見出しパンくずバー（ツールバー直下・スクロールしても常に表示） */
+.heading-breadcrumb-bar {
+    display: none;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 4px;
+    padding: 4px 12px;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    border-bottom: 1px solid var(--vscode-editorGroup-border);
+}
+
+.heading-breadcrumb-item {
+    padding: 2px 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+/* idを持つ見出し（scrollToAnchorで遷移可能）だけをクリック可能な見た目にする。
+   id無し（execCommandでの見出し化・入力直後の変換など、まだmarkdownToHtmlを
+   通っていない見出し）はクリックしても何も起きないため、ポインタ/ホバーを付けない。 */
+.heading-breadcrumb-item-clickable {
+    cursor: pointer;
+}
+
+.heading-breadcrumb-item-clickable:hover {
+    color: var(--vscode-editor-foreground);
+    background-color: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.heading-breadcrumb-sep {
+    opacity: 0.6;
+}
+
 /* 単語数・文字数ステータスバー（右下に固定表示） */
 .word-count-status {
     position: fixed;
