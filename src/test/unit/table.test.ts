@@ -325,4 +325,190 @@ suite('TableModule', () => {
             assert.strictEqual(table!.querySelectorAll('thead th').length, 2);
         });
     });
+
+    suite('computeMenuPosition', () => {
+        test('ビューポート内ならクリック座標をそのまま使う', () => {
+            const pos = env.table.computeMenuPosition(100, 120, 180, 40, 1024, 768);
+            assert.strictEqual(pos.left, 100);
+            assert.strictEqual(pos.top, 120);
+        });
+
+        test('右端・下端からはみ出すなら内側へ寄せる', () => {
+            const pos = env.table.computeMenuPosition(1000, 760, 180, 40, 1024, 768);
+            assert.strictEqual(pos.left, 1024 - 180 - 10);
+            assert.strictEqual(pos.top, 768 - 40 - 10);
+        });
+
+        test('メニューがビューポートより大きくても負にはしない', () => {
+            const pos = env.table.computeMenuPosition(5, 5, 2000, 2000, 1024, 768);
+            assert.strictEqual(pos.left, 0);
+            assert.strictEqual(pos.top, 0);
+        });
+    });
+
+    suite('clampTableDimensions', () => {
+        test('正常な文字列/数値は整数化してそのまま返す', () => {
+            assert.deepStrictEqual(
+                { ...env.table.clampTableDimensions('4', '5') }, { rows: 4, cols: 5 }
+            );
+            assert.deepStrictEqual(
+                { ...env.table.clampTableDimensions(2, 3) }, { rows: 2, cols: 3 }
+            );
+        });
+
+        test('空・非数値・0以下は1へ丸める', () => {
+            assert.deepStrictEqual({ ...env.table.clampTableDimensions('', 'x') }, { rows: 1, cols: 1 });
+            assert.deepStrictEqual({ ...env.table.clampTableDimensions('0', '-3') }, { rows: 1, cols: 1 });
+        });
+
+        test('上限（行50・列20）を超える値は上限へ丸める', () => {
+            assert.deepStrictEqual(
+                { ...env.table.clampTableDimensions('999', '999') }, { rows: 50, cols: 20 }
+            );
+        });
+    });
+
+    suite('findExcludedAncestor', () => {
+        test('数式・Mermaid・テーブル上は該当要素を返す（挿入メニュー非表示）', () => {
+            env.editor.innerHTML =
+                '<div class="math-block"><span>x</span></div>' +
+                '<div class="table-container"><table><tbody><tr><td>a</td></tr></tbody></table></div>';
+            const mathSpan = env.editor.querySelector('.math-block span')!;
+            const td = env.editor.querySelector('td')!;
+            assert.ok(env.table.findExcludedAncestor(mathSpan, env.editor));
+            assert.ok(env.table.findExcludedAncestor(td, env.editor));
+        });
+
+        test('平文段落上では null（＝除外対象ではない）', () => {
+            env.editor.innerHTML = '<p>ただの本文</p>';
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.table.findExcludedAncestor(p.firstChild, env.editor), null);
+        });
+    });
+
+    suite('isBlockEmpty', () => {
+        test('空・<br>のみのブロックは空と判定', () => {
+            const holder = env.document.createElement('div');
+            holder.innerHTML = '<p></p><p><br></p><p>   </p>';
+            const ps = holder.querySelectorAll('p');
+            ps.forEach((p) => assert.strictEqual(env.table.isBlockEmpty(p), true, p.outerHTML));
+        });
+
+        test('テキストや<br>以外の要素を含むブロックは空でない', () => {
+            const holder = env.document.createElement('div');
+            holder.innerHTML = '<p>あ</p><p><img src="x"></p>';
+            const ps = holder.querySelectorAll('p');
+            assert.strictEqual(env.table.isBlockEmpty(ps[0]), false);
+            assert.strictEqual(env.table.isBlockEmpty(ps[1]), false);
+        });
+    });
+
+    suite('shouldShowInsertMenu', () => {
+        test('空行・エディタ余白では true', () => {
+            env.editor.innerHTML = '<p><br></p>';
+            const emptyP = env.editor.querySelector('p')!;
+            assert.strictEqual(env.table.shouldShowInsertMenu(emptyP, env.editor), true);
+            assert.strictEqual(env.table.shouldShowInsertMenu(env.editor, env.editor), true);
+        });
+
+        test('本文テキスト上では false（ブラウザ既定メニューを尊重）', () => {
+            env.editor.innerHTML = '<p>本文あり</p>';
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.table.shouldShowInsertMenu(p.firstChild, env.editor), false);
+        });
+
+        test('数式・テーブル上では false', () => {
+            env.editor.innerHTML =
+                '<div class="math-block"><span>x</span></div>' +
+                '<div class="table-container"><table><tbody><tr><td>a</td></tr></tbody></table></div>';
+            assert.strictEqual(
+                env.table.shouldShowInsertMenu(env.editor.querySelector('.math-block span'), env.editor),
+                false
+            );
+            assert.strictEqual(
+                env.table.shouldShowInsertMenu(env.editor.querySelector('td'), env.editor),
+                false
+            );
+        });
+    });
+
+    suite('setupContextMenu と挿入ダイアログ', () => {
+        function dispatchContextMenu(target: Element, clientX = 40, clientY = 40) {
+            const ev = new env.window.MouseEvent('contextmenu', {
+                bubbles: true, cancelable: true, clientX, clientY
+            });
+            target.dispatchEvent(ev);
+            return ev;
+        }
+
+        test('空行の右クリックでメニューを表示し既定メニューを抑止する', () => {
+            env.table.setupContextMenu(env.editor);
+            env.editor.innerHTML = '<p><br></p>';
+            const emptyP = env.editor.querySelector('p')!;
+
+            const ev = dispatchContextMenu(emptyP);
+            assert.strictEqual(ev.defaultPrevented, true);
+            const menu = env.document.getElementById('tableContextMenu')!;
+            assert.strictEqual(menu.style.display, 'block');
+        });
+
+        test('本文テキスト上の右クリックではメニューを出さず既定に任せる（回帰防止）', () => {
+            env.table.setupContextMenu(env.editor);
+            env.editor.innerHTML = '<p>本文あり</p>';
+            const p = env.editor.querySelector('p')!;
+
+            const ev = dispatchContextMenu(p.firstChild as unknown as Element);
+            assert.strictEqual(ev.defaultPrevented, false, 'native menu preserved on text');
+            const menu = env.document.getElementById('tableContextMenu');
+            assert.ok(!menu || menu.style.display === 'none');
+        });
+
+        test('テーブル上の右クリックではメニューを出さず既定に任せる', () => {
+            env.table.setupContextMenu(env.editor);
+            env.editor.innerHTML =
+                '<div class="table-container"><table><tbody><tr><td>a</td></tr></tbody></table></div>';
+            const td = env.editor.querySelector('td')!;
+
+            const ev = dispatchContextMenu(td);
+            assert.strictEqual(ev.defaultPrevented, false);
+            const menu = env.document.getElementById('tableContextMenu');
+            // メニューは未生成 or 非表示
+            assert.ok(!menu || menu.style.display === 'none');
+        });
+
+        test('メニュー項目クリックで行数・列数ダイアログが開く', () => {
+            env.table.setupContextMenu(env.editor);
+            env.editor.innerHTML = '<p><br></p>';
+            dispatchContextMenu(env.editor.querySelector('p')!);
+
+            const item = env.document.querySelector(
+                '.table-menu-item[data-action="insertTable"]'
+            ) as HTMLElement;
+            assert.ok(item);
+            item.click();
+
+            const dialog = env.document.getElementById('tableInsertDialog')!;
+            assert.notStrictEqual(dialog.style.display, 'none');
+            assert.strictEqual(env.document.getElementById('tableContextMenu')!.style.display, 'none');
+        });
+
+        test('ダイアログでOKを押すと指定サイズの表を挿入する', () => {
+            env.table.setupContextMenu(env.editor);
+            env.editor.innerHTML = '<p>本文</p>';
+            env.table.showInsertDialog();
+
+            const dialog = env.document.getElementById('tableInsertDialog')!;
+            const inputs = dialog.querySelectorAll('input');
+            (inputs[0] as HTMLInputElement).value = '3'; // 行数
+            (inputs[1] as HTMLInputElement).value = '4'; // 列数
+            const ok = dialog.querySelector('.link-dialog-btn-primary') as HTMLElement;
+            ok.click();
+
+            const table = env.editor.querySelector('.table-container table')!;
+            assert.ok(table, env.editor.innerHTML);
+            assert.strictEqual(table.querySelectorAll('thead th').length, 4);
+            assert.strictEqual(table.querySelectorAll('tbody tr').length, 3);
+            assert.strictEqual(dialog.style.display, 'none', 'dialog closes after insert');
+        });
+    });
 });

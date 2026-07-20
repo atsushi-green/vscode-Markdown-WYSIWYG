@@ -788,6 +788,11 @@ body.vscode-dark #editor strong {
     border-color: var(--vscode-focusBorder, #007fd4);
 }
 
+/* 表の挿入ダイアログの行数・列数（数値）入力は幅を詰める */
+.table-insert-input {
+    width: 80px;
+}
+
 .link-dialog-actions {
     display: flex;
     align-items: center;
@@ -1097,7 +1102,8 @@ body.vscode-dark #editor strong {
 
 /* Mermaid／数式ブロックのコンテキストメニュー（見た目を共有） */
 .mermaid-context-menu,
-.math-context-menu {
+.math-context-menu,
+.table-context-menu {
     position: fixed;
     z-index: 10000;
     background-color: var(--vscode-menu-background, #252526);
@@ -1109,7 +1115,8 @@ body.vscode-dark #editor strong {
 }
 
 .mermaid-menu-item,
-.math-menu-item {
+.math-menu-item,
+.table-menu-item {
     padding: 8px 16px;
     cursor: pointer;
     font-size: 13px;
@@ -1118,7 +1125,8 @@ body.vscode-dark #editor strong {
 }
 
 .mermaid-menu-item:hover,
-.math-menu-item:hover {
+.math-menu-item:hover,
+.table-menu-item:hover {
     background-color: var(--vscode-menu-selectionBackground, #04395e);
     color: var(--vscode-menu-selectionForeground, #ffffff);
 }

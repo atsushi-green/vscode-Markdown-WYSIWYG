@@ -303,6 +303,10 @@
         // ブロック数式の右クリックメニュー（PNGコピー）
         mathModule.setupContextMenu(state.editor);
 
+        // 平文領域の右クリックメニュー（表を挿入…）。数式より後に配線し、
+        // 数式ブロック上の右クリックは数式メニューを優先する（対象が排他）。
+        tableModule.setupContextMenu(state.editor);
+
         // コードブロック言語セレクタのイベント
         commands.setupCodeLangEvents();
 

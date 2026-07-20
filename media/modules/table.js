@@ -593,6 +593,356 @@ window.TableModule = (function() {
         state.editor.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
+    // ---- 表の挿入UI（右クリックメニュー＋行数・列数ダイアログ）----
+    // markdownEditor.ts のHTMLには持たせず、初回に動的生成して body へ挿す
+    // （math.js のPNGコピーメニューと同じ方針。拡張機能側HTMLを触らずUIを足す）。
+    let insertMenuEl = null;
+    let insertDialogEl = null;
+    // ダイアログ確定時に表を挿す位置。右クリック時のキャレット範囲を退避しておく
+    // （ダイアログ入力へフォーカスが移るとエディタの選択が失われるため）。
+    let pendingInsertRange = null;
+
+    // 挿入メニューを出さない「特別な」ブロック（数式・Mermaid・既存テーブル）。
+    // これらの上での右クリックはそれぞれの担当（数式メニュー／Mermaidメニュー／
+    // ブラウザ既定のセル操作）に委ね、「表を挿入」は平文領域だけで出す。
+    const EXCLUDED_SELECTORS = [
+        '.math-block', '.math-inline',
+        '.mermaid-container', '.mermaid-preview-panel', 'pre.mermaid-source',
+        'table', '.table-container'
+    ];
+
+    // 行数・列数の上限（極端な値での重い挿入・誤操作を防ぐ）。
+    const MAX_ROWS = 50;
+    const MAX_COLS = 20;
+
+    /**
+     * 右クリック対象から祖先を辿り、`EXCLUDED_SELECTORS` に一致する要素があれば返す。
+     * root（＝エディタ）に達するまでに見つからなければ null＝平文領域とみなす（純粋関数）。
+     */
+    function findExcludedAncestor(target, root) {
+        let node = target;
+        while (node && node !== root) {
+            if (node.nodeType === 1 && typeof node.matches === 'function') {
+                for (let i = 0; i < EXCLUDED_SELECTORS.length; i++) {
+                    if (node.matches(EXCLUDED_SELECTORS[i])) {
+                        return node;
+                    }
+                }
+            }
+            node = node.parentNode;
+        }
+        return null;
+    }
+
+    /**
+     * ブロックが「空」＝表を挿しても本文を壊さない場所か判定する純粋関数。
+     * テキストが無く（空白・ゼロ幅のみ）、`<br>` 以外の要素（画像・数式など）も
+     * 含まないブロックを空とみなす。
+     */
+    function isBlockEmpty(block) {
+        if (!block) {
+            return false;
+        }
+        const text = (block.textContent || '').replace(/\u200B/g, '').trim();
+        if (text !== '') {
+            return false;
+        }
+        return !Array.prototype.some.call(block.children || [], function(c) {
+            return c.tagName !== 'BR';
+        });
+    }
+
+    /**
+     * 右クリック対象が「表を挿入」メニューを出してよい場所か判定する純粋関数。
+     * 本文テキスト上ではブラウザ既定メニュー（貼り付け・スペル修正等）を尊重し、
+     * **空行・エディタ余白**（＝ROADMAPの「エディタ空欄で右クリック」）でのみ true。
+     * 数式・Mermaid・既存テーブル上は対象外（false）。
+     */
+    function shouldShowInsertMenu(target, editor) {
+        if (!target || !editor) {
+            return false;
+        }
+        if (findExcludedAncestor(target, editor)) {
+            return false;
+        }
+        if (target === editor) {
+            return true; // エディタ直下の余白
+        }
+        const block = utils.findBlockAncestor(target);
+        if (!block) {
+            return true; // ブロック外（エディタ直下のテキストノード等）
+        }
+        return isBlockEmpty(block);
+    }
+
+    /**
+     * 右クリック位置からメニュー表示位置を決める純粋関数。
+     * ビューポート右端・下端からはみ出す場合は内側へ寄せる（math.js と同じ調整）。
+     */
+    function computeMenuPosition(clientX, clientY, menuWidth, menuHeight, viewportWidth, viewportHeight) {
+        let left = clientX;
+        let top = clientY;
+        if (left + menuWidth > viewportWidth) {
+            left = Math.max(0, viewportWidth - menuWidth - 10);
+        }
+        if (top + menuHeight > viewportHeight) {
+            top = Math.max(0, viewportHeight - menuHeight - 10);
+        }
+        return { left: left, top: top };
+    }
+
+    /**
+     * ダイアログの行数・列数入力（文字列でも数値でも可）を、1以上・上限以下の
+     * 整数へ正規化する純粋関数。空・非数値・0以下は既定値へ丸める。
+     * @returns {{rows:number, cols:number}}
+     */
+    function clampTableDimensions(rowsInput, colsInput) {
+        const toInt = (v, fallback, max) => {
+            const n = parseInt(v, 10);
+            if (!isFinite(n) || n < 1) {
+                return fallback;
+            }
+            return Math.min(n, max);
+        };
+        return {
+            rows: toInt(rowsInput, 1, MAX_ROWS),
+            cols: toInt(colsInput, 1, MAX_COLS)
+        };
+    }
+
+    /**
+     * 挿入メニュー（無ければ生成）を返す。見た目は mermaid/数式メニューと共有
+     * （editor.css の `.table-context-menu`/`.table-menu-item` は同ルールを参照）。
+     */
+    function ensureInsertMenu() {
+        if (insertMenuEl && document.body.contains(insertMenuEl)) {
+            return insertMenuEl;
+        }
+        const menu = document.createElement('div');
+        menu.id = 'tableContextMenu';
+        menu.className = 'table-context-menu';
+        menu.style.display = 'none';
+        menu.style.position = 'fixed';
+
+        const item = document.createElement('div');
+        item.className = 'table-menu-item';
+        item.setAttribute('data-action', 'insertTable');
+        item.textContent = '➕ 表を挿入…';
+        item.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            hideInsertMenu();
+            showInsertDialog();
+        });
+        menu.appendChild(item);
+
+        document.body.appendChild(menu);
+        insertMenuEl = menu;
+        return menu;
+    }
+
+    /**
+     * 指定座標へ挿入メニューを表示する。
+     */
+    function showInsertMenu(clientX, clientY) {
+        const menu = ensureInsertMenu();
+        menu.style.display = 'block';
+        const rect = menu.getBoundingClientRect();
+        const pos = computeMenuPosition(
+            clientX, clientY, rect.width, rect.height,
+            window.innerWidth, window.innerHeight
+        );
+        menu.style.left = pos.left + 'px';
+        menu.style.top = pos.top + 'px';
+    }
+
+    /**
+     * 挿入メニューを閉じる。
+     */
+    function hideInsertMenu() {
+        if (insertMenuEl) {
+            insertMenuEl.style.display = 'none';
+        }
+    }
+
+    /**
+     * 行数・列数ダイアログ（無ければ生成）を返す。Webviewでは `prompt()` が使えないため
+     * `#linkDialog` と同じ `.link-dialog` 系スタイルで自前に組み立てる。
+     */
+    function ensureInsertDialog() {
+        if (insertDialogEl && document.body.contains(insertDialogEl)) {
+            return insertDialogEl;
+        }
+        const dialog = document.createElement('div');
+        dialog.id = 'tableInsertDialog';
+        dialog.className = 'link-dialog table-insert-dialog';
+        dialog.style.display = 'none';
+
+        const title = document.createElement('div');
+        title.className = 'link-dialog-title';
+        title.textContent = '表の挿入';
+        dialog.appendChild(title);
+
+        const makeField = (labelText, value) => {
+            const field = document.createElement('label');
+            field.className = 'link-dialog-field';
+            const label = document.createElement('span');
+            label.className = 'link-dialog-label';
+            label.textContent = labelText;
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.className = 'link-dialog-input table-insert-input';
+            input.min = '1';
+            input.value = String(value);
+            field.appendChild(label);
+            field.appendChild(input);
+            return { field: field, input: input };
+        };
+
+        const rowsField = makeField('行数', 2);
+        const colsField = makeField('列数', 3);
+        dialog.appendChild(rowsField.field);
+        dialog.appendChild(colsField.field);
+
+        const actions = document.createElement('div');
+        actions.className = 'link-dialog-actions';
+        const spacer = document.createElement('span');
+        spacer.className = 'link-dialog-spacer';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'link-dialog-btn';
+        cancelBtn.title = 'キャンセル (Escape)';
+        cancelBtn.textContent = 'キャンセル';
+        const okBtn = document.createElement('button');
+        okBtn.className = 'link-dialog-btn link-dialog-btn-primary';
+        okBtn.title = '挿入 (Enter)';
+        okBtn.textContent = 'OK';
+        actions.appendChild(spacer);
+        actions.appendChild(cancelBtn);
+        actions.appendChild(okBtn);
+        dialog.appendChild(actions);
+
+        // 参照を保持（表示時のフォーカス・確定時の値読み取り用）
+        dialog._rowsInput = rowsField.input;
+        dialog._colsInput = colsField.input;
+
+        const confirm = () => {
+            const dims = clampTableDimensions(rowsField.input.value, colsField.input.value);
+            hideInsertDialog();
+            restorePendingSelection();
+            // 復元した範囲は使い切ったのでクリア（次回の古い範囲の誤用を防ぐ）
+            pendingInsertRange = null;
+            insertTable(dims.rows, dims.cols);
+        };
+
+        okBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            confirm();
+        });
+        cancelBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            hideInsertDialog();
+        });
+        // Enterで確定・Escapeでキャンセル（数値入力内から）。
+        // ただしキャンセルボタン上でのEnterはキャンセルとして扱う。
+        dialog.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (e.target === cancelBtn) {
+                    hideInsertDialog();
+                } else {
+                    confirm();
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                hideInsertDialog();
+            }
+        });
+
+        document.body.appendChild(dialog);
+        insertDialogEl = dialog;
+        return dialog;
+    }
+
+    /**
+     * 行数・列数ダイアログを表示し、行数入力へフォーカスする。
+     */
+    function showInsertDialog() {
+        const dialog = ensureInsertDialog();
+        dialog.style.display = '';
+        if (dialog._rowsInput) {
+            dialog._rowsInput.focus();
+            if (typeof dialog._rowsInput.select === 'function') {
+                dialog._rowsInput.select();
+            }
+        }
+    }
+
+    /**
+     * 行数・列数ダイアログを閉じる。
+     */
+    function hideInsertDialog() {
+        if (insertDialogEl) {
+            insertDialogEl.style.display = 'none';
+        }
+    }
+
+    /**
+     * 退避しておいた右クリック時のキャレット範囲を選択へ復元する。
+     * insertTable はライブの選択を読むため、ダイアログ操作で失われた選択を
+     * 戻してから挿入することで、右クリックした位置の直後へ表を入れる。
+     */
+    function restorePendingSelection() {
+        if (!pendingInsertRange) {
+            return;
+        }
+        const selection = window.getSelection();
+        if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(pendingInsertRange);
+        }
+    }
+
+    /**
+     * エディタへ「表を挿入」右クリックメニューを配線する（editor.js の初期化から一度だけ）。
+     * 対象が平文領域（数式・Mermaid・既存テーブル以外）のときだけ既定メニューを抑止して
+     * 自前メニューを出す。数式/Mermaid のメニューとは対象が排他なので競合しない。
+     */
+    function setupContextMenu(editor) {
+        if (!editor) {
+            return;
+        }
+        ensureInsertMenu();
+
+        editor.addEventListener('contextmenu', function(e) {
+            // 数式など他ハンドラが既に処理済みなら何もしない
+            if (e.defaultPrevented) {
+                return;
+            }
+            // 空行・エディタ余白でのみ出す。本文テキスト・特別ブロック上では
+            // ブラウザ既定メニュー（貼り付け・スペル修正等）を尊重する。
+            if (!shouldShowInsertMenu(e.target, editor)) {
+                return;
+            }
+            e.preventDefault();
+            // 右クリック位置のキャレット範囲を退避（挿入位置に使う）
+            pendingInsertRange = null;
+            if (typeof document.caretRangeFromPoint === 'function') {
+                const r = document.caretRangeFromPoint(e.clientX, e.clientY);
+                if (r && editor.contains(r.startContainer)) {
+                    pendingInsertRange = r.cloneRange();
+                }
+            }
+            showInsertMenu(e.clientX, e.clientY);
+        });
+
+        // メニュー外クリックで閉じる
+        document.addEventListener('click', function(e) {
+            if (insertMenuEl && !insertMenuEl.contains(e.target)) {
+                hideInsertMenu();
+            }
+        });
+    }
+
     /**
      * テーブルをクリーンアップ
      */
@@ -628,6 +978,14 @@ window.TableModule = (function() {
         cleanup: cleanup,
         updateDocument: updateDocument,
         buildEmptyTableMarkdown: buildEmptyTableMarkdown,
-        insertTable: insertTable
+        insertTable: insertTable,
+        setupContextMenu: setupContextMenu,
+        showInsertDialog: showInsertDialog,
+        hideInsertDialog: hideInsertDialog,
+        findExcludedAncestor: findExcludedAncestor,
+        isBlockEmpty: isBlockEmpty,
+        shouldShowInsertMenu: shouldShowInsertMenu,
+        computeMenuPosition: computeMenuPosition,
+        clampTableDimensions: clampTableDimensions
     };
 })();
