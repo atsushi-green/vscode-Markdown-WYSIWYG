@@ -221,3 +221,69 @@ suite('MarkdownEditorProvider.updateTextDocument（Webviewからの書き戻し�
         assert.strictEqual(document.getText(), 'a\r\nCHANGED\r\nb\r\n');
     });
 });
+
+suite('MarkdownEditorProvider.saveClipboardImage（クリップボード画像の保存）', () => {
+    let provider: MarkdownEditorProvider;
+
+    suiteSetup(() => {
+        // saveClipboardImage は context を使用しないためダミーで生成できる
+        provider = new MarkdownEditorProvider({} as vscode.ExtensionContext);
+    });
+
+    suiteTeardown(async () => {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    });
+
+    // 1x1 の透明PNG（base64・data URLプレフィックスなし）
+    const PNG_1PX =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk' +
+        'YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+    async function saveImage(
+        document: vscode.TextDocument, base64: string, mime: string
+    ): Promise<string | undefined> {
+        return (provider as any).saveClipboardImage(document, base64, mime);
+    }
+
+    test('画像をドキュメント隣へ書き込み、相対パスを返す', async () => {
+        const uri = createTempMarkdown('# 画像テスト\n');
+        const document = await vscode.workspace.openTextDocument(uri);
+
+        const rel = await saveImage(document, PNG_1PX, 'image/png');
+
+        assert.ok(rel, '相対パスが返る');
+        assert.ok(/^image-\d{8}-\d{6}\.png$/.test(rel!), `想定の命名: ${rel}`);
+        // 実ファイルが同フォルダに書かれている
+        const written = path.join(path.dirname(uri.fsPath), rel!);
+        assert.ok(fs.existsSync(written), `ファイルが存在: ${written}`);
+        // 中身は非空（1x1 PNG）
+        assert.ok(fs.statSync(written).size > 0);
+    });
+
+    test('2回連続保存で互いに別名の2ファイルが残る（上書きしない）', async () => {
+        // 同一秒内なら基準名が衝突し disambiguateFilename の -1 分岐で、
+        // 秒をまたげばタイムスタンプ差で、いずれにせよ別名になる。
+        // -1 サフィックス生成そのものは imagePaste.test.ts で決定的に検証済み。
+        const uri = createTempMarkdown('# 画像テスト2\n');
+        const document = await vscode.workspace.openTextDocument(uri);
+        const dir = path.dirname(uri.fsPath);
+
+        const rel1 = await saveImage(document, PNG_1PX, 'image/png');
+        const rel2 = await saveImage(document, PNG_1PX, 'image/png');
+
+        assert.ok(rel1 && rel2);
+        assert.notStrictEqual(rel1, rel2, '2回目は別名になり上書きしない');
+        assert.ok(fs.existsSync(path.join(dir, rel1!)));
+        assert.ok(fs.existsSync(path.join(dir, rel2!)));
+    });
+
+    test('未保存（untitled）ドキュメントでは保存せず undefined を返す', async () => {
+        const document = await vscode.workspace.openTextDocument({
+            language: 'markdown',
+            content: '# untitled\n'
+        });
+
+        const rel = await saveImage(document, PNG_1PX, 'image/png');
+        assert.strictEqual(rel, undefined);
+    });
+});

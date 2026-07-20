@@ -1,5 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import {
+    mimeToExtension,
+    buildImageFilename,
+    disambiguateFilename,
+    toMarkdownRelativePath
+} from './imagePaste';
 
 /**
  * Markdown WYSIWYG エディタプロバイダー
@@ -102,6 +108,18 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 case 'saveMermaidPng':
                     await this.saveMermaidPng(e.pngBase64, e.filename);
                     return;
+                case 'saveClipboardImage': {
+                    // クリップボードから貼り付けた画像をドキュメント隣へ保存し、
+                    // 挿入用の相対パスを Webview へ返す（挿入は Webview 側が行う）。
+                    const relPath = await this.saveClipboardImage(document, e.base64, e.mime);
+                    if (relPath) {
+                        webviewPanel.webview.postMessage({
+                            type: 'insertImagePath',
+                            path: relPath
+                        });
+                    }
+                    return;
+                }
                 case 'openLink':
                     await this.openLink(e.href);
                     return;
@@ -402,6 +420,63 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             vscode.window.showInformationMessage(`✅ Mermaid図を保存しました: ${uri.fsPath}`);
         } catch (error) {
             vscode.window.showErrorMessage(`❌ Mermaid図の保存に失敗しました: ${error}`);
+        }
+    }
+
+    /**
+     * クリップボードから貼り付けた画像を、編集中のドキュメントと同じフォルダへ
+     * 一意なファイル名（`image-<日時>.<ext>`・衝突時は `-1`,`-2`…）で保存し、
+     * 挿入用の相対パス（POSIX区切り）を返す。保存先が決まらない・失敗した場合は
+     * `undefined` を返す（呼び出し側は挿入を行わない）。
+     *
+     * @param document 編集中のドキュメント（保存先フォルダの基準）
+     * @param base64   画像データ（base64・data URLプレフィックスは含まない想定）
+     * @param mime     画像のMIMEタイプ（例: `image/png`）
+     * @returns 挿入用の相対パス、または `undefined`
+     */
+    private async saveClipboardImage(
+        document: vscode.TextDocument,
+        base64: string,
+        mime: string
+    ): Promise<string | undefined> {
+        // 未保存（untitled）だと保存先フォルダが定まらないため案内して中断する
+        if (document.isUntitled || document.uri.scheme !== 'file') {
+            vscode.window.showWarningMessage(
+                '画像を貼り付けるには、先にMarkdownファイルを保存してください。'
+            );
+            return undefined;
+        }
+        if (!base64) {
+            return undefined;
+        }
+        try {
+            const ext = mimeToExtension(mime);
+            const dirUri = vscode.Uri.joinPath(document.uri, '..');
+
+            // 同フォルダの既存ファイル名を集めて衝突を避ける
+            let existing: string[] = [];
+            try {
+                const entries = await vscode.workspace.fs.readDirectory(dirUri);
+                existing = entries.map(([name]) => name);
+            } catch {
+                // ディレクトリが読めない場合は衝突チェックなしで続行
+            }
+
+            const filename = disambiguateFilename(buildImageFilename(new Date(), ext), existing);
+            const targetUri = vscode.Uri.joinPath(dirUri, filename);
+
+            // Base64をバイナリへ（saveMermaidPng と同じ方式）
+            const binaryString = atob(base64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            await vscode.workspace.fs.writeFile(targetUri, bytes);
+            return toMarkdownRelativePath(path.dirname(document.uri.fsPath), targetUri.fsPath);
+        } catch (error) {
+            vscode.window.showErrorMessage(`❌ 画像の保存に失敗しました: ${error}`);
+            return undefined;
         }
     }
 }
