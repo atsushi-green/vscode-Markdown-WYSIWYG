@@ -27,6 +27,9 @@
     // 単語数・文字数ステータスバー要素（初期化時に生成）
     let wordCountStatusEl = null;
 
+    // クリップボード画像貼り付け時のキャレット範囲（保存応答 insertImagePath まで保持）
+    let pendingImagePasteRange = null;
+
     /**
      * 単語数・文字数ステータスバーを生成する（一度だけ）
      */
@@ -477,8 +480,43 @@
             if (state.isRawMode || isFormFieldFocused() || !event.clipboardData) {
                 return;
             }
+
             const text = event.clipboardData.getData('text/plain');
-            if (!text || !commands.handleMarkdownPaste(text)) {
+
+            // テキストを持たないクリップボード（スクリーンショット等の純粋な画像）だけを
+            // 画像貼り付けとして扱い、拡張機能側へ保存を依頼して相対パスを ![](…) で挿入する。
+            // Excel等のように**テキスト（TSV/表）と画像を併載**するクリップボードは、
+            // 従来どおりテキスト（表）貼り付けを優先する（画像で上書きしない）。
+            if (!text) {
+                const imageItem = commands.findClipboardImageItem(event.clipboardData.items);
+                const file = imageItem && imageItem.getAsFile && imageItem.getAsFile();
+                if (file) {
+                    event.preventDefault();
+                    // 非同期の保存応答（insertImagePath）まで挿入位置を保持する
+                    const selection = window.getSelection();
+                    pendingImagePasteRange =
+                        (selection && selection.rangeCount > 0 &&
+                            state.editor.contains(selection.getRangeAt(0).startContainer))
+                            ? selection.getRangeAt(0).cloneRange()
+                            : null;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const result = String(reader.result || '');
+                        const base64 = result.indexOf(',') >= 0 ? result.split(',')[1] : '';
+                        if (base64) {
+                            state.vscode.postMessage({
+                                type: 'saveClipboardImage',
+                                base64: base64,
+                                mime: file.type || 'image/png'
+                            });
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                }
+                return;
+            }
+
+            if (!commands.handleMarkdownPaste(text)) {
                 return;
             }
             event.preventDefault();
@@ -577,8 +615,35 @@
                 case 'update':
                     handleUpdateMessage(message);
                     break;
+                case 'insertImagePath':
+                    handleInsertImagePath(message);
+                    break;
             }
         });
+    }
+
+    /**
+     * 拡張機能側が保存した画像の相対パスを受け取り、貼り付け時のキャレット位置へ
+     * `![](path)` を挿入する（クリップボード画像貼り付けの受け取り側・2/2）。
+     */
+    function handleInsertImagePath(message) {
+        if (!message || !message.path) {
+            return;
+        }
+        // 貼り付け時に控えたキャレット範囲を復元してから挿入する
+        // （非同期応答の間にフォーカス・選択が変わっている可能性に備える）。
+        // 保存先が untitled 等で応答が来ないケースの取りこぼしに備え、範囲が今も
+        // エディタ内に生きているときだけ復元する（古い範囲の誤復元を避ける）。
+        const range = pendingImagePasteRange;
+        pendingImagePasteRange = null;
+        if (range && state.editor.contains(range.startContainer)) {
+            const selection = window.getSelection();
+            if (selection) {
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        }
+        commands.insertImageMarkdown(message.path);
     }
 
     /**

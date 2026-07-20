@@ -621,6 +621,79 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 相対パスから画像のMarkdown記法 `![](path)` を組み立てる純粋関数。
+     * alt は空（貼り付け画像に説明は無いため）。URLとして壊れないよう、パス中の
+     * 半角スペースは `%20` へ、丸括弧は `%28`/`%29` へエンコードする。
+     * @param {string} relPath 画像への相対パス（POSIX区切り）
+     * @returns {string} `![](encoded)`
+     */
+    function buildImageMarkdown(relPath) {
+        const encoded = String(relPath || '')
+            .replace(/ /g, '%20')
+            .replace(/\(/g, '%28')
+            .replace(/\)/g, '%29');
+        return '![](' + encoded + ')';
+    }
+
+    /**
+     * クリップボードの items（`DataTransferItemList` 相当）から最初の画像アイテムを返す
+     * 純粋関数。`type` が `image/` で始まるものを探す。無ければ null。
+     * @param {ArrayLike<{kind?:string,type?:string}>} items
+     * @returns {any|null}
+     */
+    function findClipboardImageItem(items) {
+        if (!items) {
+            return null;
+        }
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            if (it && typeof it.type === 'string' && it.type.indexOf('image/') === 0) {
+                return it;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 画像の相対パスから `![](path)` を組み立て、現在のキャレット位置へテキストとして
+     * 挿入する（クリップボード画像貼り付けの受け取り側）。選択がエディタ外／無い場合は
+     * エディタ末尾へフォールバックする。挿入後に input を発火して文書へ反映する。
+     *
+     * 画像記法は現状レンダリング対象外のため、テキストノードとして入りソースには
+     * `![](path)` がそのまま残る（直列化は `$` のみエスケープ＝往復不変）。
+     * @param {string} relPath 画像への相対パス
+     * @returns {boolean} 挿入したら true
+     */
+    function insertImageMarkdown(relPath) {
+        if (!relPath) {
+            return false;
+        }
+        const md = buildImageMarkdown(relPath);
+        const selection = window.getSelection();
+        let range = null;
+        if (selection && selection.rangeCount > 0 &&
+            state.editor.contains(selection.getRangeAt(0).startContainer)) {
+            range = selection.getRangeAt(0);
+        } else {
+            range = document.createRange();
+            range.selectNodeContents(state.editor);
+            range.collapse(false);
+        }
+        range.deleteContents();
+        const textNode = document.createTextNode(md);
+        range.insertNode(textNode);
+        // キャレットを挿入テキストの直後へ移す
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    }
+
+    /**
      * 見出しのフォーマット
      */
     function formatHeading(level) {
@@ -2476,6 +2549,9 @@ window.CommandsModule = (function() {
         insertCodeBlock: insertCodeBlock,
         insertBlockquote: insertBlockquote,
         insertToc: insertToc,
+        buildImageMarkdown: buildImageMarkdown,
+        findClipboardImageItem: findClipboardImageItem,
+        insertImageMarkdown: insertImageMarkdown,
         scrollToAnchor: scrollToAnchor,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,
