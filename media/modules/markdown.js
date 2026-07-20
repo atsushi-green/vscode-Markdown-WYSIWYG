@@ -1172,10 +1172,59 @@ window.MarkdownModule = (function() {
         return map;
     }
 
+    /**
+     * `<img src>` がローカル相対パス（webview のベースURIで解決すべきもの）か判定する
+     * 純粋関数。スキーム付きURL（`http:`/`https:`/`data:`/`blob:`/`vscode-webview:` 等）・
+     * プロトコル相対（`//host`）・ルート絶対（`/foo`）は解決しない（false）。
+     * 解決済み（asWebviewUri でスキームが付いた）srcも scheme 判定で false になる。
+     * @param {string} src
+     * @returns {boolean}
+     */
+    function isResolvableRelativeImageSrc(src) {
+        if (!src || typeof src !== 'string') {
+            return false;
+        }
+        if (/^[a-z][a-z0-9+.-]*:/i.test(src)) {
+            return false; // scheme: 付き（http:/data:/vscode-webview: など）
+        }
+        if (src.indexOf('//') === 0) {
+            return false; // プロトコル相対 //host/…
+        }
+        if (src.indexOf('/') === 0) {
+            return false; // ルート絶対 /foo（基準が曖昧なので触らない）
+        }
+        return true;
+    }
+
+    /**
+     * ローカル相対パスの画像srcを、webview のベースURI（ドキュメントフォルダの
+     * webview URI）と結合して解決する純粋関数。先頭の `./` は除去する。
+     * `../` を含む相対はブラウザのURL正規化に委ねる（文字列結合のみ）。
+     * @param {string} baseUri 末尾スラッシュ有無を問わないベースURI
+     * @param {string} src 相対パス
+     * @returns {string} 解決後のURL（baseUri が空なら src のまま）
+     */
+    function resolveImageSrc(baseUri, src) {
+        if (!baseUri) {
+            return src;
+        }
+        const base = String(baseUri).replace(/\/+$/, '');
+        // 先頭 ./ を除去し、URLとして誤解釈される `#`（フラグメント）・`?`（クエリ）を
+        // エンコードする。既に %20 等が入っている可能性があるため `%` はエンコードしない
+        // （二重エンコード回避）。
+        const rel = String(src)
+            .replace(/^\.\//, '')
+            .replace(/#/g, '%23')
+            .replace(/\?/g, '%3F');
+        return base + '/' + rel;
+    }
+
     // 公開API
     return {
         markdownToHtml: markdownToHtml,
         htmlToMarkdown: htmlToMarkdown,
+        isResolvableRelativeImageSrc: isResolvableRelativeImageSrc,
+        resolveImageSrc: resolveImageSrc,
         // 生Markdown表示（commands.syncRawMarkdownToCaret）が、任意のインライン要素
         // ⇔ 生Markdown の相互変換に使う。読込時の変換と同じ関数を共有することで、
         // 展開／復帰の結果が通常のレンダリング結果と食い違わないことを保証する。

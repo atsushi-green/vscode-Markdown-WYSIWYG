@@ -47,10 +47,22 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         webviewPanel: vscode.WebviewPanel,
         _token: vscode.CancellationToken
     ): Promise<void> {
+        // ローカル画像（`![](image.png)` の相対パス）を Webview で表示できるよう、
+        // ドキュメントのあるフォルダを localResourceRoots に加え、その webview URI を
+        // ベースとして Webview へ渡す（Webview 側が相対 src をこのベースで解決する）。
+        // file スキーム以外（untitled 等）はフォルダが定まらないため空にする。
+        const localResourceRoots = [this.context.extensionUri];
+        let imageBaseUri = '';
+        if (document.uri.scheme === 'file') {
+            const docDir = vscode.Uri.joinPath(document.uri, '..');
+            localResourceRoots.push(docDir);
+            imageBaseUri = webviewPanel.webview.asWebviewUri(docDir).toString();
+        }
+
         // Webviewのオプション設定
         webviewPanel.webview.options = {
             enableScripts: true,
-            localResourceRoots: [this.context.extensionUri]
+            localResourceRoots: localResourceRoots
         };
 
         // Webviewの初期HTML設定
@@ -68,7 +80,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             webviewPanel.webview.postMessage({
                 type: 'update',
                 content: document.getText(),
-                seq: pendingEchoSeq
+                seq: pendingEchoSeq,
+                imageBaseUri: imageBaseUri
             });
             // seq は一度きり消費する（次に来る外部変更へ持ち越さない）
             pendingEchoSeq = undefined;

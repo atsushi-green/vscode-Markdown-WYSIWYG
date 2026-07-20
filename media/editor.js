@@ -30,6 +30,33 @@
     // クリップボード画像貼り付け時のキャレット範囲（保存応答 insertImagePath まで保持）
     let pendingImagePasteRange = null;
 
+    // ローカル画像表示用のベースURI（ドキュメントフォルダの webview URI）。
+    // 拡張機能が update メッセージで渡す。相対パス `![](img.png)` の src 解決に使う。
+    let imageBaseUri = '';
+
+    /**
+     * エディタ内の `<img>` のうち、ローカル相対パスのものを webview URI へ解決する。
+     * 元パスは `data-original-src` に退避（直列化は serializeInline がこれを優先して
+     * 読むため往復は元の相対パスで保たれる）。解決済み（data-original-src あり）と
+     * スキーム付き/絶対/data: の src はスキップする。baseUri 未設定なら何もしない。
+     */
+    function resolveLocalImages(root) {
+        if (!imageBaseUri || !root) {
+            return;
+        }
+        root.querySelectorAll('img').forEach((img) => {
+            if (img.hasAttribute('data-original-src')) {
+                return;
+            }
+            const src = img.getAttribute('src') || '';
+            if (!markdown.isResolvableRelativeImageSrc(src)) {
+                return;
+            }
+            img.setAttribute('data-original-src', src);
+            img.setAttribute('src', markdown.resolveImageSrc(imageBaseUri, src));
+        });
+    }
+
     /**
      * 単語数・文字数ステータスバーを生成する（一度だけ）
      */
@@ -408,6 +435,9 @@
             // 追加・変更された数式（KaTeX）をレンダリング
             mathModule.render(state.editor);
 
+            // ローカル相対パス画像の src を webview URI へ解決
+            resolveLocalImages(state.editor);
+
             // 単語数・文字数の表示を更新
             updateWordCount();
 
@@ -650,6 +680,12 @@
      * 更新メッセージの処理
      */
     function handleUpdateMessage(message) {
+        // ローカル画像表示用のベースURI（ドキュメントフォルダの webview URI）を取り込む。
+        // ドキュメント単位で不変だが、毎回来ても上書きは無害。
+        if (typeof message.imageBaseUri === 'string') {
+            imageBaseUri = message.imageBaseUri;
+        }
+
         // コードブロック作成中はスキップ
         if (state.isCreatingCodeBlock) {
             return;
@@ -715,6 +751,9 @@
         // テーブルをレンダリング
         tableModule.render();
 
+        // ローカル相対パス画像の src を webview URI へ解決
+        resolveLocalImages(state.editor);
+
         // カーソル位置を復元（Mermaidの非同期描画完了後に行う。描画完了前に復元すると
         // ブロックの高さ・ノード構成が未確定でアンカーがずれ、キャレットが飛ぶため）
         if (savedPosition) {
@@ -772,6 +811,7 @@
             mermaidModule.render();
             mathModule.render(state.editor);
             tableModule.render();
+            resolveLocalImages(state.editor);
             hideRawLineGutter();
             showWysiwygLineGutter();
             state.toggleBtn.classList.remove('active');

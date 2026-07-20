@@ -659,8 +659,9 @@ window.CommandsModule = (function() {
      * 挿入する（クリップボード画像貼り付けの受け取り側）。選択がエディタ外／無い場合は
      * エディタ末尾へフォールバックする。挿入後に input を発火して文書へ反映する。
      *
-     * 画像記法は現状レンダリング対象外のため、テキストノードとして入りソースには
-     * `![](path)` がそのまま残る（直列化は `$` のみエスケープ＝往復不変）。
+     * テキストノードとして挿入するが、直後の input で走るライブ変換
+     * （`convertInlineText`）が `![](path)` を `<img>` に描画する（`convertInline` と同経路）。
+     * ソースには `![](path)` が保たれる（直列化は `serializeInline` の IMG 分岐＝往復不変）。
      * @param {string} relPath 画像への相対パス
      * @returns {boolean} 挿入したら true
      */

@@ -143,6 +143,60 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md.trim(), '![](image-1.png)');
         });
 
+        suite('isResolvableRelativeImageSrc', () => {
+            test('相対パスは true', () => {
+                ['image.png', 'sub/image.png', '../up.png', './here.png'].forEach(s => {
+                    assert.strictEqual(env.markdown.isResolvableRelativeImageSrc(s), true, s);
+                });
+            });
+
+            test('スキーム付き・プロトコル相対・ルート絶対・空は false', () => {
+                [
+                    'http://h/x.png', 'https://h/x.png', 'data:image/png;base64,AAAA',
+                    'blob:abc', 'vscode-webview://x/y.png', '//host/x.png', '/root.png', ''
+                ].forEach(s => {
+                    assert.strictEqual(env.markdown.isResolvableRelativeImageSrc(s), false, s);
+                });
+            });
+        });
+
+        suite('resolveImageSrc', () => {
+            test('ベースURIと相対パスを / で結合する（先頭 ./ は除去）', () => {
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base/dir', 'image.png'),
+                    'https://base/dir/image.png'
+                );
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base/dir/', './image.png'),
+                    'https://base/dir/image.png'
+                );
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base/dir', 'sub/a.png'),
+                    'https://base/dir/sub/a.png'
+                );
+            });
+
+            test('ベースURIが空なら src をそのまま返す', () => {
+                assert.strictEqual(env.markdown.resolveImageSrc('', 'image.png'), 'image.png');
+            });
+
+            test('# と ? はエンコードする（% は二重エンコードしない）', () => {
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base', 'img#1.png'),
+                    'https://base/img%231.png'
+                );
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base', 'a?b.png'),
+                    'https://base/a%3Fb.png'
+                );
+                // 既存の %20 はそのまま（% を再エンコードしない）
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base', 'a%20b.png'),
+                    'https://base/a%20b.png'
+                );
+            });
+        });
+
         test('言語指定付きコードフェンスをpre/codeに変換する', () => {
             const html = env.markdown.markdownToHtml('```python\nprint("hello")\n```');
             assert.strictEqual(
