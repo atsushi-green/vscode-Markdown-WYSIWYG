@@ -601,6 +601,9 @@ window.TableModule = (function() {
     // ダイアログ確定時に表を挿す位置。右クリック時のキャレット範囲を退避しておく
     // （ダイアログ入力へフォーカスが移るとエディタの選択が失われるため）。
     let pendingInsertRange = null;
+    // 直近の showInsertDialog 呼び出し元へ、確定（実際に表を挿入できた）後にのみ通知する
+    // コールバック。キャンセル時は呼ばない＝呼び出し元は「挿入されなかった」と判断できる。
+    let onInsertConfirmed = null;
 
     // 挿入メニューを出さない「特別な」ブロック（数式・Mermaid・既存テーブル）。
     // これらの上での右クリックはそれぞれの担当（数式メニュー／Mermaidメニュー／
@@ -832,6 +835,18 @@ window.TableModule = (function() {
             // 復元した範囲は使い切ったのでクリア（次回の古い範囲の誤用を防ぐ）
             pendingInsertRange = null;
             insertTable(dims.rows, dims.cols);
+            // 実際に挿入できた場合のみ呼び出し元へ通知する（キャンセル時は呼ばない）
+            if (onInsertConfirmed) {
+                const callback = onInsertConfirmed;
+                onInsertConfirmed = null;
+                callback();
+            }
+        };
+        // キャンセル（挿入しない）経路をまとめる。onInsertConfirmedは呼ばずに破棄することで、
+        // 呼び出し元（スラッシュコマンドメニュー等）が「挿入されなかった」と判断できるようにする。
+        const cancel = () => {
+            onInsertConfirmed = null;
+            hideInsertDialog();
         };
 
         okBtn.addEventListener('click', function(e) {
@@ -840,7 +855,7 @@ window.TableModule = (function() {
         });
         cancelBtn.addEventListener('click', function(e) {
             e.preventDefault();
-            hideInsertDialog();
+            cancel();
         });
         // Enterで確定・Escapeでキャンセル（数値入力内から）。
         // ただしキャンセルボタン上でのEnterはキャンセルとして扱う。
@@ -848,13 +863,13 @@ window.TableModule = (function() {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 if (e.target === cancelBtn) {
-                    hideInsertDialog();
+                    cancel();
                 } else {
                     confirm();
                 }
             } else if (e.key === 'Escape') {
                 e.preventDefault();
-                hideInsertDialog();
+                cancel();
             }
         });
 
@@ -865,8 +880,12 @@ window.TableModule = (function() {
 
     /**
      * 行数・列数ダイアログを表示し、行数入力へフォーカスする。
+     * @param {Function} [onInserted] 実際に表を挿入できた（OK確定・キャンセルでない）場合にのみ
+     * 呼ばれるコールバック。右クリックメニュー以外の呼び出し元（スラッシュコマンドメニュー等）が、
+     * 挿入位置に置いたプレースホルダの後始末をキャンセル時と区別して行いたい場合に使う。
      */
-    function showInsertDialog() {
+    function showInsertDialog(onInserted) {
+        onInsertConfirmed = typeof onInserted === 'function' ? onInserted : null;
         const dialog = ensureInsertDialog();
         dialog.style.display = '';
         if (dialog._rowsInput) {
@@ -900,6 +919,16 @@ window.TableModule = (function() {
             selection.removeAllRanges();
             selection.addRange(pendingInsertRange);
         }
+    }
+
+    /**
+     * ダイアログ確定時に復元する範囲を外部（右クリックメニュー以外の呼び出し元）から
+     * 設定する。`showInsertDialog` はフォーカスを行数・列数入力へ移すため、それより前の
+     * キャレット位置をここへ渡しておくと、確定時にそこへ表を挿入できる
+     * （右クリックメニューの `contextmenu` ハンドラが自分自身の内部でやっているのと同じ仕組み）。
+     */
+    function setPendingInsertRange(range) {
+        pendingInsertRange = range ? range.cloneRange() : null;
     }
 
     /**
@@ -981,6 +1010,7 @@ window.TableModule = (function() {
         insertTable: insertTable,
         setupContextMenu: setupContextMenu,
         showInsertDialog: showInsertDialog,
+        setPendingInsertRange: setPendingInsertRange,
         hideInsertDialog: hideInsertDialog,
         findExcludedAncestor: findExcludedAncestor,
         isBlockEmpty: isBlockEmpty,

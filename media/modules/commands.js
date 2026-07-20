@@ -552,6 +552,23 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * ブロックが「/」入力直後のスラッシュコマンド起動状態か判定する純粋関数。
+     * `table.isBlockEmpty` と同様の考え方で、ブロックの可視テキストが半角スラッシュ
+     * 1文字だけ（前後に他のテキスト・`<br>`以外の要素を含まない）ならtrue。
+     * それ以外（空・2文字以上・スラッシュ以外）はfalse＝メニューを出さない/閉じる対象。
+     */
+    function isSlashCommandTrigger(block) {
+        if (!block) {
+            return false;
+        }
+        const text = (block.textContent || '').replace(/\u200B/g, '');
+        if (text !== '/') {
+            return false;
+        }
+        return !Array.prototype.some.call(block.children || [], child => child.tagName !== 'BR');
+    }
+
+    /**
      * コマンドの実行
      */
     function executeCommand(command) {
@@ -622,6 +639,8 @@ window.CommandsModule = (function() {
      * エディタ内の見出しから目次（TOC）を生成し、キャレット位置のブロックの
      * 直後（キャレットが無ければ先頭）に挿入する。
      * 見出しが無い場合はトーストで知らせて何もしない。
+     * @returns {boolean} 実際に目次を挿入できたか（見出しが無い等で挿入しなかった場合はfalse。
+     * スラッシュコマンドメニュー等、挿入できたかどうかで後続処理を分けたい呼び出し元向け）
      */
     function insertToc() {
         const headings = [];
@@ -634,7 +653,7 @@ window.CommandsModule = (function() {
 
         if (!headings.length) {
             utils.showToast('見出しが見つかりません');
-            return;
+            return false;
         }
 
         const tocMarkdown = markdown.buildTocMarkdown(headings);
@@ -642,7 +661,7 @@ window.CommandsModule = (function() {
         temp.innerHTML = markdown.markdownToHtml(tocMarkdown);
         const nodes = Array.prototype.slice.call(temp.childNodes);
         if (!nodes.length) {
-            return;
+            return false;
         }
 
         // 挿入位置を決める（キャレットのあるトップレベルブロックの直後）
@@ -673,6 +692,7 @@ window.CommandsModule = (function() {
 
         // 文書へ反映
         state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
     }
 
     /**
@@ -2627,6 +2647,7 @@ window.CommandsModule = (function() {
         collectHeadings: collectHeadings,
         findCurrentHeadingIndex: findCurrentHeadingIndex,
         buildBreadcrumbChain: buildBreadcrumbChain,
+        isSlashCommandTrigger: isSlashCommandTrigger,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,
         handleHorizontalRule: handleHorizontalRule,

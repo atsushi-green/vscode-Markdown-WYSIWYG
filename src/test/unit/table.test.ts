@@ -510,5 +510,68 @@ suite('TableModule', () => {
             assert.strictEqual(table.querySelectorAll('tbody tr').length, 3);
             assert.strictEqual(dialog.style.display, 'none', 'dialog closes after insert');
         });
+
+        test('setPendingInsertRangeで指定した位置は、ダイアログを開く操作でライブ選択が別の場所へ動いても確定時にそこへ復元されて使われる', () => {
+            // スラッシュコマンドメニュー等、右クリック以外からshowInsertDialogを呼ぶ経路を想定。
+            env.editor.innerHTML = '<p>1つ目</p><p>2つ目</p>';
+            const first = env.editor.querySelectorAll('p')[0];
+            const pendingRange = env.document.createRange();
+            pendingRange.selectNodeContents(first);
+            pendingRange.collapse(true);
+            env.table.setPendingInsertRange(pendingRange);
+
+            // ダイアログを開く前に、ライブの選択を無関係な場所へ動かす
+            // （数値入力へフォーカスが移ると選択が失われる状況を模す）。
+            const second = env.editor.querySelectorAll('p')[1];
+            const liveRange = env.document.createRange();
+            liveRange.selectNodeContents(second);
+            liveRange.collapse(true);
+            const selection = env.window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(liveRange);
+
+            env.table.showInsertDialog();
+            const dialog = env.document.getElementById('tableInsertDialog')!;
+            const ok = dialog.querySelector('.link-dialog-btn-primary') as HTMLElement;
+            ok.click();
+
+            // pendingInsertRangeで指定した「1つ目」の直後（＝「2つ目」の手前）に挿入される
+            const children = Array.from(env.editor.children);
+            assert.strictEqual(children.length, 3, env.editor.innerHTML);
+            assert.strictEqual(children[0].tagName, 'P');
+            assert.strictEqual(children[0].textContent, '1つ目');
+            assert.ok(children[1].querySelector('table'), env.editor.innerHTML);
+            assert.strictEqual(children[2].tagName, 'P');
+            assert.strictEqual(children[2].textContent, '2つ目');
+        });
+
+        test('showInsertDialogのコールバックはOK確定時にのみ呼ばれる（キャンセルでは呼ばれない）', () => {
+            // スラッシュコマンドメニューはこのコールバックで「/」プレースホルダの後始末をする。
+            // キャンセル時にも呼ばれてしまうと、まだ何も挿入していないのに後始末をしてしまう
+            // （＝入力していた文字が復元不能に消えるバグになる）ため、呼び分けを検証する。
+            env.editor.innerHTML = '<p><br></p>';
+            let confirmedCount = 0;
+
+            env.table.showInsertDialog(() => { confirmedCount++; });
+            let dialog = env.document.getElementById('tableInsertDialog')!;
+            const cancelBtn = dialog.querySelector('.link-dialog-btn:not(.link-dialog-btn-primary)') as HTMLElement;
+            cancelBtn.click();
+            assert.strictEqual(confirmedCount, 0, 'キャンセルではコールバックを呼ばない');
+            assert.strictEqual(dialog.style.display, 'none');
+
+            env.table.showInsertDialog(() => { confirmedCount++; });
+            dialog = env.document.getElementById('tableInsertDialog')!;
+            const ok = dialog.querySelector('.link-dialog-btn-primary') as HTMLElement;
+            ok.click();
+            assert.strictEqual(confirmedCount, 1, 'OK確定では1回だけコールバックを呼ぶ');
+        });
+
+        test('コールバック無しでshowInsertDialogを呼んでも例外にならない（右クリックメニュー経路との後方互換）', () => {
+            env.editor.innerHTML = '<p><br></p>';
+            assert.doesNotThrow(() => env.table.showInsertDialog());
+            const dialog = env.document.getElementById('tableInsertDialog')!;
+            const ok = dialog.querySelector('.link-dialog-btn-primary') as HTMLElement;
+            assert.doesNotThrow(() => ok.click());
+        });
     });
 });

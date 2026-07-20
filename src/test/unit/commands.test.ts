@@ -1597,10 +1597,18 @@ suite('CommandsModule', () => {
             assert.strictEqual(link!.textContent, 'はじめに');
         });
 
-        test('見出しが無い場合は目次を挿入しない', () => {
+        test('見出しが無い場合は目次を挿入せず、falseを返す（呼び出し元が挿入失敗を判定できる）', () => {
             env.editor.innerHTML = '<p>本文だけ</p>';
-            env.commands.insertToc();
+            const inserted = env.commands.insertToc();
             assert.strictEqual(env.editor.querySelector('ul'), null);
+            assert.strictEqual(inserted, false);
+        });
+
+        test('見出しがあり目次を挿入できた場合はtrueを返す', () => {
+            env.editor.innerHTML = heading(1, 'タイトル');
+            const inserted = env.commands.insertToc();
+            assert.strictEqual(inserted, true);
+            assert.ok(env.editor.querySelector('ul'));
         });
 
         test('挿入した目次は htmlToMarkdown で入れ子リンク付きリストになる', () => {
@@ -1970,6 +1978,52 @@ suite('CommandsModule', () => {
                 const chain = env.commands.buildBreadcrumbChain([H1], 0);
                 assert.deepStrictEqual(Array.from(chain), [H1]);
             });
+        });
+    });
+
+    suite('isSlashCommandTrigger（「/」入力によるコマンドメニューの起動判定）', () => {
+        test('可視テキストが「/」1文字だけのブロックはtrue', () => {
+            env.editor.innerHTML = '<p>/</p>';
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), true);
+        });
+
+        test('<br>のみを伴う「/」ブロックもtrue（末尾入力直後の典型形）', () => {
+            const holder = env.document.createElement('div');
+            holder.innerHTML = '<p>/<br></p>';
+            const p = holder.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), true);
+        });
+
+        test('空のブロックはfalse', () => {
+            env.editor.innerHTML = '<p><br></p>';
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), false);
+        });
+
+        test('「/」の前後に他のテキストがあるとfalse', () => {
+            env.editor.innerHTML = '<p>a/</p>';
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), false);
+        });
+
+        test('「/」以外のテキストや、テキスト以外の要素を含むとfalse', () => {
+            const holder = env.document.createElement('div');
+            holder.innerHTML = '<p>//</p><p><img src="x"></p>';
+            const ps = holder.querySelectorAll('p');
+            assert.strictEqual(env.commands.isSlashCommandTrigger(ps[0]), false);
+            assert.strictEqual(env.commands.isSlashCommandTrigger(ps[1]), false);
+        });
+
+        test('可視テキストは「/」1文字だけでも、<br>以外の要素を含むとfalse', () => {
+            const holder = env.document.createElement('div');
+            holder.innerHTML = '<p>/<img src="x"></p>';
+            const p = holder.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), false);
+        });
+
+        test('blockがnullならfalse', () => {
+            assert.strictEqual(env.commands.isSlashCommandTrigger(null as any), false);
         });
     });
 

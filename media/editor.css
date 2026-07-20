@@ -1137,10 +1137,11 @@ body.vscode-dark #editor strong {
     opacity: 0.95;
 }
 
-/* Mermaid／数式ブロックのコンテキストメニュー（見た目を共有） */
+/* Mermaid／数式／表／スラッシュコマンドの各コンテキストメニュー（見た目を共有） */
 .mermaid-context-menu,
 .math-context-menu,
-.table-context-menu {
+.table-context-menu,
+.slash-command-menu {
     position: fixed;
     z-index: 10000;
     background-color: var(--vscode-menu-background, #252526);
@@ -1153,7 +1154,8 @@ body.vscode-dark #editor strong {
 
 .mermaid-menu-item,
 .math-menu-item,
-.table-menu-item {
+.table-menu-item,
+.slash-command-item {
     padding: 8px 16px;
     cursor: pointer;
     font-size: 13px;
@@ -1163,7 +1165,8 @@ body.vscode-dark #editor strong {
 
 .mermaid-menu-item:hover,
 .math-menu-item:hover,
-.table-menu-item:hover {
+.table-menu-item:hover,
+.slash-command-item:hover {
     background-color: var(--vscode-menu-selectionBackground, #04395e);
     color: var(--vscode-menu-selectionForeground, #ffffff);
 }

@@ -24,7 +24,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | `/`入力によるNotion風コマンドメニューの表示（初期スコープ: 表の挿入・目次挿入） | M | contentEditable内で`/`を入力した直後にポップアップメニューを表示し、選択した項目に応じたコマンドを実行する。既存の`mermaidContextMenu`（`media/modules/mermaid.js`の`showContextMenu`/`hideContextMenu`）のポップアップ実装パターンを流用できる。初回スコープは「目次挿入」（`insertToc`を呼ぶだけで実装可能）と「表の挿入」（上記の表挿入機能と合流させて実装するのが効率的）の2コマンドに絞る |
 | todo | 表の矩形選択とコピー＆ペースト（Excel等外部アプリとの相互貼り付け対応） | L | 現状`table.js`は単一セル選択（`selectCell`）とTSVテキストでの表全体コピー（`copy`）／単一始点セルへのTSV貼り付け（`pasteData`）のみで、複数セルにまたがる矩形範囲のドラッグ選択・ハイライト表示が無い。まずS/Mに分割してから着手。方向性: (1)マウスドラッグでのセル範囲選択とハイライトCSSの実装、(2)選択範囲のみをTSVテキスト＋`text/html`（`<table>`）の両方でクリップボードへ書き込み（Excel貼り付けはTSVプレーンテキストで十分だが、エディタ内貼り付けの表現力を保つにはHTML形式も有効）、(3)選択範囲を貼り付け先として`pasteData`を拡張し矩形置換に対応 |
 | todo | 脚注のホバーツールチップ表示（`[^1]` にマウスホバーで注釈内容をポップアップ） | M | 脚注参照（`[^1]`）にマウスホバーすると、対応する脚注定義の本文をツールチップ/ポップアップで表示する。**前提**: 脚注機能そのものが未実装（[[脚注（`[^1]`）のサポート]]＝優先度:低 の todo）。**脚注の表示・往復変換を先に実装してから**本項目に着手するのが自然（順序依存）。実装方向: 脚注参照に `data-footnote-id` を付与し、`mouseenter`/`mouseleave`（間引き・遅延表示）で対応する脚注定義本文を小さなポップアップに描画（既存の `.mermaid-context-menu`／`.link-dialog` 系のフローティングUIパターンとCSSを流用可能・`markdownEditor.ts` 非変更で動的生成）。位置は参照要素の矩形基準（`computeMenuPosition` 系を流用）。ユーザー要望。ホバー操作感は実機確認前提 |
 
@@ -43,6 +42,7 @@
 | todo | 表の列追加・削除時に他列のセパレーター書式（スペース有無・アライメント）を維持する | S | 表区切り行の元表記保持（`data-sep`、[roadmap-done.md](./roadmap-done.md)参照）は現状、列数がヘッダーと食い違うと全列がデフォルト`---`書式にフォールバックする実装（`serializeTable`）。列追加・削除（`table.js`の`addColumn`/`deleteColumn`）で`data-sep`も同時に更新し、変更していない他列の書式だけは保つようにすると良い。`/local-review`指摘（severity low, PLAUSIBLE）由来 |
 | todo | PDFエクスポート機能 | L | まずS/Mに分割してから着手。方式候補: (1) VS Code標準の印刷（Webview→ブラウザ印刷ダイアログ）にCSS `@media print` を用意して委ねる案（軽量・依存追加なし）、(2) `puppeteer-core` 等でHTML→PDFをヘッドレス変換する案（見た目の再現度は高いが依存が重く拡張機能サイズが増える）。Mermaid図のPNG化（html2canvas）で確立した「クリーンHTML抽出→変換」の流れを流用できる。まずは(1)の印刷スタイル対応から着手し、要望が強ければ(2)を検討するのが妥当 |
 | todo | 見出しパンくずバーの更新をデバウンス化する | S | 現状 `editor.js` の `updateHeadingBreadcrumb` は入力イベント（`setupEditorInputEvent`）から同期・無条件に呼ばれ、見出し数分の `getBoundingClientRect` を毎キー入力ごとに計算する。同じ関数内の行番号ガター更新（`scheduleWysiwygGutterUpdate`）は変換コストが高いためデバウンス済みだが、パンくず側は未対応。見出しの多い文書でタイピング中の遅延要因になりうるため、同様に `setTimeout`（150ms程度）でデバウンスすると良い。`/local-review`指摘（severity low）由来 |
+| todo | 「/」コマンドメニューを見出し・引用・テーブルセルなど`P`/`DIV`/`LI`以外のブロックでも使えるようにする | S | 現状 `utils.findBlockAncestor` が `P`/`DIV`/`LI` タグでしか停止しないため、`editor.js` の `updateSlashCommandMenu`（`commands.isSlashCommandTrigger`）は空の見出し（`<h1>/</h1>`等）・引用・テーブルセル内での「/」入力を検出できずメニューが出ない（初期実装の意図的な制限）。見出し直後の新規行などユーザーが「/」を打ちそうな場面もあるため、`findBlockAncestor`の対象タグ拡張や、対象ブロック種別ごとの分岐を検討すると良い。`/local-review`指摘（severity low, 確信度中）由来 |
 | todo | 見出しパンくずバーの差分描画とキーボード操作対応 | S | (1) `editor.js` の `renderHeadingBreadcrumb` はスクロールのたび（rAF間引き後）にバー内DOMを毎回全消去→再構築している。チェーンが前回と同一なら再構築をスキップすると無駄なreflowを減らせる。(2) パンくず項目は `<span>`+`click`のみで`tabindex`/`role`/`keydown`が無くキーボード操作不可（既存TOCリンクは`<a>`で自然に操作可）。`<a>`化するか`tabindex="0"`+`Enter`ハンドラを追加すると良い。`/local-review`指摘（severity low）由来2件をまとめて記載 |
 
 ## 完了 (done)
