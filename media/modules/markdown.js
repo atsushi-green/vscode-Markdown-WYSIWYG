@@ -106,6 +106,18 @@ window.MarkdownModule = (function() {
             return '\u0002' + (mathSpans.length - 1) + '\u0002';
         });
 
+        // 画像（![alt](url)）。リンクより**先に**処理する（`![` を `!`＋リンクに
+        // 割らないため）。alt は空も許容（貼り付け画像は alt 無し）。属性を閉じる
+        // `"` は escapeAttr で潰す（テキストは escapeHtml 済みで `<>&` は実体参照）。
+        // 生成した `<img>` はプレースホルダへ退避しておく。退避しないとURL/alt中の
+        // `_`/`*`/`~`/`+` が後続の強調変換で `src="a<em>b</em>c"` のように壊れ、往復が
+        // 崩れる（インラインコード・数式と同じ保護方針）。
+        const imgSpans = [];
+        html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_m, alt, url) {
+            imgSpans.push('<img src="' + escapeAttr(url) + '" alt="' + escapeAttr(alt) + '">');
+            return '' + (imgSpans.length - 1) + '';
+        });
+
         // リンク
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
@@ -126,6 +138,11 @@ window.MarkdownModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避した画像を <img> として復元（属性中の記法文字を強調変換から守った）
+        html = html.replace(/(\d+)/g, function (_m, i) {
+            return imgSpans[Number(i)];
+        });
 
         // 退避した数式を復元（中身は整形しない。KaTeXでのレンダリングは math.js が行う）
         html = html.replace(/\u0002(\d+)\u0002/g, function (_m, i) {
@@ -206,7 +223,11 @@ window.MarkdownModule = (function() {
         function build(level) {
             const ordered = items[index].ordered;
             const tag = ordered ? 'ol' : 'ul';
-            let html = `<${tag}>`;
+            // 箇条書きは元マーカー（`-`/`*`）を data-marker に保持して往復で復元する。
+            // このリスト（同レベルの連続）の先頭アイテムのマーカーを採用する。
+            const bullet = items[index].marker === '-' ? '-' : '*';
+            const markerAttr = ordered ? '' : ` data-marker="${bullet}"`;
+            let html = `<${tag}${markerAttr}>`;
 
             while (index < items.length && items[index].level >= level) {
                 const item = items[index];
@@ -515,6 +536,9 @@ window.MarkdownModule = (function() {
                     items.push({
                         level: Math.floor(indent / 2),
                         ordered: /^\d+\.$/.test(m[2]),
+                        // 元の箇条書きマーカー（`-` / `*`）を保持し、直列化で復元する
+                        // （触っていない行の `- ` が `* ` に書き換わるのを防ぐ）。
+                        marker: m[2],
                         task: task !== null,
                         checked: task !== null && task[1].toLowerCase() === 'x',
                         text: task !== null ? task[2] : m[3]
@@ -624,6 +648,15 @@ window.MarkdownModule = (function() {
                 const href = node.getAttribute('href') || '';
                 return `[${serializeInlineChildren(node)}](${href})`;
             }
+            case 'IMG': {
+                // 画像は void 要素で子を持たない。元のパスは `data-original-src`
+                // （ローカル画像表示のためsrcをwebview URIへ差し替える場合に使う）を
+                // 優先し、無ければ `src` を使う。alt は属性から復元する。
+                const src = node.getAttribute('data-original-src') ||
+                    node.getAttribute('src') || '';
+                const alt = node.getAttribute('alt') || '';
+                return src ? `![${alt}](${src})` : '';
+            }
             case 'SPAN':
                 // 生Markdown表示中のspan（リンク・強調・インライン数式の展開中）は
                 // 中身の生テキストをそのまま返す（`$` もエスケープしない）。
@@ -676,6 +709,10 @@ window.MarkdownModule = (function() {
      */
     function serializeList(listEl, depth) {
         const ordered = listEl.tagName === 'OL';
+        // 箇条書きマーカーは data-marker（読込時に保持した元マーカー）を尊重する。
+        // 無い（新規入力・execCommand 生成の ul）／不正値なら従来どおり `*`。
+        const rawMarker = listEl.getAttribute && listEl.getAttribute('data-marker');
+        const bullet = (rawMarker === '-' || rawMarker === '*') ? rawMarker : '*';
         let md = '';
         let index = 1;
 
@@ -708,7 +745,7 @@ window.MarkdownModule = (function() {
                 taskPrefix = checked ? '[x] ' : '[ ] ';
             }
 
-            const marker = ordered ? `${index++}. ` : '* ';
+            const marker = ordered ? `${index++}. ` : (bullet + ' ');
             md += '  '.repeat(depth) + marker + taskPrefix + text.replace(/\n+/g, ' ').trim() + '\n';
 
             nestedLists.forEach(nested => {
@@ -1146,10 +1183,59 @@ window.MarkdownModule = (function() {
         return map;
     }
 
+    /**
+     * `<img src>` がローカル相対パス（webview のベースURIで解決すべきもの）か判定する
+     * 純粋関数。スキーム付きURL（`http:`/`https:`/`data:`/`blob:`/`vscode-webview:` 等）・
+     * プロトコル相対（`//host`）・ルート絶対（`/foo`）は解決しない（false）。
+     * 解決済み（asWebviewUri でスキームが付いた）srcも scheme 判定で false になる。
+     * @param {string} src
+     * @returns {boolean}
+     */
+    function isResolvableRelativeImageSrc(src) {
+        if (!src || typeof src !== 'string') {
+            return false;
+        }
+        if (/^[a-z][a-z0-9+.-]*:/i.test(src)) {
+            return false; // scheme: 付き（http:/data:/vscode-webview: など）
+        }
+        if (src.indexOf('//') === 0) {
+            return false; // プロトコル相対 //host/…
+        }
+        if (src.indexOf('/') === 0) {
+            return false; // ルート絶対 /foo（基準が曖昧なので触らない）
+        }
+        return true;
+    }
+
+    /**
+     * ローカル相対パスの画像srcを、webview のベースURI（ドキュメントフォルダの
+     * webview URI）と結合して解決する純粋関数。先頭の `./` は除去する。
+     * `../` を含む相対はブラウザのURL正規化に委ねる（文字列結合のみ）。
+     * @param {string} baseUri 末尾スラッシュ有無を問わないベースURI
+     * @param {string} src 相対パス
+     * @returns {string} 解決後のURL（baseUri が空なら src のまま）
+     */
+    function resolveImageSrc(baseUri, src) {
+        if (!baseUri) {
+            return src;
+        }
+        const base = String(baseUri).replace(/\/+$/, '');
+        // 先頭 ./ を除去し、URLとして誤解釈される `#`（フラグメント）・`?`（クエリ）を
+        // エンコードする。既に %20 等が入っている可能性があるため `%` はエンコードしない
+        // （二重エンコード回避）。
+        const rel = String(src)
+            .replace(/^\.\//, '')
+            .replace(/#/g, '%23')
+            .replace(/\?/g, '%3F');
+        return base + '/' + rel;
+    }
+
     // 公開API
     return {
         markdownToHtml: markdownToHtml,
         htmlToMarkdown: htmlToMarkdown,
+        isResolvableRelativeImageSrc: isResolvableRelativeImageSrc,
+        resolveImageSrc: resolveImageSrc,
         // 生Markdown表示（commands.syncRawMarkdownToCaret）が、任意のインライン要素
         // ⇔ 生Markdown の相互変換に使う。読込時の変換と同じ関数を共有することで、
         // 展開／復帰の結果が通常のレンダリング結果と食い違わないことを保証する。

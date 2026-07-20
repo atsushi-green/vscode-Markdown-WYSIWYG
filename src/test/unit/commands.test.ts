@@ -58,6 +58,34 @@ suite('CommandsModule', () => {
             assert.ok(env.editor.querySelector('u'), env.editor.innerHTML);
         });
 
+        test('![](url) のライブ変換で img 要素になり、リンクと区別する', () => {
+            env.editor.innerHTML = '<p>![](image-1.png) 後続</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true);
+            const img = env.editor.querySelector('img');
+            assert.ok(img, env.editor.innerHTML);
+            assert.strictEqual(img!.getAttribute('src'), 'image-1.png');
+            assert.strictEqual(img!.getAttribute('alt'), '');
+            // ![ が ! + リンクに割れていない
+            assert.ok(!env.editor.querySelector('a'), env.editor.innerHTML);
+        });
+
+        test('通常リンク [text](url) はライブ変換で a のまま（回帰確認）', () => {
+            env.editor.innerHTML = '<p>[text](url) 後続</p>';
+            env.commands.applyInlineFormatting();
+            assert.ok(env.editor.querySelector('a'), env.editor.innerHTML);
+            assert.ok(!env.editor.querySelector('img'), env.editor.innerHTML);
+        });
+
+        test('_ を含む画像パスのライブ変換で src が強調に壊れない', () => {
+            env.editor.innerHTML = '<p>![](my_img_1.png) 後続</p>';
+            env.commands.applyInlineFormatting();
+            const img = env.editor.querySelector('img');
+            assert.ok(img, env.editor.innerHTML);
+            assert.strictEqual(img!.getAttribute('src'), 'my_img_1.png');
+            assert.ok(!img!.querySelector('em'), env.editor.innerHTML);
+        });
+
         /**
          * 分割テキストノードを持つ段落を組み立てる（実機のcontenteditable相当）。
          * fragments を順に別々のテキストノードとして追加する。
@@ -2078,6 +2106,91 @@ suite('CommandsModule', () => {
             assert.ok(out.includes('# タイトル'));
             assert.ok(out.includes('```js'));
             assert.ok(out.includes('| A | B |'));
+        });
+    });
+
+    suite('画像貼り付け（クリップボード画像 2/2）', () => {
+        suite('buildImageMarkdown', () => {
+            test('alt空の ![](path) を組み立てる', () => {
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('image-1.png'), '![](image-1.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('assets/image-1.png'),
+                    '![](assets/image-1.png)'
+                );
+            });
+
+            test('スペース・丸括弧をURLエンコードする', () => {
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('my dir/a (1).png'),
+                    '![](my%20dir/a%20%281%29.png)'
+                );
+            });
+
+            test('空パスは ![]() ', () => {
+                assert.strictEqual(env.commands.buildImageMarkdown(''), '![]()');
+            });
+        });
+
+        suite('findClipboardImageItem', () => {
+            test('image/* の最初のアイテムを返す', () => {
+                const items = [
+                    { kind: 'string', type: 'text/plain' },
+                    { kind: 'file', type: 'image/png' },
+                    { kind: 'file', type: 'image/jpeg' }
+                ];
+                const found = env.commands.findClipboardImageItem(items);
+                assert.ok(found);
+                assert.strictEqual(found.type, 'image/png');
+            });
+
+            test('画像が無ければ null', () => {
+                const items = [{ kind: 'string', type: 'text/plain' }];
+                assert.strictEqual(env.commands.findClipboardImageItem(items), null);
+                assert.strictEqual(env.commands.findClipboardImageItem(null), null);
+            });
+        });
+
+        suite('insertImageMarkdown', () => {
+            test('キャレット位置へ ![](path) を挿入し、往復で保たれる', () => {
+                env.editor.innerHTML = '<p>前<br></p>';
+                const p = env.editor.querySelector('p')!;
+                // 「前」の直後にキャレット
+                const range = env.document.createRange();
+                range.setStart(p.firstChild!, 1);
+                range.collapse(true);
+                const sel = env.window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+
+                const ok = env.commands.insertImageMarkdown('image-1.png');
+                assert.strictEqual(ok, true);
+                assert.ok(env.editor.textContent!.includes('![](image-1.png)'), env.editor.innerHTML);
+
+                // 往復（画像記法はレンダリング対象外＝リテラルテキストとして往復不変）
+                const out = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+                assert.ok(out.includes('![](image-1.png)'), out);
+            });
+
+            test('選択が無い場合はエディタ末尾へフォールバックし、往復でも保たれる', () => {
+                env.editor.innerHTML = '<p>本文</p>';
+                const sel = env.window.getSelection();
+                sel.removeAllRanges();
+
+                const ok = env.commands.insertImageMarkdown('x.png');
+                assert.strictEqual(ok, true);
+                assert.ok(env.editor.textContent!.includes('![](x.png)'), env.editor.innerHTML);
+                // フォールバック経路でも直列化で ![](x.png) が保たれる
+                const out = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+                assert.ok(out.includes('![](x.png)'), out);
+            });
+
+            test('空パスは何もしない', () => {
+                env.editor.innerHTML = '<p>本文</p>';
+                assert.strictEqual(env.commands.insertImageMarkdown(''), false);
+                assert.strictEqual(env.editor.textContent, '本文');
+            });
         });
     });
 });

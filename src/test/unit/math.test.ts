@@ -113,6 +113,125 @@ suite('MathModule', () => {
             item.click();
             assert.strictEqual(menu.style.display, 'none');
         });
+
+        test('背景色トグル（透過／白／黒）を持ち既定は白がactive', () => {
+            env.math.setupContextMenu(env.editor);
+            const menu = env.document.getElementById('mathContextMenu')!;
+            const btns = menu.querySelectorAll('.math-bg-btn');
+            assert.strictEqual(btns.length, 3, 'should have 3 background buttons');
+            const active = menu.querySelector('.math-bg-btn.active');
+            assert.ok(active, 'one button should be active by default');
+            assert.strictEqual(active!.getAttribute('data-bg'), 'white');
+        });
+
+        test('背景ボタンのクリックで active が移り、メニューは閉じない', () => {
+            env.math.setupContextMenu(env.editor);
+            const menu = env.document.getElementById('mathContextMenu')!;
+            menu.style.display = 'block';
+            const blackBtn = menu.querySelector('.math-bg-btn[data-bg="black"]') as HTMLElement;
+            blackBtn.click();
+
+            assert.ok(blackBtn.classList.contains('active'), 'clicked button becomes active');
+            const actives = menu.querySelectorAll('.math-bg-btn.active');
+            assert.strictEqual(actives.length, 1, 'only one button stays active');
+            assert.strictEqual(menu.style.display, 'block', 'menu stays open after bg toggle');
+        });
+
+        test('文字色トグル（自動／黒／白）を持ち既定は自動がactive', () => {
+            env.math.setupContextMenu(env.editor);
+            const menu = env.document.getElementById('mathContextMenu')!;
+            const btns = menu.querySelectorAll('.math-fg-btn');
+            assert.strictEqual(btns.length, 3, 'should have 3 text-color buttons');
+            const active = menu.querySelector('.math-fg-btn.active');
+            assert.ok(active, 'one button should be active by default');
+            assert.strictEqual(active!.getAttribute('data-fg'), 'auto');
+        });
+
+        test('文字色ボタンのクリックは背景トグルの active に影響しない（行が独立）', () => {
+            env.math.setupContextMenu(env.editor);
+            const menu = env.document.getElementById('mathContextMenu')!;
+            const whiteFg = menu.querySelector('.math-fg-btn[data-fg="white"]') as HTMLElement;
+            whiteFg.click();
+
+            // 文字色は white へ移り、背景は既定の white のまま
+            assert.ok(whiteFg.classList.contains('active'), 'clicked fg button becomes active');
+            assert.strictEqual(menu.querySelectorAll('.math-fg-btn.active').length, 1);
+            const bgActive = menu.querySelector('.math-bg-btn.active');
+            assert.strictEqual(bgActive!.getAttribute('data-bg'), 'white', 'bg row unaffected');
+        });
+    });
+
+    suite('resolveMenuBackground', () => {
+        function menuWithActive(bg: string | null): HTMLElement {
+            const menu = env.document.createElement('div');
+            ['transparent', 'white', 'black'].forEach((v) => {
+                const btn = env.document.createElement('button');
+                btn.className = 'math-bg-btn' + (v === bg ? ' active' : '');
+                btn.setAttribute('data-bg', v);
+                menu.appendChild(btn);
+            });
+            return menu;
+        }
+
+        test('active な透過／黒はその値を返す', () => {
+            assert.strictEqual(env.math.resolveMenuBackground(menuWithActive('transparent')), 'transparent');
+            assert.strictEqual(env.math.resolveMenuBackground(menuWithActive('black')), 'black');
+        });
+
+        test('active が白・未選択・不正なら白を返す', () => {
+            assert.strictEqual(env.math.resolveMenuBackground(menuWithActive('white')), 'white');
+            assert.strictEqual(env.math.resolveMenuBackground(menuWithActive(null)), 'white');
+        });
+
+        test('menu が null／querySelector を持たなくても白を返す', () => {
+            assert.strictEqual(env.math.resolveMenuBackground(null), 'white');
+            assert.strictEqual(env.math.resolveMenuBackground({} as unknown as HTMLElement), 'white');
+        });
+    });
+
+    suite('resolveMenuTextColor', () => {
+        function menuWithActive(fg: string | null): HTMLElement {
+            const menu = env.document.createElement('div');
+            ['auto', 'black', 'white'].forEach((v) => {
+                const btn = env.document.createElement('button');
+                btn.className = 'math-fg-btn' + (v === fg ? ' active' : '');
+                btn.setAttribute('data-fg', v);
+                menu.appendChild(btn);
+            });
+            return menu;
+        }
+
+        test('active な黒／白はその値を返す', () => {
+            assert.strictEqual(env.math.resolveMenuTextColor(menuWithActive('black')), 'black');
+            assert.strictEqual(env.math.resolveMenuTextColor(menuWithActive('white')), 'white');
+        });
+
+        test('active が自動・未選択・不正なら auto を返す', () => {
+            assert.strictEqual(env.math.resolveMenuTextColor(menuWithActive('auto')), 'auto');
+            assert.strictEqual(env.math.resolveMenuTextColor(menuWithActive(null)), 'auto');
+        });
+
+        test('menu が null／querySelector を持たなくても auto を返す', () => {
+            assert.strictEqual(env.math.resolveMenuTextColor(null), 'auto');
+            assert.strictEqual(env.math.resolveMenuTextColor({} as unknown as HTMLElement), 'auto');
+        });
+    });
+
+    suite('resolveTextColor', () => {
+        test("'black'/'white' 指定はその色（16進）で固定する", () => {
+            assert.strictEqual(env.math.resolveTextColor('white', 'black'), '#000000');
+            assert.strictEqual(env.math.resolveTextColor('transparent', 'white'), '#ffffff');
+            assert.strictEqual(env.math.resolveTextColor('black', 'black'), '#000000');
+        });
+
+        test("'auto'（既定）は背景追従＝黒背景のみ白・それ以外は黒", () => {
+            assert.strictEqual(env.math.resolveTextColor('black', 'auto'), '#ffffff');
+            assert.strictEqual(env.math.resolveTextColor('white', 'auto'), '#000000');
+            assert.strictEqual(env.math.resolveTextColor('transparent', 'auto'), '#000000');
+            // textColor 未指定でも auto と同じ（後方互換）
+            assert.strictEqual(env.math.resolveTextColor('black', undefined), '#ffffff');
+            assert.strictEqual(env.math.resolveTextColor('transparent', undefined), '#000000');
+        });
     });
 
     suite('copyBlockAsPng', () => {
@@ -141,6 +260,76 @@ suite('MathModule', () => {
         test('block が null でも何もせず例外を投げない', async () => {
             await env.math.copyBlockAsPng(null);
             assert.strictEqual(env.document.querySelector('.mermaid-toast'), null);
+        });
+
+        // 選んだ背景が PNG 生成（foreignObject SVG）まで伝播することを、Image に渡る
+        // data:URL を捕捉して検証する。黒背景では黒地に黒文字で数式が消えないよう
+        // 文字色を白へ反転していること（A-1 回帰防止）もここで確認する。
+        function captureSvgOnCopy(): { get: () => string } {
+            let capturedSrc = '';
+            env.window.Image = class {
+                onload: (() => void) | null = null;
+                onerror: (() => void) | null = null;
+                set src(v: string) {
+                    capturedSrc = v;
+                    // 実描画はできないので onerror で後段（フォールバック）へ落とす。
+                    // SVG マークアップは src セット時点で既に組み上がっている。
+                    setTimeout(() => { if (this.onerror) { this.onerror(); } }, 0);
+                }
+            };
+            return {
+                get: () => decodeURIComponent(
+                    capturedSrc.replace(/^data:image\/svg\+xml;charset=utf-8,/, '')
+                )
+            };
+        }
+
+        test('黒背景を選ぶと数式の文字色を白へ反転する（黒地に黒文字を防ぐ）', async () => {
+            const cap = captureSvgOnCopy();
+            env.editor.innerHTML =
+                '<div class="math-block" data-math="x^2"><span class="katex">x</span></div>';
+            const block = env.editor.querySelector('.math-block')!;
+
+            await env.math.copyBlockAsPng(block, 'black');
+
+            const svg = cap.get();
+            assert.ok(svg.includes('fill="black"'), 'black background rect should be drawn');
+            assert.ok(
+                /rgb\(255,\s*255,\s*255\)|#ffffff|#fff\b/i.test(svg),
+                'text color should be white on black background: ' + svg.slice(0, 500)
+            );
+        });
+
+        test('白背景では文字色は黒のまま（既定動作を維持）', async () => {
+            const cap = captureSvgOnCopy();
+            env.editor.innerHTML =
+                '<div class="math-block" data-math="x^2"><span class="katex">x</span></div>';
+            const block = env.editor.querySelector('.math-block')!;
+
+            await env.math.copyBlockAsPng(block, 'white');
+
+            const svg = cap.get();
+            assert.ok(svg.includes('fill="white"'), 'white background rect should be drawn');
+            assert.ok(
+                /rgb\(0,\s*0,\s*0\)|#000000|#000\b/i.test(svg),
+                'text color should be black on white background: ' + svg.slice(0, 500)
+            );
+        });
+
+        test("透過背景でも文字色 'white' を選べば白文字になる（ダーク環境向け）", async () => {
+            const cap = captureSvgOnCopy();
+            env.editor.innerHTML =
+                '<div class="math-block" data-math="x^2"><span class="katex">x</span></div>';
+            const block = env.editor.querySelector('.math-block')!;
+
+            await env.math.copyBlockAsPng(block, 'transparent', 'white');
+
+            const svg = cap.get();
+            assert.ok(!svg.includes('<rect'), 'transparent background draws no rect');
+            assert.ok(
+                /rgb\(255,\s*255,\s*255\)|#ffffff|#fff\b/i.test(svg),
+                'text color should be white when explicitly selected: ' + svg.slice(0, 500)
+            );
         });
     });
 
@@ -187,6 +376,24 @@ suite('MathModule', () => {
             const svg = env.math.buildMathBlockSvgMarkup('x', '', 0, 12.3, 'transparent');
             assert.ok(svg.includes('width="1"'), svg);
             assert.ok(svg.includes('height="13"'), svg);
+        });
+    });
+
+    suite('serializeNodeToXhtml（foreignObject 用の XHTML 直列化）', () => {
+        test('ネストした <svg> に xmlns（SVG名前空間）を付けて直列化する', () => {
+            // KaTeX は √ の記号を span 内のインライン <svg> で描く。outerHTML だと
+            // xmlns が落ち、XML 解釈される foreignObject 内で √ が消える（回帰ガード）。
+            const div = env.window.document.createElement('div');
+            div.innerHTML = '<span class="katex"><svg viewBox="0 0 400000 1080"><path d="M95,702"></path></svg></span>';
+            const xhtml = env.math.serializeNodeToXhtml(div);
+            assert.ok(xhtml.includes('<svg xmlns="http://www.w3.org/2000/svg"'), xhtml);
+        });
+
+        test('HTML要素はXHTML名前空間の宣言付きで直列化される', () => {
+            const div = env.window.document.createElement('div');
+            div.textContent = 'x';
+            const xhtml = env.math.serializeNodeToXhtml(div);
+            assert.ok(xhtml.includes('xmlns="http://www.w3.org/1999/xhtml"'), xhtml);
         });
     });
 

@@ -90,7 +90,13 @@ body {
     user-select: none;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
-    line-height: 1.6;
+    /* 行番号を論理行と1対1で揃えるため、textarea(#rawEditor)と全く同じ整数px
+       の行高を使う。以前は unitless の 1.6（=14px×1.6=22.4px の小数）だったが、
+       小数行高では textarea のネイティブな行描画と div の行ボックス丸めが一致せず、
+       行を下るほど番号が実際の行からずれ、下の方で番号が1行ぶんずれて
+       「一部の行に番号が出ない」ように見えた。整数pxに固定すると両者の行送りが
+       完全一致し、ずれが起きない。 */
+    line-height: 22px;
 }
 
 .raw-line-gutter-inner {
@@ -117,7 +123,10 @@ body {
     box-sizing: border-box;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
-    line-height: 1.6;
+    /* 行番号ガター（.raw-line-gutter）と全く同じ整数pxの行高にする。
+       小数の行高（1.6=22.4px）だと textarea のネイティブ行描画と gutter の div の
+       行送りが一致せず、下の行ほど番号がずれて見える不具合になるため。 */
+    line-height: 22px;
     color: var(--vscode-editor-foreground);
     background-color: var(--vscode-editor-background);
     border: none;
@@ -779,6 +788,11 @@ body.vscode-dark #editor strong {
     border-color: var(--vscode-focusBorder, #007fd4);
 }
 
+/* 表の挿入ダイアログの行数・列数（数値）入力は幅を詰める */
+.table-insert-input {
+    width: 80px;
+}
+
 .link-dialog-actions {
     display: flex;
     align-items: center;
@@ -1088,7 +1102,8 @@ body.vscode-dark #editor strong {
 
 /* Mermaid／数式ブロックのコンテキストメニュー（見た目を共有） */
 .mermaid-context-menu,
-.math-context-menu {
+.math-context-menu,
+.table-context-menu {
     position: fixed;
     z-index: 10000;
     background-color: var(--vscode-menu-background, #252526);
@@ -1100,7 +1115,8 @@ body.vscode-dark #editor strong {
 }
 
 .mermaid-menu-item,
-.math-menu-item {
+.math-menu-item,
+.table-menu-item {
     padding: 8px 16px;
     cursor: pointer;
     font-size: 13px;
@@ -1109,9 +1125,56 @@ body.vscode-dark #editor strong {
 }
 
 .mermaid-menu-item:hover,
-.math-menu-item:hover {
+.math-menu-item:hover,
+.table-menu-item:hover {
     background-color: var(--vscode-menu-selectionBackground, #04395e);
     color: var(--vscode-menu-selectionForeground, #ffffff);
+}
+
+/* 画像化の背景色トグル（コンテキストメニュー上部）。Mermaid／数式で共有 */
+.mermaid-menu-bg-row,
+.math-menu-bg-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px 8px;
+    border-bottom: 1px solid var(--vscode-menu-separatorBackground, #454545);
+    margin-bottom: 4px;
+}
+
+.mermaid-menu-bg-label,
+.math-menu-bg-label {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground, #999999);
+    margin-right: 4px;
+}
+
+.mermaid-bg-btn,
+.math-bg-btn,
+.math-fg-btn {
+    flex: 1;
+    padding: 3px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--vscode-menu-foreground, #cccccc);
+    background-color: transparent;
+    border: 1px solid var(--vscode-menu-border, #454545);
+    border-radius: 3px;
+    transition: background-color 0.1s, border-color 0.1s;
+}
+
+.mermaid-bg-btn:hover,
+.math-bg-btn:hover,
+.math-fg-btn:hover {
+    background-color: var(--vscode-menu-selectionBackground, #04395e);
+}
+
+.mermaid-bg-btn.active,
+.math-bg-btn.active,
+.math-fg-btn.active {
+    background-color: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #ffffff);
+    border-color: var(--vscode-button-background, #0e639c);
 }
 
 /* トースト通知 */

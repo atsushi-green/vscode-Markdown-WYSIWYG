@@ -621,6 +621,80 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 相対パスから画像のMarkdown記法 `![](path)` を組み立てる純粋関数。
+     * alt は空（貼り付け画像に説明は無いため）。URLとして壊れないよう、パス中の
+     * 半角スペースは `%20` へ、丸括弧は `%28`/`%29` へエンコードする。
+     * @param {string} relPath 画像への相対パス（POSIX区切り）
+     * @returns {string} `![](encoded)`
+     */
+    function buildImageMarkdown(relPath) {
+        const encoded = String(relPath || '')
+            .replace(/ /g, '%20')
+            .replace(/\(/g, '%28')
+            .replace(/\)/g, '%29');
+        return '![](' + encoded + ')';
+    }
+
+    /**
+     * クリップボードの items（`DataTransferItemList` 相当）から最初の画像アイテムを返す
+     * 純粋関数。`type` が `image/` で始まるものを探す。無ければ null。
+     * @param {ArrayLike<{kind?:string,type?:string}>} items
+     * @returns {any|null}
+     */
+    function findClipboardImageItem(items) {
+        if (!items) {
+            return null;
+        }
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            if (it && typeof it.type === 'string' && it.type.indexOf('image/') === 0) {
+                return it;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 画像の相対パスから `![](path)` を組み立て、現在のキャレット位置へテキストとして
+     * 挿入する（クリップボード画像貼り付けの受け取り側）。選択がエディタ外／無い場合は
+     * エディタ末尾へフォールバックする。挿入後に input を発火して文書へ反映する。
+     *
+     * テキストノードとして挿入するが、直後の input で走るライブ変換
+     * （`convertInlineText`）が `![](path)` を `<img>` に描画する（`convertInline` と同経路）。
+     * ソースには `![](path)` が保たれる（直列化は `serializeInline` の IMG 分岐＝往復不変）。
+     * @param {string} relPath 画像への相対パス
+     * @returns {boolean} 挿入したら true
+     */
+    function insertImageMarkdown(relPath) {
+        if (!relPath) {
+            return false;
+        }
+        const md = buildImageMarkdown(relPath);
+        const selection = window.getSelection();
+        let range = null;
+        if (selection && selection.rangeCount > 0 &&
+            state.editor.contains(selection.getRangeAt(0).startContainer)) {
+            range = selection.getRangeAt(0);
+        } else {
+            range = document.createRange();
+            range.selectNodeContents(state.editor);
+            range.collapse(false);
+        }
+        range.deleteContents();
+        const textNode = document.createTextNode(md);
+        range.insertNode(textNode);
+        // キャレットを挿入テキストの直後へ移す
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+        state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    }
+
+    /**
      * 見出しのフォーマット
      */
     function formatHeading(level) {
@@ -2196,6 +2270,16 @@ window.CommandsModule = (function() {
             return '' + (mathSpans.length - 1) + '';
         });
 
+        // 画像（![alt](url)）。リンクより先に処理して `![` を `!`＋リンクに割らない。
+        // 入力テキストは未エスケープのため属性値は escapeHtml＋" を潰す（数式と同方針）。
+        const imgSpans = [];
+        html = html.replace(/!\[([^\]]*)]\(([^)]+)\)/g, function (_m, alt, url) {
+            const s = markdown.escapeHtml(url).replace(/"/g, '&quot;');
+            const a = markdown.escapeHtml(alt).replace(/"/g, '&quot;');
+            imgSpans.push('<img src="' + s + '" alt="' + a + '">');
+            return '' + (imgSpans.length - 1) + '';
+        });
+
         // リンク
         html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
@@ -2211,6 +2295,11 @@ window.CommandsModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避した画像を <img> として復元（属性中の記法文字を強調変換から守った）
+        html = html.replace(/(\d+)/g, function (_m, i) {
+            return imgSpans[Number(i)];
+        });
 
         // 退避した数式を復元（中身は整形しない。KaTeXでのレンダリングは mathModule が行う）
         html = html.replace(/(\d+)/g, function (_m, i) {
@@ -2476,6 +2565,9 @@ window.CommandsModule = (function() {
         insertCodeBlock: insertCodeBlock,
         insertBlockquote: insertBlockquote,
         insertToc: insertToc,
+        buildImageMarkdown: buildImageMarkdown,
+        findClipboardImageItem: findClipboardImageItem,
+        insertImageMarkdown: insertImageMarkdown,
         scrollToAnchor: scrollToAnchor,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,

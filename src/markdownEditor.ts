@@ -1,5 +1,11 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import {
+    mimeToExtension,
+    buildImageFilename,
+    disambiguateFilename,
+    toMarkdownRelativePath
+} from './imagePaste';
 
 /**
  * Markdown WYSIWYG エディタプロバイダー
@@ -41,10 +47,22 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         webviewPanel: vscode.WebviewPanel,
         _token: vscode.CancellationToken
     ): Promise<void> {
+        // ローカル画像（`![](image.png)` の相対パス）を Webview で表示できるよう、
+        // ドキュメントのあるフォルダを localResourceRoots に加え、その webview URI を
+        // ベースとして Webview へ渡す（Webview 側が相対 src をこのベースで解決する）。
+        // file スキーム以外（untitled 等）はフォルダが定まらないため空にする。
+        const localResourceRoots = [this.context.extensionUri];
+        let imageBaseUri = '';
+        if (document.uri.scheme === 'file') {
+            const docDir = vscode.Uri.joinPath(document.uri, '..');
+            localResourceRoots.push(docDir);
+            imageBaseUri = webviewPanel.webview.asWebviewUri(docDir).toString();
+        }
+
         // Webviewのオプション設定
         webviewPanel.webview.options = {
             enableScripts: true,
-            localResourceRoots: [this.context.extensionUri]
+            localResourceRoots: localResourceRoots
         };
 
         // Webviewの初期HTML設定
@@ -62,7 +80,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             webviewPanel.webview.postMessage({
                 type: 'update',
                 content: document.getText(),
-                seq: pendingEchoSeq
+                seq: pendingEchoSeq,
+                imageBaseUri: imageBaseUri
             });
             // seq は一度きり消費する（次に来る外部変更へ持ち越さない）
             pendingEchoSeq = undefined;
@@ -102,6 +121,18 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 case 'saveMermaidPng':
                     await this.saveMermaidPng(e.pngBase64, e.filename);
                     return;
+                case 'saveClipboardImage': {
+                    // クリップボードから貼り付けた画像をドキュメント隣へ保存し、
+                    // 挿入用の相対パスを Webview へ返す（挿入は Webview 側が行う）。
+                    const relPath = await this.saveClipboardImage(document, e.base64, e.mime);
+                    if (relPath) {
+                        webviewPanel.webview.postMessage({
+                            type: 'insertImagePath',
+                            path: relPath
+                        });
+                    }
+                    return;
+                }
                 case 'openLink':
                     await this.openLink(e.href);
                     return;
@@ -167,6 +198,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         // WebviewはCSPで外部CDNを読めないため media/katex/ へ同梱している。
         // katex.min.css がフォントを `fonts/*.woff2` の相対パスで参照するため、
         // フォントは katex.min.css と同じ階層の fonts/ に置く必要がある（CSPは font-src で許可済み）。
+        // また数式の画像化（math.js の loadKatexFontFaceCss）が woff2 を fetch で読んで
+        // SVGへ base64 埋め込みするため、CSP の connect-src も許可が必要。
         const katexUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'media', 'katex', 'katex.min.js')
         );
@@ -194,7 +227,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                                style-src ${webview.cspSource} 'unsafe-inline'; 
                                script-src 'nonce-${nonce}' 'unsafe-eval'; 
                                img-src ${webview.cspSource} data: blob:;
-                               font-src ${webview.cspSource} data:;">
+                               font-src ${webview.cspSource} data:;
+                               connect-src ${webview.cspSource};">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <link href="${katexStyleUri}" rel="stylesheet">
                 <link href="${styleUri}" rel="stylesheet">
@@ -254,6 +288,12 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                 </div>
                 <!-- Mermaidコンテキストメニュー -->
                 <div id="mermaidContextMenu" class="mermaid-context-menu" style="display: none;">
+                    <div class="mermaid-menu-bg-row">
+                        <span class="mermaid-menu-bg-label">背景</span>
+                        <button type="button" class="mermaid-bg-btn" data-bg="transparent" title="透過背景">透過</button>
+                        <button type="button" class="mermaid-bg-btn active" data-bg="white" title="白背景">白</button>
+                        <button type="button" class="mermaid-bg-btn" data-bg="black" title="黒背景">黒</button>
+                    </div>
                     <div class="mermaid-menu-item" data-action="copyImage">📋 画像をコピー</div>
                     <div class="mermaid-menu-item" data-action="savePng">💾 PNG画像として保存</div>
                 </div>
@@ -393,6 +433,63 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             vscode.window.showInformationMessage(`✅ Mermaid図を保存しました: ${uri.fsPath}`);
         } catch (error) {
             vscode.window.showErrorMessage(`❌ Mermaid図の保存に失敗しました: ${error}`);
+        }
+    }
+
+    /**
+     * クリップボードから貼り付けた画像を、編集中のドキュメントと同じフォルダへ
+     * 一意なファイル名（`image-<日時>.<ext>`・衝突時は `-1`,`-2`…）で保存し、
+     * 挿入用の相対パス（POSIX区切り）を返す。保存先が決まらない・失敗した場合は
+     * `undefined` を返す（呼び出し側は挿入を行わない）。
+     *
+     * @param document 編集中のドキュメント（保存先フォルダの基準）
+     * @param base64   画像データ（base64・data URLプレフィックスは含まない想定）
+     * @param mime     画像のMIMEタイプ（例: `image/png`）
+     * @returns 挿入用の相対パス、または `undefined`
+     */
+    private async saveClipboardImage(
+        document: vscode.TextDocument,
+        base64: string,
+        mime: string
+    ): Promise<string | undefined> {
+        // 未保存（untitled）だと保存先フォルダが定まらないため案内して中断する
+        if (document.isUntitled || document.uri.scheme !== 'file') {
+            vscode.window.showWarningMessage(
+                '画像を貼り付けるには、先にMarkdownファイルを保存してください。'
+            );
+            return undefined;
+        }
+        if (!base64) {
+            return undefined;
+        }
+        try {
+            const ext = mimeToExtension(mime);
+            const dirUri = vscode.Uri.joinPath(document.uri, '..');
+
+            // 同フォルダの既存ファイル名を集めて衝突を避ける
+            let existing: string[] = [];
+            try {
+                const entries = await vscode.workspace.fs.readDirectory(dirUri);
+                existing = entries.map(([name]) => name);
+            } catch {
+                // ディレクトリが読めない場合は衝突チェックなしで続行
+            }
+
+            const filename = disambiguateFilename(buildImageFilename(new Date(), ext), existing);
+            const targetUri = vscode.Uri.joinPath(dirUri, filename);
+
+            // Base64をバイナリへ（saveMermaidPng と同じ方式）
+            const binaryString = atob(base64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            await vscode.workspace.fs.writeFile(targetUri, bytes);
+            return toMarkdownRelativePath(path.dirname(document.uri.fsPath), targetUri.fsPath);
+        } catch (error) {
+            vscode.window.showErrorMessage(`❌ 画像の保存に失敗しました: ${error}`);
+            return undefined;
         }
     }
 }

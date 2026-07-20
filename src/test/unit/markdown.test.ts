@@ -93,6 +93,110 @@ suite('MarkdownModule', () => {
             assert.strictEqual(html, '<p>段落1</p><p>段落2</p>');
         });
 
+        test('画像記法 ![alt](url) を <img> に変換する（リンクと区別する）', () => {
+            assert.strictEqual(
+                env.markdown.markdownToHtml('![](image-1.png)'),
+                '<p><img src="image-1.png" alt=""></p>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('![説明](path/to/a.png)'),
+                '<p><img src="path/to/a.png" alt="説明"></p>'
+            );
+            // 通常リンクは <a> のまま（! が無い）
+            assert.ok(env.markdown.markdownToHtml('[text](url)').includes('<a href="url">text</a>'));
+        });
+
+        test('画像の属性の " をエスケープする', () => {
+            const html = env.markdown.markdownToHtml('![a"b](u"v)');
+            assert.ok(html.includes('src="u&quot;v"'), html);
+            assert.ok(html.includes('alt="a&quot;b"'), html);
+        });
+
+        test('画像記法は WYSIWYG 往復で保たれる', () => {
+            ['![](image-1.png)', '![説明](assets/x.png)', '前 ![](a.png) 後'].forEach(src => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(src));
+                assert.strictEqual(rt.trim(), src, `roundtrip: ${src}`);
+            });
+        });
+
+        test('パス/altに _ * ~ + を含む画像も往復で壊れない（強調変換から保護）', () => {
+            [
+                '![](my_project/image_1_2.png)',
+                '![](a*b~c+d.png)',
+                '![al_t](x_y.png)',
+                '前 ![](p_q.png) と ![](r_s.png) 後'
+            ].forEach(src => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(src));
+                assert.strictEqual(rt.trim(), src, `roundtrip: ${src}`);
+                // 属性内に <em>/<strong> が混入していないこと
+                const html = env.markdown.markdownToHtml(src);
+                assert.ok(!/src="[^"]*<(em|strong)/.test(html), html);
+            });
+        });
+
+        test('<img> の data-original-src があればそれを優先して往復する', () => {
+            // ローカル画像表示(2/2)で src を webview URI へ差し替えても、元パスで往復する
+            const md = env.markdown.htmlToMarkdown(
+                '<p><img src="https://file+.vscode-resource/abs/image-1.png" ' +
+                'data-original-src="image-1.png" alt=""></p>'
+            );
+            assert.strictEqual(md.trim(), '![](image-1.png)');
+        });
+
+        suite('isResolvableRelativeImageSrc', () => {
+            test('相対パスは true', () => {
+                ['image.png', 'sub/image.png', '../up.png', './here.png'].forEach(s => {
+                    assert.strictEqual(env.markdown.isResolvableRelativeImageSrc(s), true, s);
+                });
+            });
+
+            test('スキーム付き・プロトコル相対・ルート絶対・空は false', () => {
+                [
+                    'http://h/x.png', 'https://h/x.png', 'data:image/png;base64,AAAA',
+                    'blob:abc', 'vscode-webview://x/y.png', '//host/x.png', '/root.png', ''
+                ].forEach(s => {
+                    assert.strictEqual(env.markdown.isResolvableRelativeImageSrc(s), false, s);
+                });
+            });
+        });
+
+        suite('resolveImageSrc', () => {
+            test('ベースURIと相対パスを / で結合する（先頭 ./ は除去）', () => {
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base/dir', 'image.png'),
+                    'https://base/dir/image.png'
+                );
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base/dir/', './image.png'),
+                    'https://base/dir/image.png'
+                );
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base/dir', 'sub/a.png'),
+                    'https://base/dir/sub/a.png'
+                );
+            });
+
+            test('ベースURIが空なら src をそのまま返す', () => {
+                assert.strictEqual(env.markdown.resolveImageSrc('', 'image.png'), 'image.png');
+            });
+
+            test('# と ? はエンコードする（% は二重エンコードしない）', () => {
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base', 'img#1.png'),
+                    'https://base/img%231.png'
+                );
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base', 'a?b.png'),
+                    'https://base/a%3Fb.png'
+                );
+                // 既存の %20 はそのまま（% を再エンコードしない）
+                assert.strictEqual(
+                    env.markdown.resolveImageSrc('https://base', 'a%20b.png'),
+                    'https://base/a%20b.png'
+                );
+            });
+        });
+
         test('言語指定付きコードフェンスをpre/codeに変換する', () => {
             const html = env.markdown.markdownToHtml('```python\nprint("hello")\n```');
             assert.strictEqual(
@@ -117,7 +221,7 @@ suite('MarkdownModule', () => {
             const html = env.markdown.markdownToHtml('- 項目1\n  - ネスト\n- 項目2');
             assert.strictEqual(
                 html,
-                '<ul><li>項目1<ul><li>ネスト</li></ul></li><li>項目2</li></ul>'
+                '<ul data-marker="-"><li>項目1<ul data-marker="-"><li>ネスト</li></ul></li><li>項目2</li></ul>'
             );
         });
 
@@ -147,7 +251,7 @@ suite('MarkdownModule', () => {
         test('タスクリストと通常リストの混在・ネストを変換する', () => {
             const html = env.markdown.markdownToHtml('- [ ] 親タスク\n  - 通常ネスト\n- 通常項目');
             assert.ok(html.includes('<li class="task-list-item">'), html);
-            assert.ok(html.includes('<ul><li>通常ネスト</li></ul>'), html);
+            assert.ok(html.includes('<ul data-marker="-"><li>通常ネスト</li></ul>'), html);
             assert.ok(html.includes('<li>通常項目</li>'), html);
         });
 
@@ -324,6 +428,42 @@ suite('MarkdownModule', () => {
         test('番号付きリストを連番でシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown('<ol><li>一</li><li>二</li></ol>');
             assert.strictEqual(md, '1. 一\n2. 二\n');
+        });
+
+        test('data-marker="-" のulは - でシリアライズする（* に書き換えない）', () => {
+            const md = env.markdown.htmlToMarkdown('<ul data-marker="-"><li>a</li><li>b</li></ul>');
+            assert.strictEqual(md, '- a\n- b\n');
+        });
+
+        test('data-marker が無い/不正な ul は従来どおり * （新規入力の既定を維持）', () => {
+            assert.strictEqual(
+                env.markdown.htmlToMarkdown('<ul><li>a</li></ul>'), '* a\n'
+            );
+            assert.strictEqual(
+                env.markdown.htmlToMarkdown('<ul data-marker="x"><li>a</li></ul>'), '* a\n'
+            );
+        });
+
+        test('箇条書きマーカーは往復でバイト一致する（触っていない行が書き換わらない）', () => {
+            [
+                '- 項目1\n- 項目2\n',
+                '* 項目1\n* 項目2\n',
+                '- 親\n  - 子\n- 親2\n',
+                '* 親\n  * 子\n',
+                '- [ ] 未\n- [x] 済\n'
+            ].forEach(src => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(src));
+                assert.strictEqual(rt, src, `roundtrip: ${JSON.stringify(src)}`);
+            });
+        });
+
+        test('既知の制約: 空行なしで異なるマーカーが混在すると先頭マーカーへ統一される', () => {
+            // `- a` と `* b` は本来別リスト（CommonMark）だが、現状のパーサーは空行が
+            // 無いと1つのulに束ね、data-marker は先頭アイテムのマーカーになる。
+            // よって `* b` は `- b` に書き換わる（往復非一致）。表区切りと合わせて
+            // ROADMAP の残タスク。ここでは現状挙動を固定し、退行に気づけるようにする。
+            const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml('- a\n* b\n'));
+            assert.strictEqual(rt, '- a\n- b\n');
         });
 
         test('タスクリストのチェックボックスを[ ]/[x]でシリアライズする', () => {

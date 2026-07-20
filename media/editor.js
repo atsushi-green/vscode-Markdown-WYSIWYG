@@ -27,6 +27,36 @@
     // 単語数・文字数ステータスバー要素（初期化時に生成）
     let wordCountStatusEl = null;
 
+    // クリップボード画像貼り付け時のキャレット範囲（保存応答 insertImagePath まで保持）
+    let pendingImagePasteRange = null;
+
+    // ローカル画像表示用のベースURI（ドキュメントフォルダの webview URI）。
+    // 拡張機能が update メッセージで渡す。相対パス `![](img.png)` の src 解決に使う。
+    let imageBaseUri = '';
+
+    /**
+     * エディタ内の `<img>` のうち、ローカル相対パスのものを webview URI へ解決する。
+     * 元パスは `data-original-src` に退避（直列化は serializeInline がこれを優先して
+     * 読むため往復は元の相対パスで保たれる）。解決済み（data-original-src あり）と
+     * スキーム付き/絶対/data: の src はスキップする。baseUri 未設定なら何もしない。
+     */
+    function resolveLocalImages(root) {
+        if (!imageBaseUri || !root) {
+            return;
+        }
+        root.querySelectorAll('img').forEach((img) => {
+            if (img.hasAttribute('data-original-src')) {
+                return;
+            }
+            const src = img.getAttribute('src') || '';
+            if (!markdown.isResolvableRelativeImageSrc(src)) {
+                return;
+            }
+            img.setAttribute('data-original-src', src);
+            img.setAttribute('src', markdown.resolveImageSrc(imageBaseUri, src));
+        });
+    }
+
     /**
      * 単語数・文字数ステータスバーを生成する（一度だけ）
      */
@@ -303,6 +333,10 @@
         // ブロック数式の右クリックメニュー（PNGコピー）
         mathModule.setupContextMenu(state.editor);
 
+        // 平文領域の右クリックメニュー（表を挿入…）。数式より後に配線し、
+        // 数式ブロック上の右クリックは数式メニューを優先する（対象が排他）。
+        tableModule.setupContextMenu(state.editor);
+
         // コードブロック言語セレクタのイベント
         commands.setupCodeLangEvents();
 
@@ -401,6 +435,9 @@
             // 追加・変更された数式（KaTeX）をレンダリング
             mathModule.render(state.editor);
 
+            // ローカル相対パス画像の src を webview URI へ解決
+            resolveLocalImages(state.editor);
+
             // 単語数・文字数の表示を更新
             updateWordCount();
 
@@ -473,8 +510,43 @@
             if (state.isRawMode || isFormFieldFocused() || !event.clipboardData) {
                 return;
             }
+
             const text = event.clipboardData.getData('text/plain');
-            if (!text || !commands.handleMarkdownPaste(text)) {
+
+            // テキストを持たないクリップボード（スクリーンショット等の純粋な画像）だけを
+            // 画像貼り付けとして扱い、拡張機能側へ保存を依頼して相対パスを ![](…) で挿入する。
+            // Excel等のように**テキスト（TSV/表）と画像を併載**するクリップボードは、
+            // 従来どおりテキスト（表）貼り付けを優先する（画像で上書きしない）。
+            if (!text) {
+                const imageItem = commands.findClipboardImageItem(event.clipboardData.items);
+                const file = imageItem && imageItem.getAsFile && imageItem.getAsFile();
+                if (file) {
+                    event.preventDefault();
+                    // 非同期の保存応答（insertImagePath）まで挿入位置を保持する
+                    const selection = window.getSelection();
+                    pendingImagePasteRange =
+                        (selection && selection.rangeCount > 0 &&
+                            state.editor.contains(selection.getRangeAt(0).startContainer))
+                            ? selection.getRangeAt(0).cloneRange()
+                            : null;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const result = String(reader.result || '');
+                        const base64 = result.indexOf(',') >= 0 ? result.split(',')[1] : '';
+                        if (base64) {
+                            state.vscode.postMessage({
+                                type: 'saveClipboardImage',
+                                base64: base64,
+                                mime: file.type || 'image/png'
+                            });
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                }
+                return;
+            }
+
+            if (!commands.handleMarkdownPaste(text)) {
                 return;
             }
             event.preventDefault();
@@ -573,14 +645,47 @@
                 case 'update':
                     handleUpdateMessage(message);
                     break;
+                case 'insertImagePath':
+                    handleInsertImagePath(message);
+                    break;
             }
         });
+    }
+
+    /**
+     * 拡張機能側が保存した画像の相対パスを受け取り、貼り付け時のキャレット位置へ
+     * `![](path)` を挿入する（クリップボード画像貼り付けの受け取り側・2/2）。
+     */
+    function handleInsertImagePath(message) {
+        if (!message || !message.path) {
+            return;
+        }
+        // 貼り付け時に控えたキャレット範囲を復元してから挿入する
+        // （非同期応答の間にフォーカス・選択が変わっている可能性に備える）。
+        // 保存先が untitled 等で応答が来ないケースの取りこぼしに備え、範囲が今も
+        // エディタ内に生きているときだけ復元する（古い範囲の誤復元を避ける）。
+        const range = pendingImagePasteRange;
+        pendingImagePasteRange = null;
+        if (range && state.editor.contains(range.startContainer)) {
+            const selection = window.getSelection();
+            if (selection) {
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        }
+        commands.insertImageMarkdown(message.path);
     }
 
     /**
      * 更新メッセージの処理
      */
     function handleUpdateMessage(message) {
+        // ローカル画像表示用のベースURI（ドキュメントフォルダの webview URI）を取り込む。
+        // ドキュメント単位で不変だが、毎回来ても上書きは無害。
+        if (typeof message.imageBaseUri === 'string') {
+            imageBaseUri = message.imageBaseUri;
+        }
+
         // コードブロック作成中はスキップ
         if (state.isCreatingCodeBlock) {
             return;
@@ -646,6 +751,9 @@
         // テーブルをレンダリング
         tableModule.render();
 
+        // ローカル相対パス画像の src を webview URI へ解決
+        resolveLocalImages(state.editor);
+
         // カーソル位置を復元（Mermaidの非同期描画完了後に行う。描画完了前に復元すると
         // ブロックの高さ・ノード構成が未確定でアンカーがずれ、キャレットが飛ぶため）
         if (savedPosition) {
@@ -703,6 +811,7 @@
             mermaidModule.render();
             mathModule.render(state.editor);
             tableModule.render();
+            resolveLocalImages(state.editor);
             hideRawLineGutter();
             showWysiwygLineGutter();
             state.toggleBtn.classList.remove('active');

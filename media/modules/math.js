@@ -96,10 +96,119 @@ window.MathModule = (function() {
         return { left: left, top: top };
     }
 
+    // 画像化の背景色の選択肢（Mermaidメニューと同じ 透過／白／黒。既定は白）。
+    const BACKGROUND_OPTIONS = [
+        { value: 'transparent', label: '透過', title: '透過背景' },
+        { value: 'white', label: '白', title: '白背景', active: true },
+        { value: 'black', label: '黒', title: '黒背景' }
+    ];
+
+    // 数式の文字色の選択肢。'auto' は背景に追従（白/透過→黒・黒→白＝従来動作）。
+    // 透過背景をダークな資料へ貼ると既定の黒文字が埋もれるため、白文字を選べるようにする。
+    const TEXT_COLOR_OPTIONS = [
+        { value: 'auto', label: '自動', title: '文字色を背景に合わせる（白/透過→黒・黒→白）', active: true },
+        { value: 'black', label: '黒', title: '黒い文字' },
+        { value: 'white', label: '白', title: '白い文字' }
+    ];
+
+    /**
+     * コンテキストメニューで現在選択されている背景色を解決する純粋関数。
+     * `.math-bg-btn.active` の `data-bg` を読み、`'transparent'`／`'black'` のみ
+     * その値を、それ以外（未選択・不正値）は `'white'`（従来動作）を返す。
+     * Mermaid メニューの `resolveMenuBackground` と同じ契約。
+     *
+     * @param {HTMLElement} menu コンテキストメニュー要素
+     * @returns {string} 'transparent' | 'white' | 'black'
+     */
+    function resolveMenuBackground(menu) {
+        if (!menu || typeof menu.querySelector !== 'function') {
+            return 'white';
+        }
+        const active = menu.querySelector('.math-bg-btn.active');
+        const bg = active && active.getAttribute('data-bg');
+        return (bg === 'transparent' || bg === 'black') ? bg : 'white';
+    }
+
+    /**
+     * コンテキストメニューで現在選択されている文字色モードを解決する純粋関数。
+     * `.math-fg-btn.active` の `data-fg` を読み、`'black'`／`'white'` のみその値を、
+     * それ以外（未選択・不正値・`'auto'`）は `'auto'`（背景追従＝従来動作）を返す。
+     *
+     * @param {HTMLElement} menu コンテキストメニュー要素
+     * @returns {string} 'auto' | 'black' | 'white'
+     */
+    function resolveMenuTextColor(menu) {
+        if (!menu || typeof menu.querySelector !== 'function') {
+            return 'auto';
+        }
+        const active = menu.querySelector('.math-fg-btn.active');
+        const fg = active && active.getAttribute('data-fg');
+        return (fg === 'black' || fg === 'white') ? fg : 'auto';
+    }
+
+    /**
+     * 背景と文字色モードから、採寸ラッパーへ与える実際の文字色（16進）を決める純粋関数。
+     * `'black'`／`'white'` 指定はその色を、`'auto'`（既定）は背景に追従して
+     * 黒背景なら白・それ以外（白/透過）なら黒を返す（従来動作）。
+     *
+     * @param {string} background 'transparent' | 'white' | 'black'
+     * @param {string} [textColor] 'auto' | 'black' | 'white'
+     * @returns {string} '#000000' | '#ffffff'
+     */
+    function resolveTextColor(background, textColor) {
+        if (textColor === 'black') {
+            return '#000000';
+        }
+        if (textColor === 'white') {
+            return '#ffffff';
+        }
+        return background === 'black' ? '#ffffff' : '#000000';
+    }
+
+    /**
+     * ラベル＋トグルボタン群からなる行を生成する。背景色・文字色の2行で共有する。
+     * クリックで同じ行内の active を1つだけ移す（メニューは閉じず、続けてアクションを選ぶ）。
+     *
+     * @param {string} labelText 行頭ラベル
+     * @param {string} btnClass ボタンのクラス（`math-bg-btn` / `math-fg-btn`）
+     * @param {string} dataAttr 選択値を持たせる属性名（`data-bg` / `data-fg`）
+     * @param {Array<{value:string,label:string,title:string,active?:boolean}>} options
+     * @returns {HTMLElement} 行要素
+     */
+    function buildToggleRow(labelText, btnClass, dataAttr, options) {
+        const row = document.createElement('div');
+        row.className = 'math-menu-bg-row';
+        const label = document.createElement('span');
+        label.className = 'math-menu-bg-label';
+        label.textContent = labelText;
+        row.appendChild(label);
+        options.forEach(function(opt) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = btnClass + (opt.active ? ' active' : '');
+            btn.setAttribute(dataAttr, opt.value);
+            btn.title = opt.title;
+            btn.textContent = opt.label;
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const btns = row.querySelectorAll('.' + btnClass);
+                Array.prototype.forEach.call(btns, function(b) {
+                    b.classList.remove('active');
+                });
+                btn.classList.add('active');
+            });
+            row.appendChild(btn);
+        });
+        return row;
+    }
+
     /**
      * コンテキストメニュー（無ければ生成）を返す。
-     * 見た目は mermaid のメニューと共有（editor.css の `.math-context-menu` は
-     * `.mermaid-context-menu` と同じルールを参照する）。
+     * 見た目は mermaid のメニューと共有（editor.css の `.math-context-menu` 系は
+     * `.mermaid-context-menu` 系と同じルールを参照する）。
+     * 上部に背景色トグル（透過／白／黒）と文字色トグル（自動／黒／白）を持ち、
+     * その下に「画像としてコピー」を置く。
      */
     function ensureContextMenu() {
         if (contextMenuEl && document.body.contains(contextMenuEl)) {
@@ -111,6 +220,9 @@ window.MathModule = (function() {
         menu.style.display = 'none';
         menu.style.position = 'fixed';
 
+        menu.appendChild(buildToggleRow('背景', 'math-bg-btn', 'data-bg', BACKGROUND_OPTIONS));
+        menu.appendChild(buildToggleRow('文字', 'math-fg-btn', 'data-fg', TEXT_COLOR_OPTIONS));
+
         const item = document.createElement('div');
         item.className = 'math-menu-item';
         item.setAttribute('data-action', 'copyImage');
@@ -119,9 +231,11 @@ window.MathModule = (function() {
             e.preventDefault();
             e.stopPropagation();
             const block = currentBlock;
+            const background = resolveMenuBackground(menu);
+            const textColor = resolveMenuTextColor(menu);
             hideContextMenu();
             if (block) {
-                copyBlockAsPng(block);
+                copyBlockAsPng(block, background, textColor);
             }
         });
         menu.appendChild(item);
@@ -389,6 +503,21 @@ window.MathModule = (function() {
     }
 
     /**
+     * DOMノードを foreignObject へ埋め込める XHTML 文字列へ直列化する。
+     *
+     * `outerHTML`（HTML直列化）は KaTeX が√の描画に使うネストした `<svg>` に
+     * xmlns を付けないため、`data:image/svg+xml` として XML 解釈されると
+     * `<svg>` が XHTML 名前空間の未知要素扱いになり√記号が消える。
+     * XMLSerializer は名前空間宣言込みで直列化するのでこれを防げる。
+     *
+     * @param {Node} node  直列化するノード
+     * @returns {string} 名前空間宣言付きの XHTML 文字列
+     */
+    function serializeNodeToXhtml(node) {
+        return new XMLSerializer().serializeToString(node);
+    }
+
+    /**
      * SVGマークアップを `<img>`（`data:image/svg+xml`）経由で canvas へ描画し、PNG Blob を返す。
      *
      * **重要（実機確認前提）**: SVG に `<foreignObject>` を含む場合、Chromium は
@@ -454,8 +583,9 @@ window.MathModule = (function() {
      * @param {HTMLElement} block  対象の `.math-block`
      * @param {number} [scale]     解像度倍率（既定4×devicePixelRatio）
      * @param {string} [background] 背景色（既定 'white'。'transparent' で透過）
+     * @param {string} [textColor] 文字色モード（既定 'auto'＝背景追従。'black'/'white' で固定）
      */
-    async function blockToPngBlob(block, scale, background) {
+    async function blockToPngBlob(block, scale, background, textColor) {
         // KaTeXのWebフォント読み込み完了を待つ（画面表示スタイルの安定化）
         if (document.fonts && document.fonts.ready) {
             try {
@@ -480,13 +610,23 @@ window.MathModule = (function() {
         var wrapper = document.createElement('div');
         wrapper.style.display = 'inline-block';
         wrapper.style.padding = '16px 24px';
-        wrapper.style.color = '#000000';
+        // KaTeX は色を明示せず currentColor を継承するため、文字色は wrapper で決める。
+        // 既定（'auto'）は背景追従で、黒背景では黒文字だと見えないため白へ反転する
+        // （白・透過背景は黒文字）。'black'/'white' 指定時はその色で固定する。
+        // 透過背景をダーク環境へ貼るときは 'white' を選べば埋もれない。
+        wrapper.style.color = resolveTextColor(bg, textColor);
         wrapper.style.textAlign = 'left';
 
         var clone = block.cloneNode(true);
         clone.style.margin = '0';
         clone.style.overflow = 'visible';
         clone.style.textAlign = 'left';
+        // `.katex-display` の既定 margin (1em 0) は画像では過大な上下余白になる。
+        // 採寸前に消して wrapper の padding だけを余白にする。
+        var display = clone.querySelector('.katex-display');
+        if (display) {
+            display.style.margin = '0';
+        }
         wrapper.appendChild(clone);
         temp.appendChild(wrapper);
         document.body.appendChild(temp);
@@ -502,7 +642,8 @@ window.MathModule = (function() {
                 // KaTeXのCSS＋フォント埋め込みを順に置く（@font-face は後勝ちのため
                 // data: URL 版が katex.min.css の相対URL版を上書きする）
                 var cssText = collectKatexCssText() + fontCss;
-                var svgMarkup = buildMathBlockSvgMarkup(wrapper.outerHTML, cssText, width, height, bg);
+                var xhtml = serializeNodeToXhtml(wrapper);
+                var svgMarkup = buildMathBlockSvgMarkup(xhtml, cssText, width, height, bg);
                 return await svgMarkupToPngBlob(svgMarkup, width, height, effectiveScale);
             } catch (foErr) {
                 console.warn('[Math] foreignObject rasterize failed, falling back to html2canvas:', foErr);
@@ -535,13 +676,17 @@ window.MathModule = (function() {
     /**
      * ブロック数式をPNGへ変換し、クリップボードへ画像としてコピーする。
      * 失敗しても例外は投げず、トーストで結果を知らせる（mermaidのコピーと同じ方針）。
+     *
+     * @param {HTMLElement} block  対象の `.math-block`
+     * @param {string} [background] 背景色（既定 'white'。'transparent' で透過、'black' で黒）
+     * @param {string} [textColor] 文字色モード（既定 'auto'＝背景追従。'black'/'white' で固定）
      */
-    async function copyBlockAsPng(block) {
+    async function copyBlockAsPng(block, background, textColor) {
         if (!block) {
             return;
         }
         try {
-            const blob = await blockToPngBlob(block);
+            const blob = await blockToPngBlob(block, undefined, background, textColor);
             await navigator.clipboard.write([
                 new ClipboardItem({ 'image/png': blob })
             ]);
@@ -589,8 +734,12 @@ window.MathModule = (function() {
         hideContextMenu: hideContextMenu,
         copyBlockAsPng: copyBlockAsPng,
         findMathBlock: findMathBlock,
+        resolveMenuBackground: resolveMenuBackground,
+        resolveMenuTextColor: resolveMenuTextColor,
+        resolveTextColor: resolveTextColor,
         computeMenuPosition: computeMenuPosition,
         buildMathBlockSvgMarkup: buildMathBlockSvgMarkup,
+        serializeNodeToXhtml: serializeNodeToXhtml,
         buildKatexFontFaceCss: buildKatexFontFaceCss,
         KATEX_FONT_MANIFEST: KATEX_FONT_MANIFEST,
         resolveKatexFontBaseUrl: resolveKatexFontBaseUrl,
