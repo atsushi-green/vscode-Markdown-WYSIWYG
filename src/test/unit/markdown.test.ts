@@ -221,7 +221,7 @@ suite('MarkdownModule', () => {
             const html = env.markdown.markdownToHtml('- 項目1\n  - ネスト\n- 項目2');
             assert.strictEqual(
                 html,
-                '<ul><li>項目1<ul><li>ネスト</li></ul></li><li>項目2</li></ul>'
+                '<ul data-marker="-"><li>項目1<ul data-marker="-"><li>ネスト</li></ul></li><li>項目2</li></ul>'
             );
         });
 
@@ -251,7 +251,7 @@ suite('MarkdownModule', () => {
         test('タスクリストと通常リストの混在・ネストを変換する', () => {
             const html = env.markdown.markdownToHtml('- [ ] 親タスク\n  - 通常ネスト\n- 通常項目');
             assert.ok(html.includes('<li class="task-list-item">'), html);
-            assert.ok(html.includes('<ul><li>通常ネスト</li></ul>'), html);
+            assert.ok(html.includes('<ul data-marker="-"><li>通常ネスト</li></ul>'), html);
             assert.ok(html.includes('<li>通常項目</li>'), html);
         });
 
@@ -428,6 +428,42 @@ suite('MarkdownModule', () => {
         test('番号付きリストを連番でシリアライズする', () => {
             const md = env.markdown.htmlToMarkdown('<ol><li>一</li><li>二</li></ol>');
             assert.strictEqual(md, '1. 一\n2. 二\n');
+        });
+
+        test('data-marker="-" のulは - でシリアライズする（* に書き換えない）', () => {
+            const md = env.markdown.htmlToMarkdown('<ul data-marker="-"><li>a</li><li>b</li></ul>');
+            assert.strictEqual(md, '- a\n- b\n');
+        });
+
+        test('data-marker が無い/不正な ul は従来どおり * （新規入力の既定を維持）', () => {
+            assert.strictEqual(
+                env.markdown.htmlToMarkdown('<ul><li>a</li></ul>'), '* a\n'
+            );
+            assert.strictEqual(
+                env.markdown.htmlToMarkdown('<ul data-marker="x"><li>a</li></ul>'), '* a\n'
+            );
+        });
+
+        test('箇条書きマーカーは往復でバイト一致する（触っていない行が書き換わらない）', () => {
+            [
+                '- 項目1\n- 項目2\n',
+                '* 項目1\n* 項目2\n',
+                '- 親\n  - 子\n- 親2\n',
+                '* 親\n  * 子\n',
+                '- [ ] 未\n- [x] 済\n'
+            ].forEach(src => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(src));
+                assert.strictEqual(rt, src, `roundtrip: ${JSON.stringify(src)}`);
+            });
+        });
+
+        test('既知の制約: 空行なしで異なるマーカーが混在すると先頭マーカーへ統一される', () => {
+            // `- a` と `* b` は本来別リスト（CommonMark）だが、現状のパーサーは空行が
+            // 無いと1つのulに束ね、data-marker は先頭アイテムのマーカーになる。
+            // よって `* b` は `- b` に書き換わる（往復非一致）。表区切りと合わせて
+            // ROADMAP の残タスク。ここでは現状挙動を固定し、退行に気づけるようにする。
+            const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml('- a\n* b\n'));
+            assert.strictEqual(rt, '- a\n- b\n');
         });
 
         test('タスクリストのチェックボックスを[ ]/[x]でシリアライズする', () => {

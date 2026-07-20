@@ -223,7 +223,11 @@ window.MarkdownModule = (function() {
         function build(level) {
             const ordered = items[index].ordered;
             const tag = ordered ? 'ol' : 'ul';
-            let html = `<${tag}>`;
+            // 箇条書きは元マーカー（`-`/`*`）を data-marker に保持して往復で復元する。
+            // このリスト（同レベルの連続）の先頭アイテムのマーカーを採用する。
+            const bullet = items[index].marker === '-' ? '-' : '*';
+            const markerAttr = ordered ? '' : ` data-marker="${bullet}"`;
+            let html = `<${tag}${markerAttr}>`;
 
             while (index < items.length && items[index].level >= level) {
                 const item = items[index];
@@ -532,6 +536,9 @@ window.MarkdownModule = (function() {
                     items.push({
                         level: Math.floor(indent / 2),
                         ordered: /^\d+\.$/.test(m[2]),
+                        // 元の箇条書きマーカー（`-` / `*`）を保持し、直列化で復元する
+                        // （触っていない行の `- ` が `* ` に書き換わるのを防ぐ）。
+                        marker: m[2],
                         task: task !== null,
                         checked: task !== null && task[1].toLowerCase() === 'x',
                         text: task !== null ? task[2] : m[3]
@@ -702,6 +709,10 @@ window.MarkdownModule = (function() {
      */
     function serializeList(listEl, depth) {
         const ordered = listEl.tagName === 'OL';
+        // 箇条書きマーカーは data-marker（読込時に保持した元マーカー）を尊重する。
+        // 無い（新規入力・execCommand 生成の ul）／不正値なら従来どおり `*`。
+        const rawMarker = listEl.getAttribute && listEl.getAttribute('data-marker');
+        const bullet = (rawMarker === '-' || rawMarker === '*') ? rawMarker : '*';
         let md = '';
         let index = 1;
 
@@ -734,7 +745,7 @@ window.MarkdownModule = (function() {
                 taskPrefix = checked ? '[x] ' : '[ ] ';
             }
 
-            const marker = ordered ? `${index++}. ` : '* ';
+            const marker = ordered ? `${index++}. ` : (bullet + ' ');
             md += '  '.repeat(depth) + marker + taskPrefix + text.replace(/\n+/g, ' ').trim() + '\n';
 
             nestedLists.forEach(nested => {
