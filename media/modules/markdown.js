@@ -106,6 +106,18 @@ window.MarkdownModule = (function() {
             return '\u0002' + (mathSpans.length - 1) + '\u0002';
         });
 
+        // 画像（![alt](url)）。リンクより**先に**処理する（`![` を `!`＋リンクに
+        // 割らないため）。alt は空も許容（貼り付け画像は alt 無し）。属性を閉じる
+        // `"` は escapeAttr で潰す（テキストは escapeHtml 済みで `<>&` は実体参照）。
+        // 生成した `<img>` はプレースホルダへ退避しておく。退避しないとURL/alt中の
+        // `_`/`*`/`~`/`+` が後続の強調変換で `src="a<em>b</em>c"` のように壊れ、往復が
+        // 崩れる（インラインコード・数式と同じ保護方針）。
+        const imgSpans = [];
+        html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_m, alt, url) {
+            imgSpans.push('<img src="' + escapeAttr(url) + '" alt="' + escapeAttr(alt) + '">');
+            return '' + (imgSpans.length - 1) + '';
+        });
+
         // リンク
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
@@ -126,6 +138,11 @@ window.MarkdownModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避した画像を <img> として復元（属性中の記法文字を強調変換から守った）
+        html = html.replace(/(\d+)/g, function (_m, i) {
+            return imgSpans[Number(i)];
+        });
 
         // 退避した数式を復元（中身は整形しない。KaTeXでのレンダリングは math.js が行う）
         html = html.replace(/\u0002(\d+)\u0002/g, function (_m, i) {
@@ -623,6 +640,15 @@ window.MarkdownModule = (function() {
             case 'A': {
                 const href = node.getAttribute('href') || '';
                 return `[${serializeInlineChildren(node)}](${href})`;
+            }
+            case 'IMG': {
+                // 画像は void 要素で子を持たない。元のパスは `data-original-src`
+                // （ローカル画像表示のためsrcをwebview URIへ差し替える場合に使う）を
+                // 優先し、無ければ `src` を使う。alt は属性から復元する。
+                const src = node.getAttribute('data-original-src') ||
+                    node.getAttribute('src') || '';
+                const alt = node.getAttribute('alt') || '';
+                return src ? `![${alt}](${src})` : '';
             }
             case 'SPAN':
                 // 生Markdown表示中のspan（リンク・強調・インライン数式の展開中）は

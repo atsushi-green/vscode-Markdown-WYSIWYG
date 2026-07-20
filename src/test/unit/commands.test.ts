@@ -58,6 +58,34 @@ suite('CommandsModule', () => {
             assert.ok(env.editor.querySelector('u'), env.editor.innerHTML);
         });
 
+        test('![](url) のライブ変換で img 要素になり、リンクと区別する', () => {
+            env.editor.innerHTML = '<p>![](image-1.png) 後続</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true);
+            const img = env.editor.querySelector('img');
+            assert.ok(img, env.editor.innerHTML);
+            assert.strictEqual(img!.getAttribute('src'), 'image-1.png');
+            assert.strictEqual(img!.getAttribute('alt'), '');
+            // ![ が ! + リンクに割れていない
+            assert.ok(!env.editor.querySelector('a'), env.editor.innerHTML);
+        });
+
+        test('通常リンク [text](url) はライブ変換で a のまま（回帰確認）', () => {
+            env.editor.innerHTML = '<p>[text](url) 後続</p>';
+            env.commands.applyInlineFormatting();
+            assert.ok(env.editor.querySelector('a'), env.editor.innerHTML);
+            assert.ok(!env.editor.querySelector('img'), env.editor.innerHTML);
+        });
+
+        test('_ を含む画像パスのライブ変換で src が強調に壊れない', () => {
+            env.editor.innerHTML = '<p>![](my_img_1.png) 後続</p>';
+            env.commands.applyInlineFormatting();
+            const img = env.editor.querySelector('img');
+            assert.ok(img, env.editor.innerHTML);
+            assert.strictEqual(img!.getAttribute('src'), 'my_img_1.png');
+            assert.ok(!img!.querySelector('em'), env.editor.innerHTML);
+        });
+
         /**
          * 分割テキストノードを持つ段落を組み立てる（実機のcontenteditable相当）。
          * fragments を順に別々のテキストノードとして追加する。

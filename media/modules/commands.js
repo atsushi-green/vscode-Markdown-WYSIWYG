@@ -2269,6 +2269,16 @@ window.CommandsModule = (function() {
             return '' + (mathSpans.length - 1) + '';
         });
 
+        // 画像（![alt](url)）。リンクより先に処理して `![` を `!`＋リンクに割らない。
+        // 入力テキストは未エスケープのため属性値は escapeHtml＋" を潰す（数式と同方針）。
+        const imgSpans = [];
+        html = html.replace(/!\[([^\]]*)]\(([^)]+)\)/g, function (_m, alt, url) {
+            const s = markdown.escapeHtml(url).replace(/"/g, '&quot;');
+            const a = markdown.escapeHtml(alt).replace(/"/g, '&quot;');
+            imgSpans.push('<img src="' + s + '" alt="' + a + '">');
+            return '' + (imgSpans.length - 1) + '';
+        });
+
         // リンク
         html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
@@ -2284,6 +2294,11 @@ window.CommandsModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避した画像を <img> として復元（属性中の記法文字を強調変換から守った）
+        html = html.replace(/(\d+)/g, function (_m, i) {
+            return imgSpans[Number(i)];
+        });
 
         // 退避した数式を復元（中身は整形しない。KaTeXでのレンダリングは mathModule が行う）
         html = html.replace(/(\d+)/g, function (_m, i) {

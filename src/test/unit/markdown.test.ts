@@ -93,6 +93,56 @@ suite('MarkdownModule', () => {
             assert.strictEqual(html, '<p>段落1</p><p>段落2</p>');
         });
 
+        test('画像記法 ![alt](url) を <img> に変換する（リンクと区別する）', () => {
+            assert.strictEqual(
+                env.markdown.markdownToHtml('![](image-1.png)'),
+                '<p><img src="image-1.png" alt=""></p>'
+            );
+            assert.strictEqual(
+                env.markdown.markdownToHtml('![説明](path/to/a.png)'),
+                '<p><img src="path/to/a.png" alt="説明"></p>'
+            );
+            // 通常リンクは <a> のまま（! が無い）
+            assert.ok(env.markdown.markdownToHtml('[text](url)').includes('<a href="url">text</a>'));
+        });
+
+        test('画像の属性の " をエスケープする', () => {
+            const html = env.markdown.markdownToHtml('![a"b](u"v)');
+            assert.ok(html.includes('src="u&quot;v"'), html);
+            assert.ok(html.includes('alt="a&quot;b"'), html);
+        });
+
+        test('画像記法は WYSIWYG 往復で保たれる', () => {
+            ['![](image-1.png)', '![説明](assets/x.png)', '前 ![](a.png) 後'].forEach(src => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(src));
+                assert.strictEqual(rt.trim(), src, `roundtrip: ${src}`);
+            });
+        });
+
+        test('パス/altに _ * ~ + を含む画像も往復で壊れない（強調変換から保護）', () => {
+            [
+                '![](my_project/image_1_2.png)',
+                '![](a*b~c+d.png)',
+                '![al_t](x_y.png)',
+                '前 ![](p_q.png) と ![](r_s.png) 後'
+            ].forEach(src => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(src));
+                assert.strictEqual(rt.trim(), src, `roundtrip: ${src}`);
+                // 属性内に <em>/<strong> が混入していないこと
+                const html = env.markdown.markdownToHtml(src);
+                assert.ok(!/src="[^"]*<(em|strong)/.test(html), html);
+            });
+        });
+
+        test('<img> の data-original-src があればそれを優先して往復する', () => {
+            // ローカル画像表示(2/2)で src を webview URI へ差し替えても、元パスで往復する
+            const md = env.markdown.htmlToMarkdown(
+                '<p><img src="https://file+.vscode-resource/abs/image-1.png" ' +
+                'data-original-src="image-1.png" alt=""></p>'
+            );
+            assert.strictEqual(md.trim(), '![](image-1.png)');
+        });
+
         test('言語指定付きコードフェンスをpre/codeに変換する', () => {
             const html = env.markdown.markdownToHtml('```python\nprint("hello")\n```');
             assert.strictEqual(
