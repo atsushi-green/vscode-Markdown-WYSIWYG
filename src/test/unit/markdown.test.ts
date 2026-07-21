@@ -409,6 +409,130 @@ suite('MarkdownModule', () => {
             const html = env.markdown.markdownToHtml(`abc${env.state.ZERO_WIDTH}def`);
             assert.strictEqual(html, '<p>abcdef</p>');
         });
+
+        suite('脚注（[^label] / [^label]: 本文）', () => {
+            test('参照を脚注リンク（sup>a）へ変換し、文書末尾に脚注一覧セクションを追加する', () => {
+                const html = env.markdown.markdownToHtml('本文[^1]です。\n\n[^1]: 脚注の本文。');
+                assert.ok(html.includes(
+                    '<sup class="footnote-ref" data-footnote-label="1"><a href="#fn-1" id="fnref-1">1</a></sup>'
+                ), html);
+                assert.ok(html.includes(
+                    '<section class="footnotes" data-footnotes="true"><ol>' +
+                    '<li id="fn-1" data-footnote-label="1">脚注の本文。 ' +
+                    '<a href="#fnref-1" class="footnote-backref">↩</a></li></ol></section>'
+                ), html);
+            });
+
+            test('英数字・アンダースコア・ハイフンのラベルを扱える', () => {
+                const html = env.markdown.markdownToHtml('参照[^note-1]。\n\n[^note-1]: 本文。');
+                assert.ok(html.includes('data-footnote-label="note-1"'), html);
+            });
+
+            test('対応する定義が無い参照はリテラルテキストのまま残す（誤変換しない）', () => {
+                const html = env.markdown.markdownToHtml('本文[^1]です。');
+                assert.ok(html.includes('本文[^1]です。'), html);
+                assert.ok(!html.includes('footnote-ref'), html);
+            });
+
+            test('脚注定義が無ければ脚注一覧セクションも生成しない', () => {
+                const html = env.markdown.markdownToHtml('ただの本文です。');
+                assert.ok(!html.includes('footnotes'), html);
+            });
+
+            test('参照されていない「定義行らしき」地の文は脚注として剥がさない（誤検知防止・/local-review指摘A対応）', () => {
+                // 正規表現の説明文などで `[^0-9]: ...` の形が偶然出てきても、
+                // どこにも `[^0-9]`（参照）が無ければ普通の段落として保持する。
+                const md = '正規表現の説明です。\n\n[^0-9]: 数字以外にマッチする文字クラスの例です。';
+                const html = env.markdown.markdownToHtml(md);
+                assert.ok(!html.includes('footnotes'), html);
+                assert.ok(html.includes('[^0-9]: 数字以外にマッチする文字クラスの例です。'), html);
+                // 参照が無いため、そのまま書き戻しても内容は変わらない
+                assert.strictEqual(env.markdown.htmlToMarkdown(html), md + '\n');
+            });
+
+            test('脚注本文にもインライン記法（強調等）を適用する', () => {
+                const html = env.markdown.markdownToHtml('本文[^1]。\n\n[^1]: **重要**な注釈。');
+                assert.ok(html.includes('<li id="fn-1" data-footnote-label="1"><strong>重要</strong>な注釈。'), html);
+            });
+
+            test('コードフェンス内の `[^1]: ...` は脚注定義として扱わない', () => {
+                const html = env.markdown.markdownToHtml(
+                    '```\n[^1]: これはコード例\n```'
+                );
+                assert.ok(html.includes('[^1]: これはコード例'), html);
+                assert.ok(!html.includes('footnotes'), html);
+            });
+
+            test('同じラベルが複数定義された場合は最初の定義を脚注として使い、二番目は通常の段落として残す（データを失わない）', () => {
+                const html = env.markdown.markdownToHtml(
+                    '本文[^1]。\n\n[^1]: 最初の定義。\n[^1]: 二番目の定義（無視される）。'
+                );
+                assert.ok(html.includes(
+                    '<li id="fn-1" data-footnote-label="1">最初の定義。'
+                ), html);
+                // 二番目は脚注としては無視されるが、内容は通常の段落として保持される
+                // （誤って脚注参照へ変換されないことも確認: /local-review 指摘由来）
+                assert.ok(html.includes('<p>[^1]: 二番目の定義（無視される）。</p>'), html);
+            });
+        });
+
+        suite('extractFootnoteDefinitions', () => {
+            test('参照（[^label]）が実在する定義行だけを抜き出し、残りの行と定義済みラベルを返す', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '本文行[^1][^note]',
+                    '[^1]: 定義1',
+                    '[^note]: 定義2',
+                    '別の本文行'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: '1', text: '定義1' },
+                    { label: 'note', text: '定義2' }
+                ]);
+                assert.strictEqual(result.labels.has('1'), true);
+                assert.strictEqual(result.labels.has('note'), true);
+                assert.deepStrictEqual(Array.from(result.contentLines), ['本文行[^1][^note]', '別の本文行']);
+            });
+
+            test('参照が無い（地の文が偶然この形をしていただけの）定義行らしき行は通常の行として残す（誤検知防止・/local-review指摘A対応）', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '正規表現の説明:',
+                    '[^0-9]: 数字以外にマッチする文字クラスの例です。',
+                    '本文はここまで'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs), []);
+                assert.strictEqual(result.labels.size, 0);
+                assert.deepStrictEqual(Array.from(result.contentLines), [
+                    '正規表現の説明:',
+                    '[^0-9]: 数字以外にマッチする文字クラスの例です。',
+                    '本文はここまで'
+                ]);
+            });
+
+            test('コードフェンス・ブロック数式の中は定義としても参照としても解釈しない', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^3]',
+                    '```',
+                    '[^1]: コード内',
+                    '```',
+                    '$$',
+                    '[^2]: 数式内',
+                    '$$',
+                    '[^3]: 本物の定義'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: '3', text: '本物の定義' }
+                ]);
+                assert.deepStrictEqual(Array.from(result.contentLines), [
+                    '参照[^3]', '```', '[^1]: コード内', '```', '$$', '[^2]: 数式内', '$$'
+                ]);
+            });
+        });
+
+        suite('buildFootnotesSectionHtml', () => {
+            test('定義が無ければ空文字を返す', () => {
+                assert.strictEqual(env.markdown.buildFootnotesSectionHtml([]), '');
+            });
+        });
     });
 
     suite('htmlToMarkdown', () => {
@@ -614,6 +738,42 @@ suite('MarkdownModule', () => {
             const md = env.markdown.htmlToMarkdown('<p>a b</p>');
             assert.strictEqual(md, 'a b\n');
         });
+
+        suite('脚注（sup.footnote-ref / section.footnotes）', () => {
+            test('脚注参照（sup）を[^label]へ復元する', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<p>本文' +
+                    '<sup class="footnote-ref" data-footnote-label="1"><a href="#fn-1" id="fnref-1">1</a></sup>' +
+                    'です。</p>'
+                );
+                assert.strictEqual(md, '本文[^1]です。\n');
+            });
+
+            test('脚注一覧セクションを[^label]: 本文へ復元し、戻りリンクは含めない', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<section class="footnotes"><ol>' +
+                    '<li id="fn-1" data-footnote-label="1">脚注本文。 ' +
+                    '<a href="#fnref-1" class="footnote-backref">back</a></li>' +
+                    '</ol></section>'
+                );
+                assert.strictEqual(md, '[^1]: 脚注本文。\n');
+            });
+
+            test('複数の脚注定義は定義順で並べる', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<section class="footnotes"><ol>' +
+                    '<li id="fn-1" data-footnote-label="1">最初。</li>' +
+                    '<li id="fn-2" data-footnote-label="2">次。</li>' +
+                    '</ol></section>'
+                );
+                assert.strictEqual(md, '[^1]: 最初。\n[^2]: 次。\n');
+            });
+
+            test('footnotesクラスを持たないsectionは通常のブロックコンテナとして再帰する', () => {
+                const md = env.markdown.htmlToMarkdown('<section><p>本文</p></section>');
+                assert.strictEqual(md, '本文\n');
+            });
+        });
     });
 
     suite('数式（インライン $...$ / ブロック $$...$$）', () => {
@@ -796,6 +956,32 @@ suite('MarkdownModule', () => {
                 );
                 assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
             });
+        });
+
+        test('脚注（[^label] / [^label]: 本文）が変換往復で保存される（定義が文書末尾にある場合）', () => {
+            [
+                '本文[^1]です。\n\n[^1]: 脚注の本文。\n',
+                '複数[^1]の脚注[^2]。\n\n[^1]: 最初。\n[^2]: 次。\n',
+                'ラベルにハイフンを含む[^note-1]。\n\n[^note-1]: 本文。\n',
+                '脚注本文に**強調**を含む[^1]。\n\n[^1]: **重要**な注釈。\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('未定義ラベルの参照はリテラルテキストのまま変換往復で保存される', () => {
+            const original = '本文[^does-not-exist]です。\n';
+            const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+            assert.strictEqual(rt, original);
+        });
+
+        test('脚注定義が文書中程にある場合は末尾へ再配置される（既知の仕様・脚注は常に末尾へ集約）', () => {
+            const original = '本文[^1]。\n\n[^1]: 脚注の本文。\n\n続きの本文。';
+            const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+            assert.ok(rt.trim().endsWith('[^1]: 脚注の本文。'), rt);
+            assert.ok(rt.includes('続きの本文。'), rt);
+            assert.ok(rt.indexOf('続きの本文。') < rt.indexOf('[^1]: 脚注の本文。'), '本文の後に脚注一覧が来る');
         });
     });
 

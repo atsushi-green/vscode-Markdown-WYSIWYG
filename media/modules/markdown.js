@@ -18,7 +18,7 @@ window.MarkdownModule = (function() {
     // ブロックレベル要素のタグ集合（シリアライズ時の判定に使用）
     const BLOCK_TAGS = new Set([
         'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE', 'HR'
+        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE', 'HR', 'SECTION'
     ]);
 
     // 水平線（--- / *** / ___ 3文字以上の単独行）の判定
@@ -67,7 +67,7 @@ window.MarkdownModule = (function() {
      * インラインMarkdown記法をHTMLへ変換（エスケープ済みテキストに適用）
      * commands.jsのライブ変換（convertInlineText）と同じ記法をサポートする
      */
-    function convertInline(escapedText) {
+    function convertInline(escapedText, footnoteLabels) {
         // インラインコードを最初にプレースホルダ（NUL文字で囲んだ通し番号）へ退避し、
         // コード内の文字列に他のインライン整形（リンク・強調・取り消し線など）が
         // 適用されて `<code>**太字**</code>` が `<code><strong>太字</strong></code>`
@@ -120,6 +120,23 @@ window.MarkdownModule = (function() {
 
         // リンク
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+        // 脚注参照（[^label]）。対応する脚注定義（footnoteLabelsに含まれるラベル）が
+        // 実在する場合のみ変換し、無ければリテラルテキストのまま残す
+        // （未定義ラベルを誤って脚注扱いしない・呼び出し元がfootnoteLabelsを渡さない
+        // 場合＝見出し・リスト等は現状この変換の対象外＝本文段落のみが対象）。
+        // 直後に`:`が続くもの（`[^label]:`＝定義行の体裁。重複ラベルで無効化された
+        // 定義が通常の段落へ回されたケースなど）は参照として変換しない
+        // （extractFootnoteDefinitionsの参照カウント側と同じ`(?!:)`ガード）。
+        if (footnoteLabels) {
+            html = html.replace(/\[\^([A-Za-z0-9_-]+)\](?!:)/g, function (match, label) {
+                if (!footnoteLabels.has(label)) {
+                    return match;
+                }
+                return '<sup class="footnote-ref" data-footnote-label="' + label + '">' +
+                    '<a href="#fn-' + label + '" id="fnref-' + label + '">' + label + '</a></sup>';
+            });
+        }
 
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
@@ -203,6 +220,106 @@ window.MarkdownModule = (function() {
      */
     function matchFence(line) {
         return /^```(\S*)\s*$/.exec(line);
+    }
+
+    // 脚注定義行（`[^label]: 本文`）の判定。ラベルはid/href属性にそのまま使うため
+    // 英数字・アンダースコア・ハイフンのみに制限する（それ以外の文字を含む見た目の
+    // 定義行は通常のテキスト行として扱う＝安全側のフォールバック）。
+    const FOOTNOTE_DEF_PATTERN = /^\[\^([A-Za-z0-9_-]+)\]:\s?(.*)$/;
+
+    // 脚注「参照」（`[^label]`）の判定。定義行自身のラベル（`[^label]:`）と区別する
+    // ため、直後に`:`が続くものは除外する（負の先読み）。
+    const FOOTNOTE_REF_PATTERN = /\[\^([A-Za-z0-9_-]+)\](?!:)/g;
+
+    /**
+     * Markdownソースの行配列から脚注定義行（`[^label]: 本文`）を抜き出す。
+     * **同じ文書内でそのラベルが実際に参照（`[^label]`）されている場合のみ**定義として
+     * 認める。これが無いと、正規表現の説明（`[^0-9]: 数字以外にマッチ`のような普通の
+     * 文章）が誤って脚注定義として剥がされてしまう（脚注機能と無関係な地の文の事故）。
+     * コードフェンス（```）・ブロック数式（$$）の中は定義としても参照としても
+     * 解釈しない（中で使われている記法例をうっかり実際の脚注として扱わないため）。
+     * 同じラベルが複数回定義された場合は最初のものを使う。
+     * @returns {{ defs: {label:string, text:string}[], labels: Set<string>, contentLines: string[] }}
+     */
+    function extractFootnoteDefinitions(lines) {
+        // 1st pass: コードフェンス/ブロック数式の中かどうかを行ごとに判定しつつ、
+        // 定義行らしき行を仮判定する（まだ確定しない＝参照の有無を見てから決める）。
+        const entries = [];
+        let inFence = false;
+        let inMathBlock = false;
+
+        lines.forEach(function (line) {
+            if (!inMathBlock && matchFence(line)) {
+                inFence = !inFence;
+                entries.push({ line: line, def: null, scannable: false });
+                return;
+            }
+            if (!inFence && /^\$\$\s*$/.test(line)) {
+                inMathBlock = !inMathBlock;
+                entries.push({ line: line, def: null, scannable: false });
+                return;
+            }
+            if (inFence || inMathBlock) {
+                entries.push({ line: line, def: null, scannable: false });
+                return;
+            }
+            const m = FOOTNOTE_DEF_PATTERN.exec(line);
+            if (m) {
+                entries.push({ line: line, def: { label: m[1], text: m[2] }, scannable: true });
+                return;
+            }
+            entries.push({ line: line, def: null, scannable: true });
+        });
+
+        // 2nd pass: フェンス/数式ブロックの外側から参照ラベルを集める
+        // （定義候補行は本文側＝`: `以降のテキストのみを対象にする）。
+        const referencedLabels = new Set();
+        entries.forEach(function (entry) {
+            if (!entry.scannable) {
+                return;
+            }
+            const text = entry.def ? entry.def.text : entry.line;
+            FOOTNOTE_REF_PATTERN.lastIndex = 0;
+            let m;
+            while ((m = FOOTNOTE_REF_PATTERN.exec(text))) {
+                referencedLabels.add(m[1]);
+            }
+        });
+
+        // 3rd pass: 参照が実在する定義候補だけを本物の定義として確定する。
+        // 参照が無い（＝地の文が偶然この形をしていただけ）候補は通常の行として残す。
+        const defs = [];
+        const labels = new Set();
+        const contentLines = [];
+        entries.forEach(function (entry) {
+            if (entry.def && referencedLabels.has(entry.def.label) && !labels.has(entry.def.label)) {
+                labels.add(entry.def.label);
+                defs.push(entry.def);
+                return;
+            }
+            contentLines.push(entry.line);
+        });
+
+        return { defs: defs, labels: labels, contentLines: contentLines };
+    }
+
+    /**
+     * 脚注定義配列から脚注一覧セクションのHTMLを組み立てる。ラベルは
+     * `FOOTNOTE_DEF_PATTERN` で既に英数字・アンダースコア・ハイフンのみに
+     * 制限されているため、id/href属性へそのまま使ってよい（エスケープ不要）。
+     */
+    function buildFootnotesSectionHtml(defs) {
+        if (!defs.length) {
+            return '';
+        }
+        let html = '<section class="footnotes" data-footnotes="true"><ol>';
+        defs.forEach(function (def) {
+            html += '<li id="fn-' + def.label + '" data-footnote-label="' + def.label + '">' +
+                convertInline(escapeHtml(def.text)) +
+                ' <a href="#fnref-' + def.label + '" class="footnote-backref">↩</a></li>';
+        });
+        html += '</ol></section>';
+        return html;
     }
 
     /**
@@ -396,7 +513,15 @@ window.MarkdownModule = (function() {
      */
     function markdownToHtml(markdown) {
         const src = stripZeroWidth(markdown).replace(/\r\n?/g, '\n');
-        const lines = src.split('\n');
+        // 脚注定義行（`[^label]: 本文`）は通常のブロックパースの対象から外し、
+        // 文書末尾の脚注一覧セクションとして別途組み立てる（末尾に集約するのは
+        // 一般的な脚注表示の慣習に合わせたもの＝定義が文書中程にあった場合、
+        // 保存すると末尾へ移動する。既知の仕様）。
+        // 末尾の空行はここで落としておく（末尾の空行はhtmlToMarkdown側で常に
+        // 1つの改行へ正規化され往復に影響しないが、定義行が文末近くにあると
+        // 除去後に隣接する空行と連結して余分な空段落が生じるため、先に潰しておく）。
+        const footnoteInfo = extractFootnoteDefinitions(src.replace(/\n+$/, '').split('\n'));
+        const lines = footnoteInfo.contentLines;
         const out = [];
         let i = 0;
         // 見出しidの重複を連番（-1, -2 ...）で解消する。buildTocMarkdownと同じ規則。
@@ -581,8 +706,10 @@ window.MarkdownModule = (function() {
                 paraLines.push(lines[i]);
                 i++;
             }
-            out.push('<p>' + paraLines.map(l => convertInline(escapeHtml(l))).join('<br>') + '</p>');
+            out.push('<p>' + paraLines.map(l => convertInline(escapeHtml(l), footnoteInfo.labels)).join('<br>') + '</p>');
         }
+
+        out.push(buildFootnotesSectionHtml(footnoteInfo.defs));
 
         return out.join('');
     }
@@ -672,6 +799,15 @@ window.MarkdownModule = (function() {
             case 'A': {
                 const href = node.getAttribute('href') || '';
                 return `[${serializeInlineChildren(node)}](${href})`;
+            }
+            case 'SUP': {
+                // 脚注参照（<sup class="footnote-ref"><a>label</a></sup>）は
+                // 中のリンクを辿らず、保持しておいたラベルから `[^label]` を復元する。
+                if (node.classList && node.classList.contains('footnote-ref')) {
+                    const label = node.getAttribute('data-footnote-label') || '';
+                    return label ? `[^${label}]` : '';
+                }
+                return serializeInlineChildren(node);
             }
             case 'IMG': {
                 // 画像は void 要素で子を持たない。元のパスは `data-original-src`
@@ -949,6 +1085,29 @@ window.MarkdownModule = (function() {
                 return serializeTable(el);
             case 'HR':
                 return '---\n\n';
+            case 'SECTION': {
+                // 脚注一覧セクション（<section class="footnotes"><ol><li>…</li></ol></section>）
+                // を `[^label]: 本文` の並びへ復元する。それ以外のsectionはブロックコンテナとして再帰。
+                if (!el.classList || !el.classList.contains('footnotes')) {
+                    return serializeBlocks(el);
+                }
+                const items = Array.from(el.querySelectorAll('li'));
+                if (!items.length) {
+                    return '';
+                }
+                const lines = items.map(li => {
+                    const label = li.getAttribute('data-footnote-label') || '';
+                    // 脚注本文の直列化時は戻りリンク（↩）を除いてから行う
+                    const clone = li.cloneNode(true);
+                    const backref = clone.querySelector('.footnote-backref');
+                    if (backref) {
+                        backref.remove();
+                    }
+                    const text = serializeInlineChildren(clone).trim();
+                    return `[^${label}]: ${text}`;
+                });
+                return lines.join('\n') + '\n\n';
+            }
             default:
                 return serializeInlineChildren(el);
         }
@@ -1290,6 +1449,9 @@ window.MarkdownModule = (function() {
         coreLinesOf: coreLinesOf,
         computeBlockStartLines: computeBlockStartLines,
         // 行番号表示（3/3 橋渡し）: 表示中ブロック→開始行の対応（DOM／レイアウト非依存）。
-        computeEditorLineMap: computeEditorLineMap
+        computeEditorLineMap: computeEditorLineMap,
+        // 脚注（[^label] / [^label]: 本文）のサポート
+        extractFootnoteDefinitions: extractFootnoteDefinitions,
+        buildFootnotesSectionHtml: buildFootnotesSectionHtml
     };
 })();

@@ -718,6 +718,34 @@ body.vscode-dark #editor strong {
     height: auto;
 }
 
+/* 脚注参照（[^label] → <sup class="footnote-ref">）: 上付き・下線無しリンク */
+#editor sup.footnote-ref a {
+    color: var(--vscode-textLink-foreground);
+    text-decoration: none;
+}
+
+#editor sup.footnote-ref a:hover {
+    text-decoration: underline;
+}
+
+/* 脚注一覧セクション（文書末尾に集約） */
+#editor section.footnotes {
+    margin-top: 2em;
+    padding-top: 0.5em;
+    border-top: 1px solid var(--vscode-editorGroup-border);
+    font-size: 0.9em;
+    color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+}
+
+#editor section.footnotes ol {
+    padding-left: 1.5em;
+}
+
+#editor section.footnotes .footnote-backref {
+    text-decoration: none;
+    margin-left: 0.25em;
+}
+
 #editor table {
     border-collapse: collapse;
     width: 100%;
