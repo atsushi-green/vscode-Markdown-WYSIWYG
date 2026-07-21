@@ -633,6 +633,9 @@
         // 数式ブロック上の右クリックは数式メニューを優先する（対象が排他）。
         tableModule.setupContextMenu(state.editor);
 
+        // 表のマウスドラッグによる矩形範囲選択（ボタンを離したらドラッグ終了）
+        tableModule.setupRangeSelectionMouseUp();
+
         // コードブロック言語セレクタのイベント
         commands.setupCodeLangEvents();
 

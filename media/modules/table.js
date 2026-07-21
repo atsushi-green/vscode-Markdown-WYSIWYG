@@ -97,6 +97,9 @@ window.TableModule = (function() {
                 selectCell(cell, table);
             });
 
+            // マウスドラッグによる矩形範囲選択
+            setupCellRangeDrag(cell, table);
+
             // フォーカスイベント
             cell.addEventListener('focus', () => {
                 console.log('[Cell Focus] Cell focused:', cell.textContent);
@@ -142,6 +145,122 @@ window.TableModule = (function() {
         });
         cell.classList.add('table-cell-selected');
         state.currentEditingCell = cell;
+        // 単一セルの選択は、既存の矩形範囲選択（あれば）を解除する。
+        if (currentCellRange) {
+            clearRangeSelection(currentCellRange.table);
+            currentCellRange = null;
+        }
+    }
+
+    // ---- 表の矩形範囲選択（マウスドラッグ） ----
+    // ドラッグ開始セル（mousedown時に記録。document の mouseup でクリアする）。
+    let rangeDragStart = null;
+    // 直近に確定した矩形範囲選択。コピー＆ペースト（(2/3)(3/3)）から参照する想定。
+    let currentCellRange = null;
+
+    /**
+     * テーブル内でのセルの行・列インデックスを求める純粋関数寄りのヘルパ。
+     * theadとtbodyをまたいだ表示順（`table.rows`）を行インデックスとして使う
+     * （既存の矢印キーナビゲーション`handleKeydown`と同じ考え方）。
+     */
+    function cellPosition(table, cell) {
+        const row = cell.parentElement;
+        return {
+            row: Array.from(table.rows).indexOf(row),
+            col: Array.from(row.cells).indexOf(cell)
+        };
+    }
+
+    /**
+     * 開始・終了セルの行列インデックスから矩形範囲（開始・終了の前後を問わない）を
+     * 正規化して返す純粋関数。
+     */
+    function computeCellRange(startRow, startCol, endRow, endCol) {
+        return {
+            minRow: Math.min(startRow, endRow),
+            maxRow: Math.max(startRow, endRow),
+            minCol: Math.min(startCol, endCol),
+            maxCol: Math.max(startCol, endCol)
+        };
+    }
+
+    /**
+     * 行・列インデックスが矩形範囲内かどうかを判定する純粋関数。
+     */
+    function isCellInRange(row, col, range) {
+        return row >= range.minRow && row <= range.maxRow &&
+            col >= range.minCol && col <= range.maxCol;
+    }
+
+    /**
+     * 矩形範囲内の各セルへハイライトclassを付与し、範囲外からは外す
+     * （このテーブル内のみが対象）。単一セル選択（`table-cell-selected`）とは
+     * 混在させず、範囲確定時にそちらは解除する。
+     */
+    function applyRangeHighlight(table, range) {
+        table.querySelectorAll('.table-cell-selected').forEach(c => {
+            c.classList.remove('table-cell-selected');
+        });
+        table.querySelectorAll('th, td').forEach(cell => {
+            const pos = cellPosition(table, cell);
+            cell.classList.toggle('table-cell-range-selected', isCellInRange(pos.row, pos.col, range));
+        });
+    }
+
+    /**
+     * 矩形範囲選択のハイライトを全解除する。
+     */
+    function clearRangeSelection(table) {
+        table.querySelectorAll('.table-cell-range-selected').forEach(c => {
+            c.classList.remove('table-cell-range-selected');
+        });
+    }
+
+    /**
+     * テーブル内のマウスドラッグによる矩形範囲選択を配線する（`makeEditable`の
+     * セルループから各セルへ）。開始セルの`mousedown`を記録し、ドラッグ中
+     * （主ボタン押下中）に別セルへ`mouseenter`すると範囲を確定・ハイライトする。
+     * 単なるクリック（同一セルでmousedown/mouseup）は別セルへの`mouseenter`が
+     * 発生しないため、この配線は一切反応せず既存の単一セル選択と競合しない。
+     */
+    function setupCellRangeDrag(cell, table) {
+        cell.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) {
+                return; // 主ボタン（左クリック）のみ対象
+            }
+            // 別のテーブルに残っている範囲選択があれば、ここで解除する。
+            // clickは必ずmousedownの後に発火するため、単純クリック・ドラッグ開始の
+            // どちらの経路でも「他テーブルの範囲ハイライトが永続的に残留する」
+            // （複数テーブルを持つ文書での取り違え・消し忘れ）を防げる。
+            if (currentCellRange && currentCellRange.table !== table) {
+                clearRangeSelection(currentCellRange.table);
+                currentCellRange = null;
+            }
+            rangeDragStart = { table: table, position: cellPosition(table, cell) };
+        });
+
+        cell.addEventListener('mouseenter', (e) => {
+            if (!rangeDragStart || rangeDragStart.table !== table || e.buttons !== 1) {
+                return;
+            }
+            const pos = cellPosition(table, cell);
+            const range = computeCellRange(
+                rangeDragStart.position.row, rangeDragStart.position.col, pos.row, pos.col
+            );
+            currentCellRange = { table: table, range: range };
+            applyRangeHighlight(table, range);
+        });
+    }
+
+    /**
+     * マウスボタンを離したらドラッグ追跡を終了する（`document`に一度だけ配線）。
+     * 確定した範囲のハイライト（`currentCellRange`）はここでは消さない
+     * （次のクリック・別範囲の開始・別テーブルでの範囲開始のいずれかまで保持する）。
+     */
+    function setupRangeSelectionMouseUp() {
+        document.addEventListener('mouseup', () => {
+            rangeDragStart = null;
+        });
     }
 
     /**
@@ -984,11 +1103,15 @@ window.TableModule = (function() {
                 table.removeAttribute('data-table-id');
                 table.querySelectorAll('th, td').forEach(cell => {
                     cell.removeAttribute('contenteditable');
-                    cell.classList.remove('table-cell', 'table-cell-selected');
+                    cell.classList.remove('table-cell', 'table-cell-selected', 'table-cell-range-selected');
                 });
             }
             container.remove();
         });
+        // インタラクティブ化を解除する＝表の状態は作り直される想定のため、
+        // 古いテーブル要素への参照を範囲選択の状態にも残さない。
+        rangeDragStart = null;
+        currentCellRange = null;
     }
 
     // 公開API
@@ -1016,6 +1139,13 @@ window.TableModule = (function() {
         isBlockEmpty: isBlockEmpty,
         shouldShowInsertMenu: shouldShowInsertMenu,
         computeMenuPosition: computeMenuPosition,
-        clampTableDimensions: clampTableDimensions
+        clampTableDimensions: clampTableDimensions,
+        cellPosition: cellPosition,
+        computeCellRange: computeCellRange,
+        isCellInRange: isCellInRange,
+        applyRangeHighlight: applyRangeHighlight,
+        clearRangeSelection: clearRangeSelection,
+        setupRangeSelectionMouseUp: setupRangeSelectionMouseUp,
+        getCurrentCellRange: function () { return currentCellRange; }
     };
 })();

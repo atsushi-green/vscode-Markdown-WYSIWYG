@@ -1350,10 +1350,19 @@ pre.mermaid-source {
     outline-offset: -2px;
 }
 
-/* 選択されたセル */
-.table-cell-selected {
+/* 選択されたセル（単一クリック）。`.table-cell`と複合させて`.table-cell:hover`と
+   同じ詳細度に揃える（`.table-cell-selected`単体だと詳細度で`:hover`に負け、
+   ドラッグ中や選択中にマウスが乗っているセルだけホバー色に上書きされてしまうため）。 */
+.table-cell.table-cell-selected {
     background-color: var(--vscode-list-activeSelectionBackground);
     color: var(--vscode-list-activeSelectionForeground);
+}
+
+/* マウスドラッグによる矩形範囲選択（複数セル）。単一選択より薄く、
+   エディタの検索ハイライトと似た「範囲」であることが分かる色調にする。
+   `.table-cell`と複合させる理由は上の`.table-cell-selected`と同じ（`:hover`対策）。 */
+.table-cell.table-cell-range-selected {
+    background-color: var(--vscode-editor-selectionBackground, rgba(51, 153, 255, 0.25));
 }
 
 /* 通常のテーブル（レンダリングされていないもの）を隠す */
