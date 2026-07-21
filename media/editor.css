@@ -200,6 +200,43 @@ body {
     outline: none;
 }
 
+/* 見出しパンくずバー（ツールバー直下・スクロールしても常に表示） */
+.heading-breadcrumb-bar {
+    display: none;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 4px;
+    padding: 4px 12px;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+    background-color: var(--vscode-editorGroupHeader-tabsBackground);
+    border-bottom: 1px solid var(--vscode-editorGroup-border);
+}
+
+.heading-breadcrumb-item {
+    padding: 2px 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+/* idを持つ見出し（scrollToAnchorで遷移可能）だけをクリック可能な見た目にする。
+   id無し（execCommandでの見出し化・入力直後の変換など、まだmarkdownToHtmlを
+   通っていない見出し）はクリックしても何も起きないため、ポインタ/ホバーを付けない。 */
+.heading-breadcrumb-item-clickable {
+    cursor: pointer;
+}
+
+.heading-breadcrumb-item-clickable:hover {
+    color: var(--vscode-editor-foreground);
+    background-color: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.heading-breadcrumb-sep {
+    opacity: 0.6;
+}
+
 /* 単語数・文字数ステータスバー（右下に固定表示） */
 .word-count-status {
     position: fixed;
@@ -1100,10 +1137,11 @@ body.vscode-dark #editor strong {
     opacity: 0.95;
 }
 
-/* Mermaid／数式ブロックのコンテキストメニュー（見た目を共有） */
+/* Mermaid／数式／表／スラッシュコマンドの各コンテキストメニュー（見た目を共有） */
 .mermaid-context-menu,
 .math-context-menu,
-.table-context-menu {
+.table-context-menu,
+.slash-command-menu {
     position: fixed;
     z-index: 10000;
     background-color: var(--vscode-menu-background, #252526);
@@ -1116,7 +1154,8 @@ body.vscode-dark #editor strong {
 
 .mermaid-menu-item,
 .math-menu-item,
-.table-menu-item {
+.table-menu-item,
+.slash-command-item {
     padding: 8px 16px;
     cursor: pointer;
     font-size: 13px;
@@ -1126,7 +1165,8 @@ body.vscode-dark #editor strong {
 
 .mermaid-menu-item:hover,
 .math-menu-item:hover,
-.table-menu-item:hover {
+.table-menu-item:hover,
+.slash-command-item:hover {
     background-color: var(--vscode-menu-selectionBackground, #04395e);
     color: var(--vscode-menu-selectionForeground, #ffffff);
 }
@@ -1310,10 +1350,19 @@ pre.mermaid-source {
     outline-offset: -2px;
 }
 
-/* 選択されたセル */
-.table-cell-selected {
+/* 選択されたセル（単一クリック）。`.table-cell`と複合させて`.table-cell:hover`と
+   同じ詳細度に揃える（`.table-cell-selected`単体だと詳細度で`:hover`に負け、
+   ドラッグ中や選択中にマウスが乗っているセルだけホバー色に上書きされてしまうため）。 */
+.table-cell.table-cell-selected {
     background-color: var(--vscode-list-activeSelectionBackground);
     color: var(--vscode-list-activeSelectionForeground);
+}
+
+/* マウスドラッグによる矩形範囲選択（複数セル）。単一選択より薄く、
+   エディタの検索ハイライトと似た「範囲」であることが分かる色調にする。
+   `.table-cell`と複合させる理由は上の`.table-cell-selected`と同じ（`:hover`対策）。 */
+.table-cell.table-cell-range-selected {
+    background-color: var(--vscode-editor-selectionBackground, rgba(51, 153, 255, 0.25));
 }
 
 /* 通常のテーブル（レンダリングされていないもの）を隠す */

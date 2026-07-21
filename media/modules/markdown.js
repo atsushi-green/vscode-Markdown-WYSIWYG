@@ -183,6 +183,22 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * 表のセパレーター行（`|---|---:|` 等）を列ごとの生テキストに分解する。
+     * splitTableRowと異なり各セルをtrimしない＝スペース有無・アライメントコロンの
+     * 表記そのままを保持し、serializeTableで往復復元できるようにする。
+     */
+    function splitSeparatorRow(line) {
+        let inner = line.trim();
+        if (inner.startsWith('|')) {
+            inner = inner.slice(1);
+        }
+        if (inner.endsWith('|')) {
+            inner = inner.slice(0, -1);
+        }
+        return inner.split('|');
+    }
+
+    /**
      * コードフェンス行の判定
      */
     function matchFence(line) {
@@ -480,6 +496,7 @@ window.MarkdownModule = (function() {
             // --- テーブル ---
             if (isTableStart(line, lines[i + 1])) {
                 const headers = splitTableRow(line);
+                const sepCells = splitSeparatorRow(lines[i + 1]);
                 i += 2; // ヘッダー行 + セパレーター行
 
                 const rows = [];
@@ -488,7 +505,15 @@ window.MarkdownModule = (function() {
                     i++;
                 }
 
-                let tableHtml = '<table><thead><tr>';
+                // セパレーター行の元表記（スペース有無・アライメントコロン）を
+                // data-sep に保持し、serializeTableで触っていない表の書式を変えず復元する。
+                // 許可文字は空白・-・:のみ（isTableStartの正規表現より）でカンマを含まないため、
+                // カンマ区切りでそのままHTML属性値にできる。
+                const sepAttr = sepCells.length === headers.length
+                    ? ` data-sep="${sepCells.join(',')}"`
+                    : '';
+
+                let tableHtml = `<table${sepAttr}><thead><tr>`;
                 headers.forEach(header => {
                     tableHtml += `<th>${convertInline(escapeHtml(header))}</th>`;
                 });
@@ -836,7 +861,16 @@ window.MarkdownModule = (function() {
         }
 
         let md = '| ' + headers.join(' | ') + ' |\n';
-        md += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
+        // 読込時に保持したセパレーター行の元表記（data-sep）があり、かつ列数が
+        // 変わっていなければそれをそのまま復元する（触っていない表の書式を壊さない）。
+        // 列数が変わっている場合（列の追加・削除）はデフォルト書式にフォールバックする。
+        const rawSep = table.getAttribute && table.getAttribute('data-sep');
+        const sepCells = rawSep ? rawSep.split(',') : null;
+        if (sepCells && sepCells.length === headers.length) {
+            md += '|' + sepCells.join('|') + '|\n';
+        } else {
+            md += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
+        }
         bodyRows.forEach(tr => {
             const cells = cellsOf(tr);
             if (cells.length) {

@@ -28,9 +28,41 @@ suite('TableModule', () => {
         return env.editor.querySelector('table') as HTMLTableElement;
     }
 
+    /** マウスイベントを生成してディスパッチする */
+    function dispatchMouse(target: Element, type: string, opts: Record<string, unknown> = {}) {
+        const ev = new env.window.MouseEvent(type, Object.assign(
+            { bubbles: true, cancelable: true, button: 0, buttons: 1 }, opts
+        ));
+        target.dispatchEvent(ev);
+        return ev;
+    }
+
+    /** table.rows経由でrow行・col列のセルを取得する（theadとtbodyをまたぐ） */
+    function cellAt(t: HTMLTableElement, row: number, col: number): HTMLElement {
+        return Array.from(t.rows[row].cells)[col] as HTMLElement;
+    }
+
+    /** cellAからcellBへドラッグして確定するまでの一連のイベントを発火する */
+    function dragRange(t: HTMLTableElement, fromRow: number, fromCol: number, toRow: number, toCol: number) {
+        const from = cellAt(t, fromRow, fromCol);
+        const to = cellAt(t, toRow, toCol);
+        dispatchMouse(from, 'mousedown');
+        dispatchMouse(to, 'mouseenter');
+        dispatchMouse(to, 'mouseup');
+    }
+
+    // jsdomレルムで実行される関数が返すプレーンオブジェクトは、そのままだと
+    // NodeレルムのオブジェクトリテラルとdeepStrictEqualした際にプロトタイプ不一致で
+    // 失敗する（配列のArray.fromと同じ問題）。スプレッドでNodeレルムへコピーしてから比較する。
+    const plain = (obj: any) => ({ ...obj });
+
     setup(() => {
         env = createEditorEnv();
         table = setupTable();
+        // document の mouseup でドラッグ追跡を終了させる配線（editor.js の initEditor で
+        // 一度だけ呼ぶのと同じ）。呼ばないと rangeDragStart が mouseup後も残り、
+        // 後続の mouseenter で範囲が誤って更新され続けてしまう。
+        env.table.setupRangeSelectionMouseUp();
     });
 
     suite('render', () => {
@@ -205,6 +237,247 @@ suite('TableModule', () => {
         });
     });
 
+    suite('表の矩形範囲選択（マウスドラッグ）', () => {
+
+        suite('cellPosition', () => {
+            test('theadとtbodyをまたいだ表示順の行・列インデックスを返す', () => {
+                assert.deepStrictEqual(plain(env.table.cellPosition(table, cellAt(table, 0, 0))), { row: 0, col: 0 });
+                assert.deepStrictEqual(plain(env.table.cellPosition(table, cellAt(table, 0, 1))), { row: 0, col: 1 });
+                assert.deepStrictEqual(plain(env.table.cellPosition(table, cellAt(table, 2, 0))), { row: 2, col: 0 });
+            });
+        });
+
+        suite('computeCellRange', () => {
+            test('開始→終了の方向によらず正規化した矩形範囲を返す', () => {
+                assert.deepStrictEqual(
+                    plain(env.table.computeCellRange(0, 0, 2, 1)),
+                    { minRow: 0, maxRow: 2, minCol: 0, maxCol: 1 }
+                );
+                assert.deepStrictEqual(
+                    plain(env.table.computeCellRange(2, 1, 0, 0)),
+                    { minRow: 0, maxRow: 2, minCol: 0, maxCol: 1 }
+                );
+            });
+
+            test('開始と終了が同じセルなら1x1の範囲になる', () => {
+                assert.deepStrictEqual(
+                    plain(env.table.computeCellRange(1, 1, 1, 1)),
+                    { minRow: 1, maxRow: 1, minCol: 1, maxCol: 1 }
+                );
+            });
+        });
+
+        suite('isCellInRange', () => {
+            const range = { minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 };
+
+            test('範囲内の行・列はtrue（境界含む）', () => {
+                assert.strictEqual(env.table.isCellInRange(0, 0, range), true);
+                assert.strictEqual(env.table.isCellInRange(1, 1, range), true);
+            });
+
+            test('範囲外の行・列はfalse', () => {
+                assert.strictEqual(env.table.isCellInRange(2, 0, range), false);
+                assert.strictEqual(env.table.isCellInRange(0, 2, range), false);
+            });
+        });
+
+        suite('applyRangeHighlight / clearRangeSelection', () => {
+            test('範囲内のセルだけにハイライトclassを付与する', () => {
+                const range = { minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 };
+                env.table.applyRangeHighlight(table, range);
+
+                assert.strictEqual(cellAt(table, 0, 0).classList.contains('table-cell-range-selected'), true);
+                assert.strictEqual(cellAt(table, 1, 1).classList.contains('table-cell-range-selected'), true);
+                assert.strictEqual(cellAt(table, 2, 0).classList.contains('table-cell-range-selected'), false);
+            });
+
+            test('既存の単一セル選択（table-cell-selected）は範囲確定で解除される', () => {
+                env.table.selectCell(cellAt(table, 2, 0), table);
+                env.table.applyRangeHighlight(table, { minRow: 0, maxRow: 0, minCol: 0, maxCol: 1 });
+                assert.strictEqual(cellAt(table, 2, 0).classList.contains('table-cell-selected'), false);
+            });
+
+            test('clearRangeSelectionでハイライトを全解除する', () => {
+                env.table.applyRangeHighlight(table, { minRow: 0, maxRow: 2, minCol: 0, maxCol: 1 });
+                env.table.clearRangeSelection(table);
+                table.querySelectorAll('th, td').forEach(cell => {
+                    assert.strictEqual(cell.classList.contains('table-cell-range-selected'), false);
+                });
+            });
+        });
+
+        suite('マウスドラッグでの範囲選択（DOM配線）', () => {
+            test('別セルへドラッグすると範囲がハイライトされ、getCurrentCellRangeで参照できる', () => {
+                dragRange(table, 0, 0, 1, 1);
+
+                assert.strictEqual(cellAt(table, 0, 0).classList.contains('table-cell-range-selected'), true);
+                assert.strictEqual(cellAt(table, 1, 1).classList.contains('table-cell-range-selected'), true);
+                assert.strictEqual(cellAt(table, 2, 0).classList.contains('table-cell-range-selected'), false);
+                const current = env.table.getCurrentCellRange();
+                assert.deepStrictEqual(
+                    { table: current.table, range: plain(current.range) },
+                    { table: table, range: { minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 } }
+                );
+            });
+
+            test('mouseupでドラッグ追跡は終了するが、確定した範囲のハイライトは残る', () => {
+                dragRange(table, 0, 0, 2, 0);
+                // mouseup後にさらにmouseenterしても範囲は更新されない（ドラッグ終了済み）
+                dispatchMouse(cellAt(table, 0, 1), 'mouseenter');
+
+                assert.strictEqual(cellAt(table, 2, 0).classList.contains('table-cell-range-selected'), true);
+                assert.strictEqual(cellAt(table, 0, 1).classList.contains('table-cell-range-selected'), false);
+            });
+
+            test('同一セルでのクリック（ドラッグ無し）は範囲選択を発生させない（既存の単一選択のみ）', () => {
+                const cell = cellAt(table, 1, 0);
+                dispatchMouse(cell, 'mousedown');
+                dispatchMouse(cell, 'mouseup');
+                cell.dispatchEvent(new env.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+                assert.strictEqual(cell.classList.contains('table-cell-selected'), true);
+                table.querySelectorAll('th, td').forEach(c => {
+                    assert.strictEqual(c.classList.contains('table-cell-range-selected'), false);
+                });
+            });
+
+            test('ボタンを離した状態でのmouseenter（ホバーのみ）は範囲を更新しない', () => {
+                dispatchMouse(cellAt(table, 0, 0), 'mousedown');
+                dispatchMouse(cellAt(table, 1, 1), 'mouseenter', { buttons: 0 });
+
+                assert.strictEqual(env.table.getCurrentCellRange(), null);
+            });
+
+            test('右クリック（mousedown button!=0）はドラッグを開始しない', () => {
+                dispatchMouse(cellAt(table, 0, 0), 'mousedown', { button: 2, buttons: 2 });
+                dispatchMouse(cellAt(table, 1, 1), 'mouseenter', { buttons: 2 });
+
+                assert.strictEqual(env.table.getCurrentCellRange(), null);
+            });
+
+            test('範囲選択後に別セルを単純クリックすると範囲ハイライトが解除される', () => {
+                dragRange(table, 0, 0, 1, 1);
+                assert.notStrictEqual(env.table.getCurrentCellRange(), null);
+
+                const other = cellAt(table, 2, 0);
+                other.dispatchEvent(new env.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+                assert.strictEqual(env.table.getCurrentCellRange(), null);
+                assert.strictEqual(cellAt(table, 0, 0).classList.contains('table-cell-range-selected'), false);
+                assert.strictEqual(other.classList.contains('table-cell-selected'), true);
+            });
+        });
+
+        suite('複数テーブル間の非干渉', () => {
+            /** 2つ目の表を追加してレンダリングする */
+            function addSecondTable(): HTMLTableElement {
+                const div = env.document.createElement('div');
+                div.innerHTML = env.markdown.markdownToHtml(TABLE_MD);
+                Array.from(div.childNodes).forEach(n => env.editor.appendChild(n));
+                env.table.render();
+                return env.editor.querySelectorAll('table')[1] as HTMLTableElement;
+            }
+
+            test('表1で範囲確定後、表2でドラッグを開始すると表1のハイライトは残留せず解除される（/local-review A-1）', () => {
+                const table2 = addSecondTable();
+
+                dragRange(table, 0, 0, 1, 1); // 表1で範囲確定
+                assert.ok(table.querySelector('.table-cell-range-selected'), '前提: 表1にハイライトがある');
+
+                dragRange(table2, 0, 0, 1, 1); // 表2で新たに範囲確定
+
+                table.querySelectorAll('th, td').forEach(c => {
+                    assert.strictEqual(c.classList.contains('table-cell-range-selected'), false, '表1の残留ハイライトが解除されていない');
+                });
+                assert.ok(cellAt(table2, 0, 0).classList.contains('table-cell-range-selected'));
+                const current = env.table.getCurrentCellRange();
+                assert.strictEqual(current.table, table2);
+            });
+
+            test('表1で範囲確定後、表2のセルを単純クリックしても表1の残留ハイライトが正しく解除される', () => {
+                const table2 = addSecondTable();
+
+                dragRange(table, 0, 0, 1, 1); // 表1で範囲確定
+                const cell2 = cellAt(table2, 0, 0);
+                dispatchMouse(cell2, 'mousedown');
+                dispatchMouse(cell2, 'mouseup');
+                cell2.dispatchEvent(new env.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+                table.querySelectorAll('th, td').forEach(c => {
+                    assert.strictEqual(c.classList.contains('table-cell-range-selected'), false, '表1の残留ハイライトが解除されていない');
+                });
+                assert.strictEqual(cell2.classList.contains('table-cell-selected'), true);
+                assert.strictEqual(env.table.getCurrentCellRange(), null);
+            });
+        });
+    });
+
+    suite('extractCellTextMatrix', () => {
+        // extractCellTextMatrixはjsdomレルムで実行され、返り値の入れ子配列も
+        // jsdomレルムのArrayとなるため、deepStrictEqualのプロトタイプ不一致を避けて
+        // JSONの往復でNodeレルムのプレーンな値へ正規化してから比較する。
+        const plainMatrix = (m: unknown) => JSON.parse(JSON.stringify(m));
+
+        test('rangeが無ければテーブル全体を行列として取り出す', () => {
+            assert.deepStrictEqual(plainMatrix(env.table.extractCellTextMatrix(table, null)), [
+                ['列A', '列B'],
+                ['a1', 'b1'],
+                ['a2', 'b2']
+            ]);
+        });
+
+        test('rangeがあればその矩形範囲だけを取り出す', () => {
+            const range = { minRow: 1, maxRow: 2, minCol: 0, maxCol: 0 };
+            assert.deepStrictEqual(plainMatrix(env.table.extractCellTextMatrix(table, range)), [
+                ['a1'],
+                ['a2']
+            ]);
+        });
+    });
+
+    suite('buildTsvFromMatrix', () => {
+        test('行を改行・列をタブで区切ったTSVテキストを組み立てる', () => {
+            assert.strictEqual(
+                env.table.buildTsvFromMatrix([['a', 'b'], ['c', 'd']]),
+                'a\tb\nc\td'
+            );
+        });
+
+        test('空の行列は空文字を返す', () => {
+            assert.strictEqual(env.table.buildTsvFromMatrix([]), '');
+        });
+    });
+
+    suite('buildHtmlTableFragment', () => {
+        test('rangeが無ければテーブル全体を<table>断片として組み立てる（ヘッダ行はth）', () => {
+            const html = env.table.buildHtmlTableFragment(table, null);
+            assert.strictEqual(
+                html,
+                '<table><tbody><tr><th>列A</th><th>列B</th></tr>' +
+                '<tr><td>a1</td><td>b1</td></tr><tr><td>a2</td><td>b2</td></tr></tbody></table>'
+            );
+        });
+
+        test('rangeがあればその矩形範囲だけを組み立てる', () => {
+            const range = { minRow: 1, maxRow: 2, minCol: 0, maxCol: 0 };
+            const html = env.table.buildHtmlTableFragment(table, range);
+            assert.strictEqual(
+                html,
+                '<table><tbody><tr><td>a1</td></tr><tr><td>a2</td></tr></tbody></table>'
+            );
+        });
+
+        test('セル内の装飾（innerHTML）をtextContentへ潰さず保つ', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '| A |\n| --- |\n| **太字** |'
+            );
+            const t = env.editor.querySelector('table') as HTMLTableElement;
+            env.table.render();
+            const html = env.table.buildHtmlTableFragment(t, null);
+            assert.ok(html.includes('<strong>太字</strong>'), html);
+        });
+    });
+
     suite('copy', () => {
         test('テーブル全体をタブ区切りテキストとしてクリップボードへコピーする', async () => {
             env.table.copy(table);
@@ -213,6 +486,86 @@ suite('TableModule', () => {
 
             assert.strictEqual(env.copiedTexts.length, 1);
             assert.strictEqual(env.copiedTexts[0], '列A\t列B\na1\tb1\na2\tb2');
+        });
+
+        test('矩形範囲選択が確定している場合は、その範囲だけをコピーする', async () => {
+            dragRange(table, 1, 0, 2, 0); // a1〜a2（1列目）だけを範囲選択
+            env.table.copy(table);
+            await Promise.resolve();
+
+            assert.strictEqual(env.copiedTexts.length, 1);
+            assert.strictEqual(env.copiedTexts[0], 'a1\na2');
+        });
+
+        test('矩形範囲選択が別のテーブルのものなら、このテーブルは全体をコピーする', async () => {
+            const div = env.document.createElement('div');
+            div.innerHTML = env.markdown.markdownToHtml(TABLE_MD);
+            Array.from(div.childNodes).forEach(n => env.editor.appendChild(n));
+            env.table.render();
+            const table2 = env.editor.querySelectorAll('table')[1] as HTMLTableElement;
+
+            dragRange(table2, 0, 0, 0, 0); // 表2側で範囲確定（表1には無関係）
+            env.table.copy(table);
+            await Promise.resolve();
+
+            assert.strictEqual(env.copiedTexts[0], '列A\t列B\na1\tb1\na2\tb2');
+        });
+
+        test('範囲確定後に行・列を追加/削除すると、staleな範囲を使わずテーブル全体をコピーする（/local-review A-1）', async () => {
+            // 再現手順（/local-review指摘どおり）: ①セルをクリックしてcurrentEditingCellを設定
+            // → ②別セルへドラッグして範囲確定（ドラッグはclickを発火しないため①の選択は残る）
+            // → ③ツールバー操作（①で設定したcurrentEditingCellを使って実行される）で行・列を増減。
+            const anchor = cellAt(table, 1, 0); // a1
+            dispatchMouse(anchor, 'mousedown');
+            dispatchMouse(anchor, 'mouseup');
+            anchor.dispatchEvent(new env.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+            dragRange(table, 0, 0, 1, 1); // 2行2列を範囲選択（currentEditingCellはanchorのまま）
+            assert.notStrictEqual(env.table.getCurrentCellRange(), null);
+
+            env.table.handleAction(table, 'delete-row'); // 行が減り、旧範囲の行インデックスが無効になる
+
+            assert.strictEqual(env.table.getCurrentCellRange(), null, '行・列操作で範囲選択は無効化される');
+            env.table.copy(table);
+            await Promise.resolve();
+
+            // 削除後のテーブル全体がコピーされる（stale範囲の行数のまま切り出されない）
+            const rowsNow = table.querySelectorAll('tr').length;
+            assert.strictEqual(env.copiedTexts[0].split('\n').length, rowsNow);
+        });
+
+        test('ClipboardItem/clipboard.writeが使える環境ではTSVとtext/htmlの両方を書き込む', async () => {
+            const written: any[] = [];
+            (env.window as any).ClipboardItem = class {
+                constructor(public items: Record<string, Blob>) { /* noop */ }
+            };
+            (env.window.navigator as any).clipboard.write = (items: any[]) => {
+                written.push(...items);
+                return Promise.resolve();
+            };
+
+            dragRange(table, 0, 0, 1, 1);
+            env.table.copy(table);
+            await Promise.resolve();
+
+            assert.strictEqual(written.length, 1, 'writeTextではなくwriteが使われる');
+            const item = written[0];
+            assert.ok('text/plain' in item.items);
+            assert.ok('text/html' in item.items);
+            assert.strictEqual(env.copiedTexts.length, 0, 'writeTextは使われない');
+        });
+
+        test('クリップボードへの書き込みが失敗した場合は失敗トーストを表示する', async () => {
+            (env.window.navigator as any).clipboard.writeText = () => Promise.reject(new Error('denied'));
+
+            env.table.copy(table);
+            // rejectのハンドラ実行を待つ（マイクロタスク2段: writeToClipboard→copyのcatch）
+            await Promise.resolve();
+            await Promise.resolve();
+
+            const toast = env.document.querySelector('.mermaid-toast');
+            assert.ok(toast, 'トーストが表示されていない');
+            assert.strictEqual(toast!.textContent, '❌ コピーに失敗しました');
         });
     });
 
@@ -227,6 +580,18 @@ suite('TableModule', () => {
             plainTable!.querySelectorAll('th, td').forEach(cell => {
                 assert.strictEqual(cell.getAttribute('contenteditable'), null);
                 assert.ok(!cell.classList.contains('table-cell'));
+            });
+        });
+
+        test('矩形範囲選択のハイライト（table-cell-range-selected）も除去し、選択状態をリセットする', () => {
+            env.table.applyRangeHighlight(table, { minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 });
+            assert.ok(table.querySelector('.table-cell-range-selected'), '前提: ハイライトが付いている');
+
+            env.table.cleanup();
+
+            const plainTable = env.editor.querySelector('table')!;
+            plainTable.querySelectorAll('th, td').forEach(cell => {
+                assert.ok(!cell.classList.contains('table-cell-range-selected'));
             });
         });
     });
@@ -509,6 +874,69 @@ suite('TableModule', () => {
             assert.strictEqual(table.querySelectorAll('thead th').length, 4);
             assert.strictEqual(table.querySelectorAll('tbody tr').length, 3);
             assert.strictEqual(dialog.style.display, 'none', 'dialog closes after insert');
+        });
+
+        test('setPendingInsertRangeで指定した位置は、ダイアログを開く操作でライブ選択が別の場所へ動いても確定時にそこへ復元されて使われる', () => {
+            // スラッシュコマンドメニュー等、右クリック以外からshowInsertDialogを呼ぶ経路を想定。
+            env.editor.innerHTML = '<p>1つ目</p><p>2つ目</p>';
+            const first = env.editor.querySelectorAll('p')[0];
+            const pendingRange = env.document.createRange();
+            pendingRange.selectNodeContents(first);
+            pendingRange.collapse(true);
+            env.table.setPendingInsertRange(pendingRange);
+
+            // ダイアログを開く前に、ライブの選択を無関係な場所へ動かす
+            // （数値入力へフォーカスが移ると選択が失われる状況を模す）。
+            const second = env.editor.querySelectorAll('p')[1];
+            const liveRange = env.document.createRange();
+            liveRange.selectNodeContents(second);
+            liveRange.collapse(true);
+            const selection = env.window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(liveRange);
+
+            env.table.showInsertDialog();
+            const dialog = env.document.getElementById('tableInsertDialog')!;
+            const ok = dialog.querySelector('.link-dialog-btn-primary') as HTMLElement;
+            ok.click();
+
+            // pendingInsertRangeで指定した「1つ目」の直後（＝「2つ目」の手前）に挿入される
+            const children = Array.from(env.editor.children);
+            assert.strictEqual(children.length, 3, env.editor.innerHTML);
+            assert.strictEqual(children[0].tagName, 'P');
+            assert.strictEqual(children[0].textContent, '1つ目');
+            assert.ok(children[1].querySelector('table'), env.editor.innerHTML);
+            assert.strictEqual(children[2].tagName, 'P');
+            assert.strictEqual(children[2].textContent, '2つ目');
+        });
+
+        test('showInsertDialogのコールバックはOK確定時にのみ呼ばれる（キャンセルでは呼ばれない）', () => {
+            // スラッシュコマンドメニューはこのコールバックで「/」プレースホルダの後始末をする。
+            // キャンセル時にも呼ばれてしまうと、まだ何も挿入していないのに後始末をしてしまう
+            // （＝入力していた文字が復元不能に消えるバグになる）ため、呼び分けを検証する。
+            env.editor.innerHTML = '<p><br></p>';
+            let confirmedCount = 0;
+
+            env.table.showInsertDialog(() => { confirmedCount++; });
+            let dialog = env.document.getElementById('tableInsertDialog')!;
+            const cancelBtn = dialog.querySelector('.link-dialog-btn:not(.link-dialog-btn-primary)') as HTMLElement;
+            cancelBtn.click();
+            assert.strictEqual(confirmedCount, 0, 'キャンセルではコールバックを呼ばない');
+            assert.strictEqual(dialog.style.display, 'none');
+
+            env.table.showInsertDialog(() => { confirmedCount++; });
+            dialog = env.document.getElementById('tableInsertDialog')!;
+            const ok = dialog.querySelector('.link-dialog-btn-primary') as HTMLElement;
+            ok.click();
+            assert.strictEqual(confirmedCount, 1, 'OK確定では1回だけコールバックを呼ぶ');
+        });
+
+        test('コールバック無しでshowInsertDialogを呼んでも例外にならない（右クリックメニュー経路との後方互換）', () => {
+            env.editor.innerHTML = '<p><br></p>';
+            assert.doesNotThrow(() => env.table.showInsertDialog());
+            const dialog = env.document.getElementById('tableInsertDialog')!;
+            const ok = dialog.querySelector('.link-dialog-btn-primary') as HTMLElement;
+            assert.doesNotThrow(() => ok.click());
         });
     });
 });

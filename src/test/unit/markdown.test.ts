@@ -347,8 +347,22 @@ suite('MarkdownModule', () => {
         test('テーブルをthead/tbody付きで変換する', () => {
             const md = '| 列A | 列B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |';
             const html = env.markdown.markdownToHtml(md);
-            assert.ok(html.startsWith('<table><thead><tr><th>列A</th><th>列B</th></tr></thead>'), html);
+            assert.ok(html.startsWith('<table data-sep=" --- , --- "><thead><tr><th>列A</th><th>列B</th></tr></thead>'), html);
             assert.ok(html.includes('<tbody><tr><td>a1</td><td>b1</td></tr><tr><td>a2</td><td>b2</td></tr></tbody>'), html);
+        });
+
+        test('表区切り行の元表記（スペース有無・アライメントコロン）をdata-sepへ保持する', () => {
+            const compact = env.markdown.markdownToHtml('| A |B|\n|---|---:|\n| 1 |2|');
+            assert.ok(compact.includes('data-sep="---,---:"'), compact);
+
+            const aligned = env.markdown.markdownToHtml('| A | B | C |\n|:---|---:|:---:|\n| 1 | 2 | 3 |');
+            assert.ok(aligned.includes('data-sep=":---,---:,:---:"'), aligned);
+        });
+
+        test('列数とセパレーター列数が食い違う不正な表はdata-sepを付与しない', () => {
+            // isTableStartの正規表現上は区切り行として認識されるが列数がヘッダーと異なるケース
+            const html = env.markdown.markdownToHtml('| A | B |\n| --- |\n| 1 | 2 |');
+            assert.ok(!html.includes('data-sep'), html);
         });
 
         test('テーブルの空セルを保持する（列ずれ防止）', () => {
@@ -543,6 +557,34 @@ suite('MarkdownModule', () => {
                 md,
                 '| 列A | 列B |\n| --- | --- |\n| **a1** | b1 |\n'
             );
+        });
+
+        test('data-sepが無いtableはデフォルトの --- 区切りでシリアライズする（新規生成テーブル向け）', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<table><thead><tr><th>A</th><th>B</th></tr></thead>' +
+                '<tbody><tr><td>1</td><td>2</td></tr></tbody></table>'
+            );
+            assert.strictEqual(md, '| A | B |\n| --- | --- |\n| 1 | 2 |\n');
+        });
+
+        test('data-sepの列数がヘッダー列数と食い違う場合はデフォルト書式にフォールバックする', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<table data-sep="---"><thead><tr><th>A</th><th>B</th></tr></thead>' +
+                '<tbody><tr><td>1</td><td>2</td></tr></tbody></table>'
+            );
+            assert.strictEqual(md, '| A | B |\n| --- | --- |\n| 1 | 2 |\n');
+        });
+
+        [
+            '| A | B |\n|---|---:|\n| 1 | 2 |',
+            '| A | B |\n|:---|---:|\n| 1 | 2 |',
+            '| A | B |\n| :---: | :---: |\n| 1 | 2 |'
+        ].forEach(md => {
+            test(`触っていない表の区切り行の書式をバイト単位で保つ（往復）: ${JSON.stringify(md)}`, () => {
+                const html = env.markdown.markdownToHtml(md);
+                const roundTripped = env.markdown.htmlToMarkdown(html);
+                assert.strictEqual(roundTripped.trim(), md.trim());
+            });
         });
 
         test('セル内のパイプ文字をエスケープする', () => {

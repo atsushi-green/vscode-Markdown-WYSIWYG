@@ -497,6 +497,78 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * スクロール位置パンくず用に、エディタ内の見出し要素を出現順の階層情報配列へ変換する。
+     * `id` は markdownToHtml が付与したスラッグ（scrollToAnchor と同じ規則で遷移できる）。
+     */
+    function collectHeadings(editor) {
+        const headings = [];
+        editor.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => {
+            headings.push({
+                level: Number(h.tagName[1]),
+                id: h.id || '',
+                text: headingText(h),
+                el: h
+            });
+        });
+        return headings;
+    }
+
+    /**
+     * 見出しの上端位置（配列。出現順＝昇順）とスクロール位置から、
+     * 「いま見ている位置」に対応する見出しのインデックスを求める（純粋関数）。
+     * スクロール位置以前の最後の見出し＝現在読んでいる節の見出しとみなす。
+     * 最初の見出しより手前（まだどの見出しも通過していない）なら -1。
+     */
+    function findCurrentHeadingIndex(tops, scrollTop) {
+        let result = -1;
+        for (let i = 0; i < tops.length; i++) {
+            if (tops[i] <= scrollTop) {
+                result = i;
+            } else {
+                break;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 現在の見出しインデックスから、祖先の階層すべてを連ねたパンくずチェーンを組み立てる（純粋関数）。
+     * currentIndexの見出し自身を末尾に置き、そこから手前へ辿ってレベルが
+     * それまでの最小値より小さい見出しだけを先頭へ積み上げる（レベル飛び＝存在するものだけ）。
+     */
+    function buildBreadcrumbChain(headings, currentIndex) {
+        if (!headings || currentIndex < 0 || currentIndex >= headings.length) {
+            return [];
+        }
+        const chain = [headings[currentIndex]];
+        let minLevel = headings[currentIndex].level;
+        for (let i = currentIndex - 1; i >= 0 && minLevel > 1; i--) {
+            if (headings[i].level < minLevel) {
+                chain.unshift(headings[i]);
+                minLevel = headings[i].level;
+            }
+        }
+        return chain;
+    }
+
+    /**
+     * ブロックが「/」入力直後のスラッシュコマンド起動状態か判定する純粋関数。
+     * `table.isBlockEmpty` と同様の考え方で、ブロックの可視テキストが半角スラッシュ
+     * 1文字だけ（前後に他のテキスト・`<br>`以外の要素を含まない）ならtrue。
+     * それ以外（空・2文字以上・スラッシュ以外）はfalse＝メニューを出さない/閉じる対象。
+     */
+    function isSlashCommandTrigger(block) {
+        if (!block) {
+            return false;
+        }
+        const text = (block.textContent || '').replace(/\u200B/g, '');
+        if (text !== '/') {
+            return false;
+        }
+        return !Array.prototype.some.call(block.children || [], child => child.tagName !== 'BR');
+    }
+
+    /**
      * コマンドの実行
      */
     function executeCommand(command) {
@@ -567,6 +639,8 @@ window.CommandsModule = (function() {
      * エディタ内の見出しから目次（TOC）を生成し、キャレット位置のブロックの
      * 直後（キャレットが無ければ先頭）に挿入する。
      * 見出しが無い場合はトーストで知らせて何もしない。
+     * @returns {boolean} 実際に目次を挿入できたか（見出しが無い等で挿入しなかった場合はfalse。
+     * スラッシュコマンドメニュー等、挿入できたかどうかで後続処理を分けたい呼び出し元向け）
      */
     function insertToc() {
         const headings = [];
@@ -579,7 +653,7 @@ window.CommandsModule = (function() {
 
         if (!headings.length) {
             utils.showToast('見出しが見つかりません');
-            return;
+            return false;
         }
 
         const tocMarkdown = markdown.buildTocMarkdown(headings);
@@ -587,7 +661,7 @@ window.CommandsModule = (function() {
         temp.innerHTML = markdown.markdownToHtml(tocMarkdown);
         const nodes = Array.prototype.slice.call(temp.childNodes);
         if (!nodes.length) {
-            return;
+            return false;
         }
 
         // 挿入位置を決める（キャレットのあるトップレベルブロックの直後）
@@ -618,6 +692,7 @@ window.CommandsModule = (function() {
 
         // 文書へ反映
         state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
     }
 
     /**
@@ -2569,6 +2644,10 @@ window.CommandsModule = (function() {
         findClipboardImageItem: findClipboardImageItem,
         insertImageMarkdown: insertImageMarkdown,
         scrollToAnchor: scrollToAnchor,
+        collectHeadings: collectHeadings,
+        findCurrentHeadingIndex: findCurrentHeadingIndex,
+        buildBreadcrumbChain: buildBreadcrumbChain,
+        isSlashCommandTrigger: isSlashCommandTrigger,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         handleAutoBlock: handleAutoBlock,
         handleHorizontalRule: handleHorizontalRule,

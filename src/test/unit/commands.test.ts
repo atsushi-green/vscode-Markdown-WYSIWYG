@@ -1597,10 +1597,18 @@ suite('CommandsModule', () => {
             assert.strictEqual(link!.textContent, 'はじめに');
         });
 
-        test('見出しが無い場合は目次を挿入しない', () => {
+        test('見出しが無い場合は目次を挿入せず、falseを返す（呼び出し元が挿入失敗を判定できる）', () => {
             env.editor.innerHTML = '<p>本文だけ</p>';
-            env.commands.insertToc();
+            const inserted = env.commands.insertToc();
             assert.strictEqual(env.editor.querySelector('ul'), null);
+            assert.strictEqual(inserted, false);
+        });
+
+        test('見出しがあり目次を挿入できた場合はtrueを返す', () => {
+            env.editor.innerHTML = heading(1, 'タイトル');
+            const inserted = env.commands.insertToc();
+            assert.strictEqual(inserted, true);
+            assert.ok(env.editor.querySelector('ul'));
         });
 
         test('挿入した目次は htmlToMarkdown で入れ子リンク付きリストになる', () => {
@@ -1891,6 +1899,131 @@ suite('CommandsModule', () => {
         test('#で始まらないhrefは無視する', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml('# Title');
             assert.doesNotThrow(() => env.commands.scrollToAnchor('https://example.com'));
+        });
+    });
+
+    suite('見出しパンくず（スクロール位置の見出し階層表示）', () => {
+        suite('collectHeadings', () => {
+            test('エディタ内の見出しを出現順にlevel/id/textへ変換する', () => {
+                env.editor.innerHTML = env.markdown.markdownToHtml(
+                    '# タイトル\n\n## 節A\n\n### 詳細'
+                );
+                const headings = env.commands.collectHeadings(env.editor);
+                assert.strictEqual(headings.length, 3);
+                // headings/mapはjsdomレルムの配列を返すため、deepStrictEqualの
+                // プロトタイプ不一致を避けてArray.fromでNodeレルムへ変換して比較する
+                assert.deepStrictEqual(Array.from(headings, (h: any) => h.level), [1, 2, 3]);
+                assert.deepStrictEqual(Array.from(headings, (h: any) => h.text), ['タイトル', '節A', '詳細']);
+                assert.ok(headings[0].id, 'idが付与されている');
+                assert.strictEqual(headings[0].el.tagName, 'H1');
+            });
+
+            test('見出しが無ければ空配列を返す', () => {
+                env.editor.innerHTML = '<p>本文だけ</p>';
+                assert.deepStrictEqual(Array.from(env.commands.collectHeadings(env.editor)), []);
+            });
+        });
+
+        suite('findCurrentHeadingIndex', () => {
+            test('スクロール位置以前の最後の見出しのインデックスを返す', () => {
+                const tops = [0, 100, 250];
+                assert.strictEqual(env.commands.findCurrentHeadingIndex(tops, 0), 0);
+                assert.strictEqual(env.commands.findCurrentHeadingIndex(tops, 150), 1);
+                assert.strictEqual(env.commands.findCurrentHeadingIndex(tops, 999), 2);
+            });
+
+            test('最初の見出しより手前（文書先頭）なら-1', () => {
+                const tops = [100, 250];
+                assert.strictEqual(env.commands.findCurrentHeadingIndex(tops, 50), -1);
+            });
+
+            test('見出しが無ければ-1', () => {
+                assert.strictEqual(env.commands.findCurrentHeadingIndex([], 100), -1);
+            });
+        });
+
+        suite('buildBreadcrumbChain', () => {
+            const H1 = { level: 1, id: 'doc', text: 'ドキュメント' };
+            const H2 = { level: 2, id: 'sec', text: '機能テスト' };
+            const H3 = { level: 3, id: 'detail', text: '詳細' };
+
+            // buildBreadcrumbChainはjsdomレルムで実行され返り値のArrayもjsdomレルム
+            // となるため、deepStrictEqualのプロトタイプ不一致を避けてArray.fromで
+            // Nodeレルムへ変換してから比較する。
+
+            test('現在位置の見出しと、その上位すべての祖先を連ねる', () => {
+                const chain = env.commands.buildBreadcrumbChain([H1, H2, H3], 2);
+                assert.deepStrictEqual(Array.from(chain), [H1, H2, H3]);
+            });
+
+            test('途中のレベルが飛んでいる場合は存在するものだけを並べる（h1の次がh3）', () => {
+                const H3only = { level: 3, id: 'detail', text: '詳細' };
+                const chain = env.commands.buildBreadcrumbChain([H1, H3only], 1);
+                assert.deepStrictEqual(Array.from(chain), [H1, H3only]);
+            });
+
+            test('同レベルや自分より深いレベルの手前の見出しは祖先に含めない', () => {
+                const H2b = { level: 2, id: 'sec-b', text: '節B' };
+                // H1 > H2(節A) > H2b(節B) の並びで、現在位置がH2bなら祖先はH1のみ
+                const chain = env.commands.buildBreadcrumbChain([H1, H2, H2b], 2);
+                assert.deepStrictEqual(Array.from(chain), [H1, H2b]);
+            });
+
+            test('currentIndexが範囲外なら空配列を返す', () => {
+                assert.deepStrictEqual(Array.from(env.commands.buildBreadcrumbChain([H1], -1)), []);
+                assert.deepStrictEqual(Array.from(env.commands.buildBreadcrumbChain([H1], 5)), []);
+            });
+
+            test('見出しが1つ（h1のみ）ならその見出しだけを返す', () => {
+                const chain = env.commands.buildBreadcrumbChain([H1], 0);
+                assert.deepStrictEqual(Array.from(chain), [H1]);
+            });
+        });
+    });
+
+    suite('isSlashCommandTrigger（「/」入力によるコマンドメニューの起動判定）', () => {
+        test('可視テキストが「/」1文字だけのブロックはtrue', () => {
+            env.editor.innerHTML = '<p>/</p>';
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), true);
+        });
+
+        test('<br>のみを伴う「/」ブロックもtrue（末尾入力直後の典型形）', () => {
+            const holder = env.document.createElement('div');
+            holder.innerHTML = '<p>/<br></p>';
+            const p = holder.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), true);
+        });
+
+        test('空のブロックはfalse', () => {
+            env.editor.innerHTML = '<p><br></p>';
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), false);
+        });
+
+        test('「/」の前後に他のテキストがあるとfalse', () => {
+            env.editor.innerHTML = '<p>a/</p>';
+            const p = env.editor.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), false);
+        });
+
+        test('「/」以外のテキストや、テキスト以外の要素を含むとfalse', () => {
+            const holder = env.document.createElement('div');
+            holder.innerHTML = '<p>//</p><p><img src="x"></p>';
+            const ps = holder.querySelectorAll('p');
+            assert.strictEqual(env.commands.isSlashCommandTrigger(ps[0]), false);
+            assert.strictEqual(env.commands.isSlashCommandTrigger(ps[1]), false);
+        });
+
+        test('可視テキストは「/」1文字だけでも、<br>以外の要素を含むとfalse', () => {
+            const holder = env.document.createElement('div');
+            holder.innerHTML = '<p>/<img src="x"></p>';
+            const p = holder.querySelector('p')!;
+            assert.strictEqual(env.commands.isSlashCommandTrigger(p), false);
+        });
+
+        test('blockがnullならfalse', () => {
+            assert.strictEqual(env.commands.isSlashCommandTrigger(null as any), false);
         });
     });
 

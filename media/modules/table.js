@@ -97,6 +97,9 @@ window.TableModule = (function() {
                 selectCell(cell, table);
             });
 
+            // マウスドラッグによる矩形範囲選択
+            setupCellRangeDrag(cell, table);
+
             // フォーカスイベント
             cell.addEventListener('focus', () => {
                 console.log('[Cell Focus] Cell focused:', cell.textContent);
@@ -142,6 +145,137 @@ window.TableModule = (function() {
         });
         cell.classList.add('table-cell-selected');
         state.currentEditingCell = cell;
+        // 単一セルの選択は、既存の矩形範囲選択（あれば）を解除する。
+        if (currentCellRange) {
+            clearRangeSelection(currentCellRange.table);
+            currentCellRange = null;
+        }
+    }
+
+    // ---- 表の矩形範囲選択（マウスドラッグ） ----
+    // ドラッグ開始セル（mousedown時に記録。document の mouseup でクリアする）。
+    let rangeDragStart = null;
+    // 直近に確定した矩形範囲選択。コピー＆ペースト（(2/3)(3/3)）から参照する想定。
+    let currentCellRange = null;
+
+    /**
+     * テーブル内でのセルの行・列インデックスを求める純粋関数寄りのヘルパ。
+     * theadとtbodyをまたいだ表示順（`table.rows`）を行インデックスとして使う
+     * （既存の矢印キーナビゲーション`handleKeydown`と同じ考え方）。
+     */
+    function cellPosition(table, cell) {
+        const row = cell.parentElement;
+        return {
+            row: Array.from(table.rows).indexOf(row),
+            col: Array.from(row.cells).indexOf(cell)
+        };
+    }
+
+    /**
+     * 開始・終了セルの行列インデックスから矩形範囲（開始・終了の前後を問わない）を
+     * 正規化して返す純粋関数。
+     */
+    function computeCellRange(startRow, startCol, endRow, endCol) {
+        return {
+            minRow: Math.min(startRow, endRow),
+            maxRow: Math.max(startRow, endRow),
+            minCol: Math.min(startCol, endCol),
+            maxCol: Math.max(startCol, endCol)
+        };
+    }
+
+    /**
+     * 行・列インデックスが矩形範囲内かどうかを判定する純粋関数。
+     */
+    function isCellInRange(row, col, range) {
+        return row >= range.minRow && row <= range.maxRow &&
+            col >= range.minCol && col <= range.maxCol;
+    }
+
+    /**
+     * 矩形範囲内の各セルへハイライトclassを付与し、範囲外からは外す
+     * （このテーブル内のみが対象）。単一セル選択（`table-cell-selected`）とは
+     * 混在させず、範囲確定時にそちらは解除する。
+     */
+    function applyRangeHighlight(table, range) {
+        table.querySelectorAll('.table-cell-selected').forEach(c => {
+            c.classList.remove('table-cell-selected');
+        });
+        table.querySelectorAll('th, td').forEach(cell => {
+            const pos = cellPosition(table, cell);
+            cell.classList.toggle('table-cell-range-selected', isCellInRange(pos.row, pos.col, range));
+        });
+    }
+
+    /**
+     * 矩形範囲選択のハイライトを全解除する。
+     */
+    function clearRangeSelection(table) {
+        table.querySelectorAll('.table-cell-range-selected').forEach(c => {
+            c.classList.remove('table-cell-range-selected');
+        });
+    }
+
+    /**
+     * このテーブルに対して矩形範囲選択が確定している場合、それを無効化する。
+     * 行・列の追加/削除は行・列インデックスの構造そのものを変えるため、
+     * 確定済みの範囲（`minRow`/`maxRow`/`minCol`/`maxCol`）をそのまま使い続けると
+     * ずれた行・列を指す stale な範囲になる（例: 削除後に範囲外のセルまで
+     * 巻き込んで`copy()`が誤った内容を返す）。`addRow`/`addColumn`/`deleteRow`/
+     * `deleteColumn`の冒頭で呼び、`selectCell`と同じ考え方で後始末する。
+     */
+    function invalidateRangeSelectionFor(table) {
+        if (currentCellRange && currentCellRange.table === table) {
+            clearRangeSelection(table);
+            currentCellRange = null;
+        }
+    }
+
+    /**
+     * テーブル内のマウスドラッグによる矩形範囲選択を配線する（`makeEditable`の
+     * セルループから各セルへ）。開始セルの`mousedown`を記録し、ドラッグ中
+     * （主ボタン押下中）に別セルへ`mouseenter`すると範囲を確定・ハイライトする。
+     * 単なるクリック（同一セルでmousedown/mouseup）は別セルへの`mouseenter`が
+     * 発生しないため、この配線は一切反応せず既存の単一セル選択と競合しない。
+     */
+    function setupCellRangeDrag(cell, table) {
+        cell.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) {
+                return; // 主ボタン（左クリック）のみ対象
+            }
+            // 別のテーブルに残っている範囲選択があれば、ここで解除する。
+            // clickは必ずmousedownの後に発火するため、単純クリック・ドラッグ開始の
+            // どちらの経路でも「他テーブルの範囲ハイライトが永続的に残留する」
+            // （複数テーブルを持つ文書での取り違え・消し忘れ）を防げる。
+            if (currentCellRange && currentCellRange.table !== table) {
+                clearRangeSelection(currentCellRange.table);
+                currentCellRange = null;
+            }
+            rangeDragStart = { table: table, position: cellPosition(table, cell) };
+        });
+
+        cell.addEventListener('mouseenter', (e) => {
+            if (!rangeDragStart || rangeDragStart.table !== table || e.buttons !== 1) {
+                return;
+            }
+            const pos = cellPosition(table, cell);
+            const range = computeCellRange(
+                rangeDragStart.position.row, rangeDragStart.position.col, pos.row, pos.col
+            );
+            currentCellRange = { table: table, range: range };
+            applyRangeHighlight(table, range);
+        });
+    }
+
+    /**
+     * マウスボタンを離したらドラッグ追跡を終了する（`document`に一度だけ配線）。
+     * 確定した範囲のハイライト（`currentCellRange`）はここでは消さない
+     * （次のクリック・別範囲の開始・別テーブルでの範囲開始のいずれかまで保持する）。
+     */
+    function setupRangeSelectionMouseUp() {
+        document.addEventListener('mouseup', () => {
+            rangeDragStart = null;
+        });
     }
 
     /**
@@ -324,6 +458,7 @@ window.TableModule = (function() {
      * 行を追加
      */
     function addRow(table, currentRow, position) {
+        invalidateRangeSelectionFor(table);
         const tbody = table.querySelector('tbody');
         if (!tbody) return;
 
@@ -355,6 +490,7 @@ window.TableModule = (function() {
      * 列を追加
      */
     function addColumn(table, colIndex, position) {
+        invalidateRangeSelectionFor(table);
         const thead = table.querySelector('thead');
         const tbody = table.querySelector('tbody');
         const targetIndex = position === 'before' ? colIndex : colIndex + 1;
@@ -396,6 +532,7 @@ window.TableModule = (function() {
      * 行を削除
      */
     function deleteRow(table, currentRow) {
+        invalidateRangeSelectionFor(table);
         const tbody = table.querySelector('tbody');
         if (!tbody) return;
 
@@ -414,6 +551,7 @@ window.TableModule = (function() {
      * 列を削除
      */
     function deleteColumn(table, colIndex) {
+        invalidateRangeSelectionFor(table);
         const thead = table.querySelector('thead');
         const tbody = table.querySelector('tbody');
 
@@ -483,18 +621,90 @@ window.TableModule = (function() {
     }
 
     /**
-     * テーブルをコピー
+     * テーブル全体、または矩形範囲（`isCellInRange`と同じ形の`{minRow,maxRow,minCol,maxCol}`。
+     * 無ければテーブル全体）に含まれるセルのテキストを行列（文字列の二次元配列）として
+     * 取り出す純粋関数寄りのヘルパ。
+     */
+    function extractCellTextMatrix(table, range) {
+        const matrix = [];
+        Array.from(table.rows).forEach((row, rowIndex) => {
+            const line = [];
+            Array.from(row.cells).forEach((cell, colIndex) => {
+                if (range && !isCellInRange(rowIndex, colIndex, range)) {
+                    return;
+                }
+                line.push(cell.textContent);
+            });
+            if (line.length) {
+                matrix.push(line);
+            }
+        });
+        return matrix;
+    }
+
+    /**
+     * 文字列の行列をタブ区切り（TSV）テキストへ組み立てる純粋関数。
+     */
+    function buildTsvFromMatrix(matrix) {
+        return matrix.map(row => row.join('\t')).join('\n');
+    }
+
+    /**
+     * テーブル全体、または矩形範囲に含まれるセルを`<table>`断片のHTML文字列として
+     * 組み立てる。セル内の装飾（`<strong>`・リンク等）を保つため`textContent`ではなく
+     * `innerHTML`をそのまま使う（エディタ内の`contenteditable`等の属性はセル自身の
+     * ものであり、ここでは新規に`<td>`/`<th>`タグを作って中身だけ包むため含まれない）。
+     */
+    function buildHtmlTableFragment(table, range) {
+        const rowsHtml = [];
+        Array.from(table.rows).forEach((row, rowIndex) => {
+            const cellsHtml = [];
+            Array.from(row.cells).forEach((cell, colIndex) => {
+                if (range && !isCellInRange(rowIndex, colIndex, range)) {
+                    return;
+                }
+                const tag = cell.tagName === 'TH' ? 'th' : 'td';
+                cellsHtml.push(`<${tag}>${cell.innerHTML}</${tag}>`);
+            });
+            if (cellsHtml.length) {
+                rowsHtml.push(`<tr>${cellsHtml.join('')}</tr>`);
+            }
+        });
+        return `<table><tbody>${rowsHtml.join('')}</tbody></table>`;
+    }
+
+    /**
+     * TSVテキストとHTML断片をクリップボードへ書き込む。`ClipboardItem`/
+     * `navigator.clipboard.write`が使える環境（Webview＝Chromiumベースなので通常は使える）
+     * ではその両方を書き込み、Excel等へはTSVプレーンテキストとして、装飾を保ちたい
+     * 貼り付け先へは`text/html`として渡せるようにする。使えない環境（jsdomでのテスト等）
+     * では従来どおり`writeText`（TSVのみ）へフォールバックする。
+     */
+    function writeToClipboard(tsv, html) {
+        if (typeof ClipboardItem !== 'undefined' &&
+            navigator.clipboard && typeof navigator.clipboard.write === 'function') {
+            const item = new ClipboardItem({
+                'text/plain': new Blob([tsv], { type: 'text/plain' }),
+                'text/html': new Blob([html], { type: 'text/html' })
+            });
+            return navigator.clipboard.write([item]);
+        }
+        return navigator.clipboard.writeText(tsv);
+    }
+
+    /**
+     * テーブルをコピーする。矩形範囲選択（`currentCellRange`）がこのテーブルに
+     * 対して確定している場合はその範囲だけを、無ければテーブル全体をTSV＋text/htmlで
+     * クリップボードへ書き込む（範囲が無い場合の挙動・出力内容は従来と同じ＝無退行）。
      */
     function copy(table) {
-        const rows = table.querySelectorAll('tr');
-        const data = Array.from(rows).map(row => {
-            const cells = Array.from(row.querySelectorAll('th, td'));
-            return cells.map(cell => cell.textContent).join('\t');
-        });
+        const range = (currentCellRange && currentCellRange.table === table) ? currentCellRange.range : null;
+        const matrix = extractCellTextMatrix(table, range);
+        const tsv = buildTsvFromMatrix(matrix);
+        const html = buildHtmlTableFragment(table, range);
 
-        const text = data.join('\n');
-        navigator.clipboard.writeText(text).then(() => {
-            utils.showToast('✅ テーブルをコピーしました');
+        writeToClipboard(tsv, html).then(() => {
+            utils.showToast(range ? '✅ 選択範囲をコピーしました' : '✅ テーブルをコピーしました');
         }).catch(err => {
             console.error('Copy failed:', err);
             utils.showToast('❌ コピーに失敗しました');
@@ -601,6 +811,9 @@ window.TableModule = (function() {
     // ダイアログ確定時に表を挿す位置。右クリック時のキャレット範囲を退避しておく
     // （ダイアログ入力へフォーカスが移るとエディタの選択が失われるため）。
     let pendingInsertRange = null;
+    // 直近の showInsertDialog 呼び出し元へ、確定（実際に表を挿入できた）後にのみ通知する
+    // コールバック。キャンセル時は呼ばない＝呼び出し元は「挿入されなかった」と判断できる。
+    let onInsertConfirmed = null;
 
     // 挿入メニューを出さない「特別な」ブロック（数式・Mermaid・既存テーブル）。
     // これらの上での右クリックはそれぞれの担当（数式メニュー／Mermaidメニュー／
@@ -832,6 +1045,18 @@ window.TableModule = (function() {
             // 復元した範囲は使い切ったのでクリア（次回の古い範囲の誤用を防ぐ）
             pendingInsertRange = null;
             insertTable(dims.rows, dims.cols);
+            // 実際に挿入できた場合のみ呼び出し元へ通知する（キャンセル時は呼ばない）
+            if (onInsertConfirmed) {
+                const callback = onInsertConfirmed;
+                onInsertConfirmed = null;
+                callback();
+            }
+        };
+        // キャンセル（挿入しない）経路をまとめる。onInsertConfirmedは呼ばずに破棄することで、
+        // 呼び出し元（スラッシュコマンドメニュー等）が「挿入されなかった」と判断できるようにする。
+        const cancel = () => {
+            onInsertConfirmed = null;
+            hideInsertDialog();
         };
 
         okBtn.addEventListener('click', function(e) {
@@ -840,7 +1065,7 @@ window.TableModule = (function() {
         });
         cancelBtn.addEventListener('click', function(e) {
             e.preventDefault();
-            hideInsertDialog();
+            cancel();
         });
         // Enterで確定・Escapeでキャンセル（数値入力内から）。
         // ただしキャンセルボタン上でのEnterはキャンセルとして扱う。
@@ -848,13 +1073,13 @@ window.TableModule = (function() {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 if (e.target === cancelBtn) {
-                    hideInsertDialog();
+                    cancel();
                 } else {
                     confirm();
                 }
             } else if (e.key === 'Escape') {
                 e.preventDefault();
-                hideInsertDialog();
+                cancel();
             }
         });
 
@@ -865,8 +1090,12 @@ window.TableModule = (function() {
 
     /**
      * 行数・列数ダイアログを表示し、行数入力へフォーカスする。
+     * @param {Function} [onInserted] 実際に表を挿入できた（OK確定・キャンセルでない）場合にのみ
+     * 呼ばれるコールバック。右クリックメニュー以外の呼び出し元（スラッシュコマンドメニュー等）が、
+     * 挿入位置に置いたプレースホルダの後始末をキャンセル時と区別して行いたい場合に使う。
      */
-    function showInsertDialog() {
+    function showInsertDialog(onInserted) {
+        onInsertConfirmed = typeof onInserted === 'function' ? onInserted : null;
         const dialog = ensureInsertDialog();
         dialog.style.display = '';
         if (dialog._rowsInput) {
@@ -900,6 +1129,16 @@ window.TableModule = (function() {
             selection.removeAllRanges();
             selection.addRange(pendingInsertRange);
         }
+    }
+
+    /**
+     * ダイアログ確定時に復元する範囲を外部（右クリックメニュー以外の呼び出し元）から
+     * 設定する。`showInsertDialog` はフォーカスを行数・列数入力へ移すため、それより前の
+     * キャレット位置をここへ渡しておくと、確定時にそこへ表を挿入できる
+     * （右クリックメニューの `contextmenu` ハンドラが自分自身の内部でやっているのと同じ仕組み）。
+     */
+    function setPendingInsertRange(range) {
+        pendingInsertRange = range ? range.cloneRange() : null;
     }
 
     /**
@@ -955,11 +1194,15 @@ window.TableModule = (function() {
                 table.removeAttribute('data-table-id');
                 table.querySelectorAll('th, td').forEach(cell => {
                     cell.removeAttribute('contenteditable');
-                    cell.classList.remove('table-cell', 'table-cell-selected');
+                    cell.classList.remove('table-cell', 'table-cell-selected', 'table-cell-range-selected');
                 });
             }
             container.remove();
         });
+        // インタラクティブ化を解除する＝表の状態は作り直される想定のため、
+        // 古いテーブル要素への参照を範囲選択の状態にも残さない。
+        rangeDragStart = null;
+        currentCellRange = null;
     }
 
     // 公開API
@@ -981,11 +1224,22 @@ window.TableModule = (function() {
         insertTable: insertTable,
         setupContextMenu: setupContextMenu,
         showInsertDialog: showInsertDialog,
+        setPendingInsertRange: setPendingInsertRange,
         hideInsertDialog: hideInsertDialog,
         findExcludedAncestor: findExcludedAncestor,
         isBlockEmpty: isBlockEmpty,
         shouldShowInsertMenu: shouldShowInsertMenu,
         computeMenuPosition: computeMenuPosition,
-        clampTableDimensions: clampTableDimensions
+        clampTableDimensions: clampTableDimensions,
+        cellPosition: cellPosition,
+        computeCellRange: computeCellRange,
+        isCellInRange: isCellInRange,
+        applyRangeHighlight: applyRangeHighlight,
+        clearRangeSelection: clearRangeSelection,
+        setupRangeSelectionMouseUp: setupRangeSelectionMouseUp,
+        getCurrentCellRange: function () { return currentCellRange; },
+        extractCellTextMatrix: extractCellTextMatrix,
+        buildTsvFromMatrix: buildTsvFromMatrix,
+        buildHtmlTableFragment: buildHtmlTableFragment
     };
 })();

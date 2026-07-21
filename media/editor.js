@@ -212,6 +212,7 @@
         // 縦スクロールに追従（内容・レイアウト変化時のみ再配置＝input/resizeで update）
         ed.addEventListener('scroll', syncWysiwygGutterScroll);
         window.addEventListener('resize', updateWysiwygLineGutter);
+        window.addEventListener('resize', updateHeadingBreadcrumb);
 
         updateWysiwygLineGutter();
     }
@@ -284,6 +285,298 @@
         }
     }
 
+    // 見出しパンくずバー（初期化時に生成。#editor の直前へ挿入）
+    let headingBreadcrumbBar = null;
+    let headingBreadcrumbRafPending = false;
+
+    /**
+     * スクロール位置パンくずバーを生成する（一度だけ）。ツールバー直下・
+     * `#editor`（行番号ガターのラッパーを含む）の直前に挿入し、通常のflowで
+     * 常に表示位置を保つ（`#editor` 自身がスクロールしてもバーは動かない）。
+     */
+    function initHeadingBreadcrumb() {
+        const ed = state.editor;
+        if (!ed || headingBreadcrumbBar) {
+            return;
+        }
+        const bar = document.createElement('div');
+        bar.className = 'heading-breadcrumb-bar';
+        bar.style.display = 'none';
+        ed.parentNode.insertBefore(bar, ed);
+        headingBreadcrumbBar = bar;
+
+        ed.addEventListener('scroll', scheduleHeadingBreadcrumbUpdate);
+        updateHeadingBreadcrumb();
+    }
+
+    /**
+     * スクロールイベントの間引き（rAF）。スクロール中に何度も呼ばれても
+     * 1フレームにつき1回だけ再計算する。
+     */
+    function scheduleHeadingBreadcrumbUpdate() {
+        if (headingBreadcrumbRafPending) {
+            return;
+        }
+        headingBreadcrumbRafPending = true;
+        window.requestAnimationFrame(function () {
+            headingBreadcrumbRafPending = false;
+            updateHeadingBreadcrumb();
+        });
+    }
+
+    /**
+     * 現在のスクロール位置から「いま見ている見出し」の祖先チェーンを求め、
+     * パンくずバーへ描画する。見出しが無い／まだどの見出しも通過していない
+     * （文書先頭）場合はバーを隠す。Rawモード中は何もしない。
+     */
+    function updateHeadingBreadcrumb() {
+        if (!headingBreadcrumbBar || !state.editor || state.isRawMode) {
+            return;
+        }
+        const headings = commands.collectHeadings(state.editor);
+        if (!headings.length) {
+            headingBreadcrumbBar.style.display = 'none';
+            return;
+        }
+
+        const editorRect = state.editor.getBoundingClientRect();
+        const scrollTop = state.editor.scrollTop;
+        const tops = headings.map(function (h) {
+            return h.el.getBoundingClientRect().top - editorRect.top + scrollTop;
+        });
+        const currentIndex = commands.findCurrentHeadingIndex(tops, scrollTop);
+        if (currentIndex < 0) {
+            headingBreadcrumbBar.style.display = 'none';
+            return;
+        }
+
+        const chain = commands.buildBreadcrumbChain(headings, currentIndex);
+        renderHeadingBreadcrumb(chain);
+    }
+
+    /**
+     * パンくずチェーンをバーへ描画する。各セグメントをクリックすると
+     * 該当見出しへスクロールする（`commands.scrollToAnchor` と同じidベース遷移）。
+     */
+    function renderHeadingBreadcrumb(chain) {
+        const bar = headingBreadcrumbBar;
+        bar.textContent = '';
+        chain.forEach(function (heading, index) {
+            if (index > 0) {
+                const sep = document.createElement('span');
+                sep.className = 'heading-breadcrumb-sep';
+                sep.textContent = '›';
+                bar.appendChild(sep);
+            }
+            const item = document.createElement('span');
+            item.className = 'heading-breadcrumb-item';
+            item.textContent = '#'.repeat(heading.level) + ' ' + heading.text;
+            // idが無い見出し（execCommandによる見出し化・入力直後の変換等はidを付与しない。
+            // idはmarkdownToHtmlの再パース時のみ付く）はスクロール遷移できないため、
+            // クリック可能に見えないよう装飾（cursor/hover）ごとクラスで分ける。
+            if (heading.id) {
+                item.classList.add('heading-breadcrumb-item-clickable');
+                item.title = heading.text;
+                item.addEventListener('click', function () {
+                    commands.scrollToAnchor('#' + heading.id);
+                });
+            }
+            bar.appendChild(item);
+        });
+        bar.style.display = 'flex';
+    }
+
+    /**
+     * Rawモードに入るときにパンくずバーを隠す。
+     */
+    function hideHeadingBreadcrumb() {
+        if (headingBreadcrumbBar) {
+            headingBreadcrumbBar.style.display = 'none';
+        }
+    }
+
+    // 「/」入力によるコマンドメニュー（初期スコープ: 目次挿入・表の挿入）。
+    // markdownEditor.ts 非変更・body直下へ動的生成（mermaid/math/tableの各メニューと同パターン）。
+    let slashMenuEl = null;
+    // メニュー表示中の対象ブロック（可視テキストが「/」1文字だけのP/DIV/LI）。
+    let slashMenuBlock = null;
+
+    /**
+     * スラッシュコマンドメニュー（無ければ生成）を返す。
+     * 見た目は table/mermaid/math の各コンテキストメニューと共有
+     * （editor.css の `.slash-command-menu`/`.slash-command-item` は同ルールを参照）。
+     */
+    function ensureSlashCommandMenu() {
+        if (slashMenuEl) {
+            return slashMenuEl;
+        }
+        const menu = document.createElement('div');
+        menu.id = 'slashCommandMenu';
+        menu.className = 'slash-command-menu';
+        menu.style.display = 'none';
+        menu.style.position = 'fixed';
+
+        const addItem = function (label, action) {
+            const item = document.createElement('div');
+            item.className = 'slash-command-item';
+            item.textContent = label;
+            // mousedown側でpreventDefaultし、クリックによるフォーカス/選択の移動
+            // （「/」ブロックへのライブ選択が崩れること）を防ぐ。
+            item.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+            });
+            item.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                runSlashCommand(action);
+            });
+            menu.appendChild(item);
+        };
+        addItem('📑 目次を挿入', 'toc');
+        addItem('➕ 表を挿入…', 'table');
+
+        document.body.appendChild(menu);
+        slashMenuEl = menu;
+        return menu;
+    }
+
+    /**
+     * 対象ブロックの直後（キャレット位置）付近へスラッシュコマンドメニューを表示する。
+     */
+    function showSlashCommandMenu(block, range) {
+        slashMenuBlock = block;
+        const menu = ensureSlashCommandMenu();
+        menu.style.display = 'block';
+
+        // キャレット位置の矩形（折り畳まれたRangeが0を返す環境向けにブロック自身へフォールバック）。
+        let anchor = null;
+        if (range && typeof range.getClientRects === 'function' && range.getClientRects().length) {
+            anchor = range.getClientRects()[0];
+        } else if (range && typeof range.getBoundingClientRect === 'function') {
+            anchor = range.getBoundingClientRect();
+        }
+        if (!anchor || (!anchor.width && !anchor.height && !anchor.top && !anchor.left)) {
+            anchor = block.getBoundingClientRect();
+        }
+
+        const menuRect = menu.getBoundingClientRect();
+        const pos = tableModule.computeMenuPosition(
+            anchor.left, anchor.bottom + 4, menuRect.width, menuRect.height,
+            window.innerWidth, window.innerHeight
+        );
+        menu.style.left = pos.left + 'px';
+        menu.style.top = pos.top + 'px';
+    }
+
+    /**
+     * スラッシュコマンドメニューを閉じる。
+     */
+    function hideSlashCommandMenu() {
+        slashMenuBlock = null;
+        if (slashMenuEl) {
+            slashMenuEl.style.display = 'none';
+        }
+    }
+
+    /**
+     * キャレット位置から、スラッシュコマンドメニューを表示すべきかどうかを判定して
+     * 表示/非表示を更新する（`selectionchange` から呼ぶ）。
+     */
+    function updateSlashCommandMenu() {
+        if (state.isRawMode) {
+            hideSlashCommandMenu();
+            return;
+        }
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+            hideSlashCommandMenu();
+            return;
+        }
+        const range = selection.getRangeAt(0);
+        if (!state.editor.contains(range.startContainer)) {
+            hideSlashCommandMenu();
+            return;
+        }
+        const block = utils.findBlockAncestor(range.startContainer);
+        if (!commands.isSlashCommandTrigger(block)) {
+            hideSlashCommandMenu();
+            return;
+        }
+        showSlashCommandMenu(block, range);
+    }
+
+    /**
+     * メニュー項目の選択を実行する。対象ブロック（「/」の直後）へキャレットを合わせてから、
+     * 既存のTOC挿入／表の挿入ダイアログを呼ぶ（どちらも「キャレットのあるブロックの直後」へ
+     * 内容を挿入する処理を流用する）。
+     *
+     * 「/」の除去は**挿入が実際に成功した後**にのみ行う。先に消してしまうと、表ダイアログの
+     * キャンセル（Escape／キャンセルボタン）や、見出しが無い文書での「目次を挿入」失敗時に、
+     * 入力していた「/」が復元されず消えるだけになる（`/local-review`指摘A-1/A-2）。
+     */
+    function runSlashCommand(action) {
+        const block = slashMenuBlock;
+        hideSlashCommandMenu();
+        if (!block || !block.parentNode) {
+            return;
+        }
+
+        const range = document.createRange();
+        range.selectNodeContents(block);
+        range.collapse(false); // 「/」の直後（末尾）へ
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        // 挿入成功後にのみ呼ぶ: 「/」を消して空行へ戻す。プレースホルダ自身の変更は
+        // 'input'イベントを自発しないため、変更後に明示的にディスパッチして同期させる
+        // （insertToc/insertTableは自身の挿入分をそれぞれ既にディスパッチ済み）。
+        const clearPlaceholder = function () {
+            if (block.parentNode) {
+                block.innerHTML = '<br>';
+                state.editor.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        };
+
+        if (action === 'toc') {
+            if (commands.insertToc()) {
+                clearPlaceholder();
+            }
+        } else if (action === 'table') {
+            tableModule.setPendingInsertRange(range);
+            tableModule.showInsertDialog(clearPlaceholder);
+        }
+    }
+
+    /**
+     * スラッシュコマンドメニューのイベントを配線する（editor.js の初期化から一度だけ）。
+     * `selectionchange` はキャレット移動全般（クリック・矢印キー・入力）で発火するため、
+     * これ1つで「/」入力直後の表示と、条件を外れた際（追加入力・削除・移動）の
+     * 非表示の両方をカバーする（`setupRawMarkdownCaretEvent` と同じ設計）。
+     */
+    function setupSlashCommandMenuEvents() {
+        document.addEventListener('selectionchange', function () {
+            if (state.isUpdating || state.isFormatting || state.isCreatingCodeBlock) {
+                return;
+            }
+            updateSlashCommandMenu();
+        });
+
+        // メニュー外クリックで閉じる
+        document.addEventListener('click', function (e) {
+            if (slashMenuEl && !slashMenuEl.contains(e.target)) {
+                hideSlashCommandMenu();
+            }
+        });
+
+        // メニュー表示中のEscapeで閉じる
+        state.editor.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && slashMenuEl && slashMenuEl.style.display !== 'none') {
+                hideSlashCommandMenu();
+            }
+        });
+    }
+
     /**
      * エディタの初期化
      */
@@ -305,6 +598,9 @@
 
         // キャレット位置に応じた生Markdown表示の切り替えを監視
         setupRawMarkdownCaretEvent();
+
+        // 「/」入力によるコマンドメニュー（目次挿入・表の挿入）を監視
+        setupSlashCommandMenuEvents();
 
         // リンクの挿入・編集ダイアログの操作を監視
         setupLinkDialogEvents();
@@ -337,6 +633,9 @@
         // 数式ブロック上の右クリックは数式メニューを優先する（対象が排他）。
         tableModule.setupContextMenu(state.editor);
 
+        // 表のマウスドラッグによる矩形範囲選択（ボタンを離したらドラッグ終了）
+        tableModule.setupRangeSelectionMouseUp();
+
         // コードブロック言語セレクタのイベント
         commands.setupCodeLangEvents();
 
@@ -345,6 +644,11 @@
 
         // Rawモードの行番号ガターを生成（rawEditorをラッパーで包む）
         initRawLineGutter();
+
+        // 見出しパンくずバーを生成（ツールバー直下・#editorの直前）。
+        // #editor がまだ行番号ガターのラッパーで包まれる前（親がbody直下）に挿す必要があるため、
+        // 次の initWysiwygLineGutter より必ず先に呼ぶ（後だと親がラッパー内になり縦積みが崩れる）。
+        initHeadingBreadcrumb();
 
         // WYSIWYGモードの行番号ガターを生成（#editorをラッパーで包む）
         initWysiwygLineGutter();
@@ -443,6 +747,9 @@
 
             // 行番号ガターを更新（変換コストが高いためデバウンス）
             scheduleWysiwygGutterUpdate();
+
+            // 見出しパンくずバーを更新（見出しの追加・削除・移動に追従）
+            updateHeadingBreadcrumb();
 
             // 文書への書き戻し（変換コストが高いためデバウンス）
             if (editSyncTimeout) {
@@ -772,6 +1079,9 @@
 
         // 行番号ガターを更新（Mermaid/数式/テーブル描画後の高さで再配置）
         scheduleWysiwygGutterUpdate();
+
+        // 見出しパンくずバーを更新（外部編集での見出し変化に追従）
+        updateHeadingBreadcrumb();
     }
 
     /**
@@ -796,6 +1106,8 @@
             const md = state.lastSentMarkdown || markdown.htmlToMarkdown(cleanHtml);
             state.rawEditor.value = md;
             hideWysiwygLineGutter();
+            hideHeadingBreadcrumb();
+            hideSlashCommandMenu();
             showRawLineGutter();
             state.toggleBtn.classList.add('active');
             state.toggleBtn.innerHTML = '👁️ Preview';
@@ -814,6 +1126,7 @@
             resolveLocalImages(state.editor);
             hideRawLineGutter();
             showWysiwygLineGutter();
+            updateHeadingBreadcrumb();
             state.toggleBtn.classList.remove('active');
             state.toggleBtn.innerHTML = '📄 Raw';
             state.toggleBtn.title = '生マークダウン表示切替 (Ctrl+/)';
