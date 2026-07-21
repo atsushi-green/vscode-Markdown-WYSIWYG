@@ -24,7 +24,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 表の矩形選択とコピー＆ペースト(3/3) — 選択範囲への矩形貼り付け対応 | S | (1/3)の矩形選択状態に依存（(2/3)とは独立に実装可能）。既存`pasteData`（単一始点セルへのTSV貼り付けのみ）を拡張し、矩形選択がある状態で貼り付けると、貼り付けデータ（TSV）を選択範囲の左上を起点に敷き詰める（範囲より貼り付けデータが小さい場合は繰り返すか単純に左上基点で収まる分だけ／大きい場合はデータ側の行列数を優先）。範囲外にはみ出す場合の挙動（列・行を自動追加するか、はみ出し分を無視するか）を決めてから実装 |
 | todo | 脚注のホバーツールチップ表示（`[^1]` にマウスホバーで注釈内容をポップアップ） | M | 脚注参照（`[^1]`）にマウスホバーすると、対応する脚注定義の本文をツールチップ/ポップアップで表示する。**前提**: 脚注機能そのものが未実装（[[脚注（`[^1]`）のサポート]]＝優先度:低 の todo）。**脚注の表示・往復変換を先に実装してから**本項目に着手するのが自然（順序依存）。実装方向: 脚注参照に `data-footnote-id` を付与し、`mouseenter`/`mouseleave`（間引き・遅延表示）で対応する脚注定義本文を小さなポップアップに描画（既存の `.mermaid-context-menu`／`.link-dialog` 系のフローティングUIパターンとCSSを流用可能・`markdownEditor.ts` 非変更で動的生成）。位置は参照要素の矩形基準（`computeMenuPosition` 系を流用）。ユーザー要望。ホバー操作感は実機確認前提 |
 
 ## 優先度: 低
@@ -48,6 +47,8 @@
 | todo | 表の矩形範囲選択のハイライト計算が大きな表でO(セル数×行数)になる | S | `table.js`の`applyRangeHighlight`はドラッグの`mouseenter`毎に全セルを走査し、各セルで`cellPosition`（`indexOf`＝O(行数)）を呼ぶため全体でO(セル数×行数)。挿入UIの上限（行50×列20＝最大1000セル）まで表を大きくしてドラッグすると、mouseenter毎に重い処理が走り操作がもたつく可能性がある。行・列インデックスを`data-`属性等で事前計算しO(1)で引けるようにすると改善できる。現状の典型的な小さな表では体感できない。`/local-review`指摘（severity low）由来 |
 | todo | `table.js`の`buildTsvFromMatrix`がセル内のタブ・改行文字をエスケープしない | S | セル内容にタブ`\t`や改行`\n`が含まれる場合、TSV区切りとして貼り付け先で列・行がずれる。`copy()`の旧実装（表全体コピーのみ）から存在する既存の制約で、今回の矩形範囲コピー追加が原因ではない。エスケープ（例: タブ→スペース、改行→`<br>`相当の別区切りにするか、そもそもセル内改行自体が現状想定されているか要確認）を検討すると良い。`/local-review`指摘（severity low）由来 |
 | todo | `table.js`の`writeToClipboard`が`new ClipboardItem(...)`の同期例外を捕捉できない | S | `writeToClipboard`は`navigator.clipboard.write(...).then().catch()`のPromiseチェーンのみで失敗を捕捉するが、`new ClipboardItem({...})`自体がPromiseではなく同期的に例外を投げるブラウザ実装（MIMEタイプの組み合わせによっては起こりうる）の場合、この`try`の外側で例外が発生し「❌ コピーに失敗しました」トーストが出ないまま失敗しうる。VS Code Webview（Chromium）では`text/plain`+`text/html`の組み合わせは通常サポートされ発生可能性は低いが、`writeToClipboard`内で`try/catch`し失敗をPromiseとして返すようにすると防げる。`/local-review`指摘（severity low、確信度低）由来 |
+| todo | `table.js`の`writeMatrixIntoTable`が全行のセル数をヘッダ行（`rows[0]`）のセル数に一律依存して算出している | S | `writeMatrixIntoTable`の`colCount = Array.from(rows[0].cells).length`は、全行がヘッダ行と同じセル数であることを前提にした暗黙の不変条件（現状のテーブル生成・行列追加削除ロジックはこれを保っている）。旧`pasteData`実装は本文行ごとに実セル数（`querySelectorAll('td').length`）を個別に見ていたため、この前提への依存はより強くなっている。将来的に不揃いな行（rowspan/colspan等）を扱うようになった場合にずれるリスクがあるため、行ごとの実セル数を見るよう戻すか、テーブルが常に矩形であることをコメントで明記しておくと良い。`/local-review`指摘（severity low）由来 |
+| todo | `table.js`の`writeMatrixIntoTable`が書き込みのたびに`Array.from(rows[row].cells)`を再生成する | S | `targets.forEach`のループ内で対象行ごとに`Array.from(...)`を毎回呼んでおり、小規模テーブル前提のため実害はないが行ごとにキャッシュすれば無駄な配列生成を避けられる（simplification）。`/local-review`指摘（severity low）由来 |
 
 ## 完了 (done)
 

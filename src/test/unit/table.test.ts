@@ -478,6 +478,134 @@ suite('TableModule', () => {
         });
     });
 
+    suite('computePasteTargets', () => {
+        test('アンカー位置を起点にデータの行列サイズぶんの書き込み先を列挙する', () => {
+            const targets = env.table.computePasteTargets(
+                0, 0, [['x', 'y'], ['z', 'w']], 3, 2
+            );
+            assert.deepStrictEqual(Array.from(targets, plain), [
+                { row: 0, col: 0, value: 'x' },
+                { row: 0, col: 1, value: 'y' },
+                { row: 1, col: 0, value: 'z' },
+                { row: 1, col: 1, value: 'w' }
+            ]);
+        });
+
+        test('rowCount/colCountを超える位置（はみ出し分）は含めない＝自動追加しない', () => {
+            const targets = env.table.computePasteTargets(
+                2, 1, [['a', 'b'], ['c', 'd']], 3, 2
+            );
+            // row=2は範囲内だがrow=3はrowCount(3)以上のため除外、col=2はcolCount(2)以上のため除外
+            assert.deepStrictEqual(Array.from(targets, plain), [
+                { row: 2, col: 1, value: 'a' }
+            ]);
+        });
+
+        test('アンカーが負の位置を含む場合、範囲外の位置は含めない', () => {
+            const targets = env.table.computePasteTargets(
+                -1, 0, [['a'], ['b']], 3, 2
+            );
+            assert.deepStrictEqual(Array.from(targets, plain), [
+                { row: 0, col: 0, value: 'b' }
+            ]);
+        });
+
+        test('空の行列は空配列を返す', () => {
+            assert.deepStrictEqual(Array.from(env.table.computePasteTargets(0, 0, [], 3, 2)), []);
+        });
+    });
+
+    suite('writeMatrixIntoTable', () => {
+        test('アンカー位置を起点に本文セルへ書き込む', () => {
+            env.table.writeMatrixIntoTable(table, 1, 0, [['x', 'y']]);
+            assert.strictEqual(cellAt(table, 1, 0).textContent, 'x');
+            assert.strictEqual(cellAt(table, 1, 1).textContent, 'y');
+        });
+
+        test('見出し行（th）は書き込み対象から除外する', () => {
+            env.table.writeMatrixIntoTable(table, 0, 0, [['x', 'y'], ['z', 'w']]);
+            assert.strictEqual(cellAt(table, 0, 0).textContent, '列A', '見出しは書き換わらない');
+            assert.strictEqual(cellAt(table, 0, 1).textContent, '列B', '見出しは書き換わらない');
+            assert.strictEqual(cellAt(table, 1, 0).textContent, 'z', '本文行には書き込まれる');
+            assert.strictEqual(cellAt(table, 1, 1).textContent, 'w');
+        });
+
+        test('テーブルの範囲を超える書き込みは例外を投げず無視する', () => {
+            assert.doesNotThrow(() => {
+                env.table.writeMatrixIntoTable(table, 2, 1, [['a', 'b'], ['c', 'd']]);
+            });
+            assert.strictEqual(cellAt(table, 2, 1).textContent, 'a');
+        });
+    });
+
+    suite('pasteData（矩形範囲選択への貼り付け対応）', () => {
+        test('範囲選択が無ければ、貼り付け先セルを起点に展開する（従来どおり）', () => {
+            const anchor = cellAt(table, 1, 0); // a1
+            env.table.pasteData(anchor, table, 'x\ty');
+            assert.strictEqual(cellAt(table, 1, 0).textContent, 'x');
+            assert.strictEqual(cellAt(table, 1, 1).textContent, 'y');
+        });
+
+        test('見出しセルを起点にしても、本文行への貼り付けは行われる', () => {
+            const anchor = cellAt(table, 0, 0); // 見出し
+            env.table.pasteData(anchor, table, 'H1\tH2\nx\ty');
+            assert.strictEqual(cellAt(table, 0, 0).textContent, '列A', '見出しは書き換わらない');
+            assert.strictEqual(cellAt(table, 1, 0).textContent, 'x');
+            assert.strictEqual(cellAt(table, 1, 1).textContent, 'y');
+        });
+
+        test('矩形範囲選択が確定している場合は、貼り付け先セルに関わらずその範囲の左上を起点に展開する', () => {
+            dragRange(table, 1, 0, 2, 1); // a1〜b2 の範囲を選択
+
+            // 貼り付け先セルはb1（範囲内の別セル）だが、起点は範囲の左上（a1＝row1,col0）になる
+            env.table.pasteData(cellAt(table, 1, 1), table, 'x\ty\nz\tw');
+
+            assert.strictEqual(cellAt(table, 1, 0).textContent, 'x');
+            assert.strictEqual(cellAt(table, 1, 1).textContent, 'y');
+            assert.strictEqual(cellAt(table, 2, 0).textContent, 'z');
+            assert.strictEqual(cellAt(table, 2, 1).textContent, 'w');
+        });
+
+        test('範囲選択より貼り付けデータが大きい場合は、データ側の行列数がそのまま使われる（テーブルの範囲内のみ）', () => {
+            dragRange(table, 1, 0, 1, 0); // a1の1セルだけを選択
+
+            env.table.pasteData(cellAt(table, 1, 0), table, 'x\ty\nz\tw');
+
+            assert.strictEqual(cellAt(table, 1, 0).textContent, 'x');
+            assert.strictEqual(cellAt(table, 1, 1).textContent, 'y');
+            assert.strictEqual(cellAt(table, 2, 0).textContent, 'z');
+            assert.strictEqual(cellAt(table, 2, 1).textContent, 'w');
+        });
+
+        test('矩形範囲選択が別のテーブルのものなら、このテーブルは貼り付け先セルを起点に展開する', () => {
+            const div = env.document.createElement('div');
+            div.innerHTML = env.markdown.markdownToHtml(TABLE_MD);
+            Array.from(div.childNodes).forEach(n => env.editor.appendChild(n));
+            env.table.render();
+            const table2 = env.editor.querySelectorAll('table')[1] as HTMLTableElement;
+
+            dragRange(table2, 0, 0, 0, 0); // 表2側で範囲確定（表1には無関係）
+            env.table.pasteData(cellAt(table, 1, 1), table, 'x');
+
+            assert.strictEqual(cellAt(table, 1, 0).textContent, 'a1', '表1は範囲の影響を受けない');
+            assert.strictEqual(cellAt(table, 1, 1).textContent, 'x', '貼り付け先セル自身に書き込まれる');
+        });
+
+        test('データがテーブルの範囲をはみ出す場合は、はみ出し分を無視する（行・列の自動追加はしない）', () => {
+            assert.doesNotThrow(() => {
+                env.table.pasteData(cellAt(table, 2, 1), table, 'x\ty\nz\tw');
+            });
+            assert.strictEqual(cellAt(table, 2, 1).textContent, 'x');
+        });
+
+        test('貼り付け後にドキュメントへ反映し、成功トーストを表示する', () => {
+            env.table.pasteData(cellAt(table, 1, 0), table, 'x\ty');
+            const editMessage = env.posted.filter(m => m.type === 'edit').pop();
+            assert.ok(editMessage, 'ドキュメントへ反映される');
+            assert.ok(editMessage.content.includes('| x | y |'), editMessage.content);
+        });
+    });
+
     suite('copy', () => {
         test('テーブル全体をタブ区切りテキストとしてクリップボードへコピーする', async () => {
             env.table.copy(table);
