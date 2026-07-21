@@ -577,6 +577,101 @@
         });
     }
 
+    // 脚注ホバーツールチップ（`sup.footnote-ref` にマウスホバーすると脚注定義本文を表示）。
+    // markdownEditor.ts 非変更・body直下へ動的生成（mermaid/math/tableの各メニューと同パターン）。
+    let footnoteTooltipEl = null;
+    let footnoteTooltipTimeout = null;
+
+    /**
+     * ツールチップ要素（無ければ生成）を返す。
+     */
+    function ensureFootnoteTooltip() {
+        if (footnoteTooltipEl) {
+            return footnoteTooltipEl;
+        }
+        const el = document.createElement('div');
+        el.className = 'footnote-tooltip';
+        el.style.display = 'none';
+        document.body.appendChild(el);
+        footnoteTooltipEl = el;
+        return el;
+    }
+
+    /**
+     * 脚注参照（`refEl` = `sup.footnote-ref`）の直下付近へ、対応する脚注定義本文を
+     * ツールチップ表示する。定義が見つからない（本文が空）場合は何もしない。
+     */
+    function showFootnoteTooltip(refEl) {
+        const label = refEl.getAttribute('data-footnote-label');
+        if (!label) {
+            return;
+        }
+        const text = commands.getFootnoteDefinitionText(state.editor, label);
+        if (!text) {
+            return;
+        }
+        const tooltip = ensureFootnoteTooltip();
+        tooltip.textContent = text;
+        tooltip.style.display = 'block';
+
+        const anchor = refEl.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+        const pos = tableModule.computeMenuPosition(
+            anchor.left, anchor.bottom + 4, tooltipRect.width, tooltipRect.height,
+            window.innerWidth, window.innerHeight
+        );
+        tooltip.style.left = pos.left + 'px';
+        tooltip.style.top = pos.top + 'px';
+    }
+
+    /**
+     * ツールチップを閉じる。
+     */
+    function hideFootnoteTooltip() {
+        if (footnoteTooltipTimeout) {
+            clearTimeout(footnoteTooltipTimeout);
+            footnoteTooltipTimeout = null;
+        }
+        if (footnoteTooltipEl) {
+            footnoteTooltipEl.style.display = 'none';
+        }
+    }
+
+    /**
+     * 脚注ホバーツールチップのイベントを配線する（editor.js の初期化から一度だけ）。
+     * `mouseenter`/`mouseleave`はバブリングしないため、委譲には`mouseover`/`mouseout`＋
+     * `closest`を使う（`table.js`のセル範囲選択と異なりホバーのみで良いため間引きは
+     * 表示側をsetTimeoutでデバウンスするだけで十分）。
+     */
+    function setupFootnoteTooltipEvents() {
+        state.editor.addEventListener('mouseover', function (e) {
+            const ref = e.target && e.target.closest && e.target.closest('sup.footnote-ref');
+            if (!ref) {
+                return;
+            }
+            clearTimeout(footnoteTooltipTimeout);
+            footnoteTooltipTimeout = setTimeout(function () {
+                showFootnoteTooltip(ref);
+            }, 300);
+        });
+
+        state.editor.addEventListener('mouseout', function (e) {
+            const ref = e.target && e.target.closest && e.target.closest('sup.footnote-ref');
+            if (!ref) {
+                return;
+            }
+            // 移動先が同じ参照内（<sup>と内側の<a>の間の移動等）なら維持する
+            const related = e.relatedTarget;
+            if (related && ref.contains(related)) {
+                return;
+            }
+            hideFootnoteTooltip();
+        });
+
+        // スクロールすると参照の画面位置がずれるため、表示中なら閉じる
+        state.editor.addEventListener('scroll', hideFootnoteTooltip);
+    }
+
     /**
      * エディタの初期化
      */
@@ -601,6 +696,9 @@
 
         // 「/」入力によるコマンドメニュー（目次挿入・表の挿入）を監視
         setupSlashCommandMenuEvents();
+
+        // 脚注参照（[^label]）ホバー時のツールチップ表示を監視
+        setupFootnoteTooltipEvents();
 
         // リンクの挿入・編集ダイアログの操作を監視
         setupLinkDialogEvents();
@@ -1082,6 +1180,12 @@
 
         // 見出しパンくずバーを更新（外部編集での見出し変化に追従）
         updateHeadingBreadcrumb();
+
+        // 脚注ツールチップを閉じる（外部更新でDOMを丸ごと差し替えるため、表示中の
+        // ツールチップが古い内容のまま残ったり、保留中のmouseoverタイマーが
+        // detachedになった旧`sup`要素に対して発火して誤表示するのを防ぐ。
+        // Raw⇔プレビュー切替の同種の全書き換え経路でも同様に閉じている）
+        hideFootnoteTooltip();
     }
 
     /**
@@ -1108,6 +1212,7 @@
             hideWysiwygLineGutter();
             hideHeadingBreadcrumb();
             hideSlashCommandMenu();
+            hideFootnoteTooltip();
             showRawLineGutter();
             state.toggleBtn.classList.add('active');
             state.toggleBtn.innerHTML = '👁️ Preview';

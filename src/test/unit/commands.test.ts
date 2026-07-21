@@ -1981,6 +1981,42 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('getFootnoteDefinitionText（脚注ホバーツールチップ用の本文取得）', () => {
+        test('対応する脚注定義（#fn-label）の本文を、戻りリンクを除いて返す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '本文[^1]。\n\n[^1]: これが脚注の本文です。'
+            );
+            const text = env.commands.getFootnoteDefinitionText(env.editor, '1');
+            assert.strictEqual(text, 'これが脚注の本文です。');
+        });
+
+        test('脚注本文のインライン装飾はテキストとして取り出す（タグは含まない）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '本文[^1]。\n\n[^1]: **重要**な注釈です。'
+            );
+            const text = env.commands.getFootnoteDefinitionText(env.editor, '1');
+            assert.strictEqual(text, '重要な注釈です。');
+        });
+
+        test('対応する定義が存在しなければ空文字を返す', () => {
+            env.editor.innerHTML = '<p>本文だけ</p>';
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(env.editor, '1'), '');
+        });
+
+        test('editorやlabelが無ければ空文字を返す（例外を投げない）', () => {
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(null as any, '1'), '');
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(env.editor, ''), '');
+        });
+
+        test('複数の脚注があっても該当ラベルの本文だけを返す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '参照[^1]と[^note]。\n\n[^1]: 最初の脚注。\n[^note]: 二番目の脚注。'
+            );
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(env.editor, '1'), '最初の脚注。');
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(env.editor, 'note'), '二番目の脚注。');
+        });
+    });
+
     suite('isSlashCommandTrigger（「/」入力によるコマンドメニューの起動判定）', () => {
         test('可視テキストが「/」1文字だけのブロックはtrue', () => {
             env.editor.innerHTML = '<p>/</p>';

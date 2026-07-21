@@ -746,6 +746,26 @@ body.vscode-dark #editor strong {
     margin-left: 0.25em;
 }
 
+/* 脚注参照ホバー時のツールチップ（定義本文を表示）。VS Code標準のホバー
+   ウィジェットと似た見た目にする（`.mermaid-context-menu`等の「メニュー」系とは
+   異なりコンテンツ幅に合わせるだけ＝`min-width`は持たせない）。 */
+.footnote-tooltip {
+    position: fixed;
+    z-index: 10000;
+    max-width: 320px;
+    padding: 6px 10px;
+    background-color: var(--vscode-editorHoverWidget-background, var(--vscode-menu-background, #252526));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-menu-border, #454545));
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));
+    pointer-events: none;
+    white-space: normal;
+    word-break: break-word;
+}
+
 #editor table {
     border-collapse: collapse;
     width: 100%;

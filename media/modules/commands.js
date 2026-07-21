@@ -514,6 +514,34 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 脚注ホバーツールチップ用に、指定ラベルの脚注定義本文をエディタから取り出す。
+     * `#fn-label` の`<li>`（`markdown.js`の`buildFootnotesSectionHtml`が生成）から
+     * 戻りリンク（`.footnote-backref`）を除いたテキストを返す。見つからなければ空文字。
+     * ラベルは`markdownToHtml`側で英数字・アンダースコア・ハイフンのみに制限されて
+     * いるため、属性セレクタへそのまま埋め込んでも安全（`"`等を含み得ない）。
+     */
+    function getFootnoteDefinitionText(editor, label) {
+        if (!editor || !label) {
+            return '';
+        }
+        let li;
+        try {
+            li = editor.querySelector('li[id="fn-' + label + '"]');
+        } catch (_e) {
+            li = null;
+        }
+        if (!li) {
+            return '';
+        }
+        const clone = li.cloneNode(true);
+        const backref = clone.querySelector('.footnote-backref');
+        if (backref) {
+            backref.remove();
+        }
+        return (clone.textContent || '').trim();
+    }
+
+    /**
      * 見出しの上端位置（配列。出現順＝昇順）とスクロール位置から、
      * 「いま見ている位置」に対応する見出しのインデックスを求める（純粋関数）。
      * スクロール位置以前の最後の見出し＝現在読んでいる節の見出しとみなす。
@@ -2645,6 +2673,7 @@ window.CommandsModule = (function() {
         insertImageMarkdown: insertImageMarkdown,
         scrollToAnchor: scrollToAnchor,
         collectHeadings: collectHeadings,
+        getFootnoteDefinitionText: getFootnoteDefinitionText,
         findCurrentHeadingIndex: findCurrentHeadingIndex,
         buildBreadcrumbChain: buildBreadcrumbChain,
         isSlashCommandTrigger: isSlashCommandTrigger,

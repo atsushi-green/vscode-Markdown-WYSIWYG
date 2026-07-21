@@ -24,9 +24,9 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 脚注のホバーツールチップ表示（`[^1]` にマウスホバーで注釈内容をポップアップ） | M | 脚注参照（`<sup class="footnote-ref">`）にマウスホバーすると、対応する脚注定義の本文をツールチップ/ポップアップで表示する。**前提解消済み**: 脚注機能そのものは実装済み（[docs/roadmap-done.md](./roadmap-done.md)参照。`markdown.js`の`data-footnote-label`属性・`#fn-label`のid付き`<li>`が既にある）。実装方向: `mouseenter`/`mouseleave`（間引き・遅延表示）で対応する脚注定義本文（`#fn-label`要素のテキスト）を小さなポップアップに描画（既存の `.mermaid-context-menu`／`.link-dialog` 系のフローティングUIパターンとCSSを流用可能・`markdownEditor.ts` 非変更で動的生成）。位置は参照要素の矩形基準（`computeMenuPosition` 系を流用）。ユーザー要望。ホバー操作感は実機確認前提 |
 | todo | 脚注参照（`[^label]`）の入力時ライブ変換 | S | 現状 `markdownToHtml`（読込・Raw⇔プレビュー切替時）でのみ脚注参照を`<sup>`へ変換しており、`commands.js`の`convertInlineText`（入力中のライブ変換。太字・取り消し線・数式等はこちらで即時反映）には配線していない（意図的なMVPスコープ限定。脚注は「定義がどこかにあるか」という文書全体の状態に依存するため、他のインライン変換のように1行単位の即時変換にしづらい）。タイピング中に`[^label]`を打ってもRaw切替や保存・再読込まで見た目が変わらない。ライブ反映するなら、入力のたびに軽量にドキュメント全体から参照済みラベル集合を再計算する方式を検討する必要がある。`/local-review`指摘由来 |
 | todo | 脚注定義行（`[^label]: 本文`）のコロン直後の空白が2つ以上あると往復で1つに正規化される | S | `FOOTNOTE_DEF_PATTERN`（`markdown.js`）は`:`の後の空白を`\s?`（0または1文字）で吸収するため、`[^1]:  本文`のように空白が2つ以上あると余分な空白が本文側の先頭空白として残り、直列化時に`trim()`で失われる（往復後は常に`[^label]: 本文`＝空白1つに正規化される）。実害は乏しいが厳密な往復を求めるなら元の空白数を保持する対応が要る。`/local-review`指摘（severity low）由来 |
+| todo | 脚注ホバーツールチップの`mouseover`/`mouseout`が`<sup>`内側の`<a>`との出入りで再発火する | S | `editor.js`の`setupFootnoteTooltipEvents`は`sup.footnote-ref`への`mouseover`/`mouseout`をイベント委譲で監視しているが、`<sup>`とその内側の`<a>`の間でマウスが出入りするたびにバブリングで再発火し、300msデバウンス用の`clearTimeout`/`setTimeout`が毎回リセットされる（機能停止には至らない軽微な非効率）。同一refへの再入場を無視するガードを足すか、素直に判定方法を見直すと良い。`/local-review`指摘（severity low）由来 |
 
 ## 優先度: 低
 
