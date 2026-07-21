@@ -28,9 +28,41 @@ suite('TableModule', () => {
         return env.editor.querySelector('table') as HTMLTableElement;
     }
 
+    /** マウスイベントを生成してディスパッチする */
+    function dispatchMouse(target: Element, type: string, opts: Record<string, unknown> = {}) {
+        const ev = new env.window.MouseEvent(type, Object.assign(
+            { bubbles: true, cancelable: true, button: 0, buttons: 1 }, opts
+        ));
+        target.dispatchEvent(ev);
+        return ev;
+    }
+
+    /** table.rows経由でrow行・col列のセルを取得する（theadとtbodyをまたぐ） */
+    function cellAt(t: HTMLTableElement, row: number, col: number): HTMLElement {
+        return Array.from(t.rows[row].cells)[col] as HTMLElement;
+    }
+
+    /** cellAからcellBへドラッグして確定するまでの一連のイベントを発火する */
+    function dragRange(t: HTMLTableElement, fromRow: number, fromCol: number, toRow: number, toCol: number) {
+        const from = cellAt(t, fromRow, fromCol);
+        const to = cellAt(t, toRow, toCol);
+        dispatchMouse(from, 'mousedown');
+        dispatchMouse(to, 'mouseenter');
+        dispatchMouse(to, 'mouseup');
+    }
+
+    // jsdomレルムで実行される関数が返すプレーンオブジェクトは、そのままだと
+    // NodeレルムのオブジェクトリテラルとdeepStrictEqualした際にプロトタイプ不一致で
+    // 失敗する（配列のArray.fromと同じ問題）。スプレッドでNodeレルムへコピーしてから比較する。
+    const plain = (obj: any) => ({ ...obj });
+
     setup(() => {
         env = createEditorEnv();
         table = setupTable();
+        // document の mouseup でドラッグ追跡を終了させる配線（editor.js の initEditor で
+        // 一度だけ呼ぶのと同じ）。呼ばないと rangeDragStart が mouseup後も残り、
+        // 後続の mouseenter で範囲が誤って更新され続けてしまう。
+        env.table.setupRangeSelectionMouseUp();
     });
 
     suite('render', () => {
@@ -206,40 +238,6 @@ suite('TableModule', () => {
     });
 
     suite('表の矩形範囲選択（マウスドラッグ）', () => {
-        // document の mouseup でドラッグ追跡を終了させる配線（editor.js の initEditor で
-        // 一度だけ呼ぶのと同じ）。呼ばないと rangeDragStart が mouseup後も残り、
-        // 後続の mouseenter で範囲が誤って更新され続けてしまう。
-        setup(() => {
-            env.table.setupRangeSelectionMouseUp();
-        });
-
-        /** マウスイベントを生成してディスパッチする */
-        function dispatchMouse(target: Element, type: string, opts: Record<string, unknown> = {}) {
-            const ev = new env.window.MouseEvent(type, Object.assign(
-                { bubbles: true, cancelable: true, button: 0, buttons: 1 }, opts
-            ));
-            target.dispatchEvent(ev);
-            return ev;
-        }
-
-        /** table.rows経由でrow行・col列のセルを取得する（theadとtbodyをまたぐ） */
-        function cellAt(t: HTMLTableElement, row: number, col: number): HTMLElement {
-            return Array.from(t.rows[row].cells)[col] as HTMLElement;
-        }
-
-        /** cellAからcellBへドラッグして確定するまでの一連のイベントを発火する */
-        function dragRange(t: HTMLTableElement, fromRow: number, fromCol: number, toRow: number, toCol: number) {
-            const from = cellAt(t, fromRow, fromCol);
-            const to = cellAt(t, toRow, toCol);
-            dispatchMouse(from, 'mousedown');
-            dispatchMouse(to, 'mouseenter');
-            dispatchMouse(to, 'mouseup');
-        }
-
-        // jsdomレルムで実行される関数が返すプレーンオブジェクトは、そのままだと
-        // NodeレルムのオブジェクトリテラルとdeepStrictEqualした際にプロトタイプ不一致で
-        // 失敗する（配列のArray.fromと同じ問題）。スプレッドでNodeレルムへコピーしてから比較する。
-        const plain = (obj: any) => ({ ...obj });
 
         suite('cellPosition', () => {
             test('theadとtbodyをまたいだ表示順の行・列インデックスを返す', () => {
@@ -414,6 +412,72 @@ suite('TableModule', () => {
         });
     });
 
+    suite('extractCellTextMatrix', () => {
+        // extractCellTextMatrixはjsdomレルムで実行され、返り値の入れ子配列も
+        // jsdomレルムのArrayとなるため、deepStrictEqualのプロトタイプ不一致を避けて
+        // JSONの往復でNodeレルムのプレーンな値へ正規化してから比較する。
+        const plainMatrix = (m: unknown) => JSON.parse(JSON.stringify(m));
+
+        test('rangeが無ければテーブル全体を行列として取り出す', () => {
+            assert.deepStrictEqual(plainMatrix(env.table.extractCellTextMatrix(table, null)), [
+                ['列A', '列B'],
+                ['a1', 'b1'],
+                ['a2', 'b2']
+            ]);
+        });
+
+        test('rangeがあればその矩形範囲だけを取り出す', () => {
+            const range = { minRow: 1, maxRow: 2, minCol: 0, maxCol: 0 };
+            assert.deepStrictEqual(plainMatrix(env.table.extractCellTextMatrix(table, range)), [
+                ['a1'],
+                ['a2']
+            ]);
+        });
+    });
+
+    suite('buildTsvFromMatrix', () => {
+        test('行を改行・列をタブで区切ったTSVテキストを組み立てる', () => {
+            assert.strictEqual(
+                env.table.buildTsvFromMatrix([['a', 'b'], ['c', 'd']]),
+                'a\tb\nc\td'
+            );
+        });
+
+        test('空の行列は空文字を返す', () => {
+            assert.strictEqual(env.table.buildTsvFromMatrix([]), '');
+        });
+    });
+
+    suite('buildHtmlTableFragment', () => {
+        test('rangeが無ければテーブル全体を<table>断片として組み立てる（ヘッダ行はth）', () => {
+            const html = env.table.buildHtmlTableFragment(table, null);
+            assert.strictEqual(
+                html,
+                '<table><tbody><tr><th>列A</th><th>列B</th></tr>' +
+                '<tr><td>a1</td><td>b1</td></tr><tr><td>a2</td><td>b2</td></tr></tbody></table>'
+            );
+        });
+
+        test('rangeがあればその矩形範囲だけを組み立てる', () => {
+            const range = { minRow: 1, maxRow: 2, minCol: 0, maxCol: 0 };
+            const html = env.table.buildHtmlTableFragment(table, range);
+            assert.strictEqual(
+                html,
+                '<table><tbody><tr><td>a1</td></tr><tr><td>a2</td></tr></tbody></table>'
+            );
+        });
+
+        test('セル内の装飾（innerHTML）をtextContentへ潰さず保つ', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '| A |\n| --- |\n| **太字** |'
+            );
+            const t = env.editor.querySelector('table') as HTMLTableElement;
+            env.table.render();
+            const html = env.table.buildHtmlTableFragment(t, null);
+            assert.ok(html.includes('<strong>太字</strong>'), html);
+        });
+    });
+
     suite('copy', () => {
         test('テーブル全体をタブ区切りテキストとしてクリップボードへコピーする', async () => {
             env.table.copy(table);
@@ -422,6 +486,86 @@ suite('TableModule', () => {
 
             assert.strictEqual(env.copiedTexts.length, 1);
             assert.strictEqual(env.copiedTexts[0], '列A\t列B\na1\tb1\na2\tb2');
+        });
+
+        test('矩形範囲選択が確定している場合は、その範囲だけをコピーする', async () => {
+            dragRange(table, 1, 0, 2, 0); // a1〜a2（1列目）だけを範囲選択
+            env.table.copy(table);
+            await Promise.resolve();
+
+            assert.strictEqual(env.copiedTexts.length, 1);
+            assert.strictEqual(env.copiedTexts[0], 'a1\na2');
+        });
+
+        test('矩形範囲選択が別のテーブルのものなら、このテーブルは全体をコピーする', async () => {
+            const div = env.document.createElement('div');
+            div.innerHTML = env.markdown.markdownToHtml(TABLE_MD);
+            Array.from(div.childNodes).forEach(n => env.editor.appendChild(n));
+            env.table.render();
+            const table2 = env.editor.querySelectorAll('table')[1] as HTMLTableElement;
+
+            dragRange(table2, 0, 0, 0, 0); // 表2側で範囲確定（表1には無関係）
+            env.table.copy(table);
+            await Promise.resolve();
+
+            assert.strictEqual(env.copiedTexts[0], '列A\t列B\na1\tb1\na2\tb2');
+        });
+
+        test('範囲確定後に行・列を追加/削除すると、staleな範囲を使わずテーブル全体をコピーする（/local-review A-1）', async () => {
+            // 再現手順（/local-review指摘どおり）: ①セルをクリックしてcurrentEditingCellを設定
+            // → ②別セルへドラッグして範囲確定（ドラッグはclickを発火しないため①の選択は残る）
+            // → ③ツールバー操作（①で設定したcurrentEditingCellを使って実行される）で行・列を増減。
+            const anchor = cellAt(table, 1, 0); // a1
+            dispatchMouse(anchor, 'mousedown');
+            dispatchMouse(anchor, 'mouseup');
+            anchor.dispatchEvent(new env.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+            dragRange(table, 0, 0, 1, 1); // 2行2列を範囲選択（currentEditingCellはanchorのまま）
+            assert.notStrictEqual(env.table.getCurrentCellRange(), null);
+
+            env.table.handleAction(table, 'delete-row'); // 行が減り、旧範囲の行インデックスが無効になる
+
+            assert.strictEqual(env.table.getCurrentCellRange(), null, '行・列操作で範囲選択は無効化される');
+            env.table.copy(table);
+            await Promise.resolve();
+
+            // 削除後のテーブル全体がコピーされる（stale範囲の行数のまま切り出されない）
+            const rowsNow = table.querySelectorAll('tr').length;
+            assert.strictEqual(env.copiedTexts[0].split('\n').length, rowsNow);
+        });
+
+        test('ClipboardItem/clipboard.writeが使える環境ではTSVとtext/htmlの両方を書き込む', async () => {
+            const written: any[] = [];
+            (env.window as any).ClipboardItem = class {
+                constructor(public items: Record<string, Blob>) { /* noop */ }
+            };
+            (env.window.navigator as any).clipboard.write = (items: any[]) => {
+                written.push(...items);
+                return Promise.resolve();
+            };
+
+            dragRange(table, 0, 0, 1, 1);
+            env.table.copy(table);
+            await Promise.resolve();
+
+            assert.strictEqual(written.length, 1, 'writeTextではなくwriteが使われる');
+            const item = written[0];
+            assert.ok('text/plain' in item.items);
+            assert.ok('text/html' in item.items);
+            assert.strictEqual(env.copiedTexts.length, 0, 'writeTextは使われない');
+        });
+
+        test('クリップボードへの書き込みが失敗した場合は失敗トーストを表示する', async () => {
+            (env.window.navigator as any).clipboard.writeText = () => Promise.reject(new Error('denied'));
+
+            env.table.copy(table);
+            // rejectのハンドラ実行を待つ（マイクロタスク2段: writeToClipboard→copyのcatch）
+            await Promise.resolve();
+            await Promise.resolve();
+
+            const toast = env.document.querySelector('.mermaid-toast');
+            assert.ok(toast, 'トーストが表示されていない');
+            assert.strictEqual(toast!.textContent, '❌ コピーに失敗しました');
         });
     });
 

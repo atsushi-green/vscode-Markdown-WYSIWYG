@@ -217,6 +217,21 @@ window.TableModule = (function() {
     }
 
     /**
+     * このテーブルに対して矩形範囲選択が確定している場合、それを無効化する。
+     * 行・列の追加/削除は行・列インデックスの構造そのものを変えるため、
+     * 確定済みの範囲（`minRow`/`maxRow`/`minCol`/`maxCol`）をそのまま使い続けると
+     * ずれた行・列を指す stale な範囲になる（例: 削除後に範囲外のセルまで
+     * 巻き込んで`copy()`が誤った内容を返す）。`addRow`/`addColumn`/`deleteRow`/
+     * `deleteColumn`の冒頭で呼び、`selectCell`と同じ考え方で後始末する。
+     */
+    function invalidateRangeSelectionFor(table) {
+        if (currentCellRange && currentCellRange.table === table) {
+            clearRangeSelection(table);
+            currentCellRange = null;
+        }
+    }
+
+    /**
      * テーブル内のマウスドラッグによる矩形範囲選択を配線する（`makeEditable`の
      * セルループから各セルへ）。開始セルの`mousedown`を記録し、ドラッグ中
      * （主ボタン押下中）に別セルへ`mouseenter`すると範囲を確定・ハイライトする。
@@ -443,6 +458,7 @@ window.TableModule = (function() {
      * 行を追加
      */
     function addRow(table, currentRow, position) {
+        invalidateRangeSelectionFor(table);
         const tbody = table.querySelector('tbody');
         if (!tbody) return;
 
@@ -474,6 +490,7 @@ window.TableModule = (function() {
      * 列を追加
      */
     function addColumn(table, colIndex, position) {
+        invalidateRangeSelectionFor(table);
         const thead = table.querySelector('thead');
         const tbody = table.querySelector('tbody');
         const targetIndex = position === 'before' ? colIndex : colIndex + 1;
@@ -515,6 +532,7 @@ window.TableModule = (function() {
      * 行を削除
      */
     function deleteRow(table, currentRow) {
+        invalidateRangeSelectionFor(table);
         const tbody = table.querySelector('tbody');
         if (!tbody) return;
 
@@ -533,6 +551,7 @@ window.TableModule = (function() {
      * 列を削除
      */
     function deleteColumn(table, colIndex) {
+        invalidateRangeSelectionFor(table);
         const thead = table.querySelector('thead');
         const tbody = table.querySelector('tbody');
 
@@ -602,18 +621,90 @@ window.TableModule = (function() {
     }
 
     /**
-     * テーブルをコピー
+     * テーブル全体、または矩形範囲（`isCellInRange`と同じ形の`{minRow,maxRow,minCol,maxCol}`。
+     * 無ければテーブル全体）に含まれるセルのテキストを行列（文字列の二次元配列）として
+     * 取り出す純粋関数寄りのヘルパ。
+     */
+    function extractCellTextMatrix(table, range) {
+        const matrix = [];
+        Array.from(table.rows).forEach((row, rowIndex) => {
+            const line = [];
+            Array.from(row.cells).forEach((cell, colIndex) => {
+                if (range && !isCellInRange(rowIndex, colIndex, range)) {
+                    return;
+                }
+                line.push(cell.textContent);
+            });
+            if (line.length) {
+                matrix.push(line);
+            }
+        });
+        return matrix;
+    }
+
+    /**
+     * 文字列の行列をタブ区切り（TSV）テキストへ組み立てる純粋関数。
+     */
+    function buildTsvFromMatrix(matrix) {
+        return matrix.map(row => row.join('\t')).join('\n');
+    }
+
+    /**
+     * テーブル全体、または矩形範囲に含まれるセルを`<table>`断片のHTML文字列として
+     * 組み立てる。セル内の装飾（`<strong>`・リンク等）を保つため`textContent`ではなく
+     * `innerHTML`をそのまま使う（エディタ内の`contenteditable`等の属性はセル自身の
+     * ものであり、ここでは新規に`<td>`/`<th>`タグを作って中身だけ包むため含まれない）。
+     */
+    function buildHtmlTableFragment(table, range) {
+        const rowsHtml = [];
+        Array.from(table.rows).forEach((row, rowIndex) => {
+            const cellsHtml = [];
+            Array.from(row.cells).forEach((cell, colIndex) => {
+                if (range && !isCellInRange(rowIndex, colIndex, range)) {
+                    return;
+                }
+                const tag = cell.tagName === 'TH' ? 'th' : 'td';
+                cellsHtml.push(`<${tag}>${cell.innerHTML}</${tag}>`);
+            });
+            if (cellsHtml.length) {
+                rowsHtml.push(`<tr>${cellsHtml.join('')}</tr>`);
+            }
+        });
+        return `<table><tbody>${rowsHtml.join('')}</tbody></table>`;
+    }
+
+    /**
+     * TSVテキストとHTML断片をクリップボードへ書き込む。`ClipboardItem`/
+     * `navigator.clipboard.write`が使える環境（Webview＝Chromiumベースなので通常は使える）
+     * ではその両方を書き込み、Excel等へはTSVプレーンテキストとして、装飾を保ちたい
+     * 貼り付け先へは`text/html`として渡せるようにする。使えない環境（jsdomでのテスト等）
+     * では従来どおり`writeText`（TSVのみ）へフォールバックする。
+     */
+    function writeToClipboard(tsv, html) {
+        if (typeof ClipboardItem !== 'undefined' &&
+            navigator.clipboard && typeof navigator.clipboard.write === 'function') {
+            const item = new ClipboardItem({
+                'text/plain': new Blob([tsv], { type: 'text/plain' }),
+                'text/html': new Blob([html], { type: 'text/html' })
+            });
+            return navigator.clipboard.write([item]);
+        }
+        return navigator.clipboard.writeText(tsv);
+    }
+
+    /**
+     * テーブルをコピーする。矩形範囲選択（`currentCellRange`）がこのテーブルに
+     * 対して確定している場合はその範囲だけを、無ければテーブル全体をTSV＋text/htmlで
+     * クリップボードへ書き込む（範囲が無い場合の挙動・出力内容は従来と同じ＝無退行）。
      */
     function copy(table) {
-        const rows = table.querySelectorAll('tr');
-        const data = Array.from(rows).map(row => {
-            const cells = Array.from(row.querySelectorAll('th, td'));
-            return cells.map(cell => cell.textContent).join('\t');
-        });
+        const range = (currentCellRange && currentCellRange.table === table) ? currentCellRange.range : null;
+        const matrix = extractCellTextMatrix(table, range);
+        const tsv = buildTsvFromMatrix(matrix);
+        const html = buildHtmlTableFragment(table, range);
 
-        const text = data.join('\n');
-        navigator.clipboard.writeText(text).then(() => {
-            utils.showToast('✅ テーブルをコピーしました');
+        writeToClipboard(tsv, html).then(() => {
+            utils.showToast(range ? '✅ 選択範囲をコピーしました' : '✅ テーブルをコピーしました');
         }).catch(err => {
             console.error('Copy failed:', err);
             utils.showToast('❌ コピーに失敗しました');
@@ -1146,6 +1237,9 @@ window.TableModule = (function() {
         applyRangeHighlight: applyRangeHighlight,
         clearRangeSelection: clearRangeSelection,
         setupRangeSelectionMouseUp: setupRangeSelectionMouseUp,
-        getCurrentCellRange: function () { return currentCellRange; }
+        getCurrentCellRange: function () { return currentCellRange; },
+        extractCellTextMatrix: extractCellTextMatrix,
+        buildTsvFromMatrix: buildTsvFromMatrix,
+        buildHtmlTableFragment: buildHtmlTableFragment
     };
 })();
