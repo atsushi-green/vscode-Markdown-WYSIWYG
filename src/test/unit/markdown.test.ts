@@ -418,7 +418,7 @@ suite('MarkdownModule', () => {
                 ), html);
                 assert.ok(html.includes(
                     '<section class="footnotes" data-footnotes="true"><ol>' +
-                    '<li id="fn-1" data-footnote-label="1">脚注の本文。 ' +
+                    '<li id="fn-1" data-footnote-label="1" data-footnote-sep=" ">脚注の本文。 ' +
                     '<a href="#fnref-1" class="footnote-backref">↩</a></li></ol></section>'
                 ), html);
             });
@@ -452,7 +452,9 @@ suite('MarkdownModule', () => {
 
             test('脚注本文にもインライン記法（強調等）を適用する', () => {
                 const html = env.markdown.markdownToHtml('本文[^1]。\n\n[^1]: **重要**な注釈。');
-                assert.ok(html.includes('<li id="fn-1" data-footnote-label="1"><strong>重要</strong>な注釈。'), html);
+                assert.ok(html.includes(
+                    '<li id="fn-1" data-footnote-label="1" data-footnote-sep=" "><strong>重要</strong>な注釈。'
+                ), html);
             });
 
             test('コードフェンス内の `[^1]: ...` は脚注定義として扱わない', () => {
@@ -468,7 +470,7 @@ suite('MarkdownModule', () => {
                     '本文[^1]。\n\n[^1]: 最初の定義。\n[^1]: 二番目の定義（無視される）。'
                 );
                 assert.ok(html.includes(
-                    '<li id="fn-1" data-footnote-label="1">最初の定義。'
+                    '<li id="fn-1" data-footnote-label="1" data-footnote-sep=" ">最初の定義。'
                 ), html);
                 // 二番目は脚注としては無視されるが、内容は通常の段落として保持される
                 // （誤って脚注参照へ変換されないことも確認: /local-review 指摘由来）
@@ -485,8 +487,8 @@ suite('MarkdownModule', () => {
                     '別の本文行'
                 ]);
                 assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
-                    { label: '1', text: '定義1' },
-                    { label: 'note', text: '定義2' }
+                    { label: '1', sep: ' ', text: '定義1' },
+                    { label: 'note', sep: ' ', text: '定義2' }
                 ]);
                 assert.strictEqual(result.labels.has('1'), true);
                 assert.strictEqual(result.labels.has('note'), true);
@@ -520,10 +522,24 @@ suite('MarkdownModule', () => {
                     '[^3]: 本物の定義'
                 ]);
                 assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
-                    { label: '3', text: '本物の定義' }
+                    { label: '3', sep: ' ', text: '本物の定義' }
                 ]);
                 assert.deepStrictEqual(Array.from(result.contentLines), [
                     '参照[^3]', '```', '[^1]: コード内', '```', '$$', '[^2]: 数式内', '$$'
+                ]);
+            });
+
+            test('コロン直後の空白の個数をsepとしてそのまま保持する（0個・1個・2個以上）', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^a][^b][^c]',
+                    '[^a]:空白無し',
+                    '[^b]: 空白1つ',
+                    '[^c]:   空白3つ'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: 'a', sep: '', text: '空白無し' },
+                    { label: 'b', sep: ' ', text: '空白1つ' },
+                    { label: 'c', sep: '   ', text: '空白3つ' }
                 ]);
             });
         });
@@ -531,6 +547,15 @@ suite('MarkdownModule', () => {
         suite('buildFootnotesSectionHtml', () => {
             test('定義が無ければ空文字を返す', () => {
                 assert.strictEqual(env.markdown.buildFootnotesSectionHtml([]), '');
+            });
+
+            test('data-footnote-sepへ元の空白をそのまま埋め込む', () => {
+                const html = env.markdown.buildFootnotesSectionHtml([
+                    { label: '1', sep: '', text: '空白無し' },
+                    { label: '2', sep: '   ', text: '空白3つ' }
+                ]);
+                assert.ok(html.includes('data-footnote-sep=""'), html);
+                assert.ok(html.includes('data-footnote-sep="   "'), html);
             });
         });
     });
@@ -964,6 +989,17 @@ suite('MarkdownModule', () => {
                 '複数[^1]の脚注[^2]。\n\n[^1]: 最初。\n[^2]: 次。\n',
                 'ラベルにハイフンを含む[^note-1]。\n\n[^note-1]: 本文。\n',
                 '脚注本文に**強調**を含む[^1]。\n\n[^1]: **重要**な注釈。\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('脚注定義行のコロン直後の空白数（0個・1個・2個以上）が変換往復で保持される', () => {
+            [
+                '空白無し[^a]。\n\n[^a]:空白無し。\n',
+                '空白1つ[^b]。\n\n[^b]: 空白1つ。\n',
+                '空白3つ[^c]。\n\n[^c]:   空白3つ。\n'
             ].forEach(original => {
                 const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
                 assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);

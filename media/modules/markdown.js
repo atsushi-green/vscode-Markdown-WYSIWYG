@@ -225,7 +225,11 @@ window.MarkdownModule = (function() {
     // 脚注定義行（`[^label]: 本文`）の判定。ラベルはid/href属性にそのまま使うため
     // 英数字・アンダースコア・ハイフンのみに制限する（それ以外の文字を含む見た目の
     // 定義行は通常のテキスト行として扱う＝安全側のフォールバック）。
-    const FOOTNOTE_DEF_PATTERN = /^\[\^([A-Za-z0-9_-]+)\]:\s?(.*)$/;
+    // `:`直後の空白（0文字以上）は第2キャプチャで独立して取り出し、往復時に
+    // 元の空白数（例: `[^1]:  本文`の空白2つ）をそのまま復元できるようにする
+    // （`\s?`で1文字だけ吸収し残りを本文側に混ぜていた旧実装は、本文の
+    // 直列化時にtrim()され余分な空白が失われていた）。
+    const FOOTNOTE_DEF_PATTERN = /^\[\^([A-Za-z0-9_-]+)\]:(\s*)(.*)$/;
 
     // 脚注「参照」（`[^label]`）の判定。定義行自身のラベル（`[^label]:`）と区別する
     // ため、直後に`:`が続くものは除外する（負の先読み）。
@@ -239,7 +243,7 @@ window.MarkdownModule = (function() {
      * コードフェンス（```）・ブロック数式（$$）の中は定義としても参照としても
      * 解釈しない（中で使われている記法例をうっかり実際の脚注として扱わないため）。
      * 同じラベルが複数回定義された場合は最初のものを使う。
-     * @returns {{ defs: {label:string, text:string}[], labels: Set<string>, contentLines: string[] }}
+     * @returns {{ defs: {label:string, sep:string, text:string}[], labels: Set<string>, contentLines: string[] }}
      */
     function extractFootnoteDefinitions(lines) {
         // 1st pass: コードフェンス/ブロック数式の中かどうかを行ごとに判定しつつ、
@@ -265,7 +269,7 @@ window.MarkdownModule = (function() {
             }
             const m = FOOTNOTE_DEF_PATTERN.exec(line);
             if (m) {
-                entries.push({ line: line, def: { label: m[1], text: m[2] }, scannable: true });
+                entries.push({ line: line, def: { label: m[1], sep: m[2], text: m[3] }, scannable: true });
                 return;
             }
             entries.push({ line: line, def: null, scannable: true });
@@ -307,6 +311,9 @@ window.MarkdownModule = (function() {
      * 脚注定義配列から脚注一覧セクションのHTMLを組み立てる。ラベルは
      * `FOOTNOTE_DEF_PATTERN` で既に英数字・アンダースコア・ハイフンのみに
      * 制限されているため、id/href属性へそのまま使ってよい（エスケープ不要）。
+     * `:`直後の元の空白（`def.sep`。空白のみで構成されるため属性値として安全）を
+     * `data-footnote-sep`へ保持し、htmlToMarkdownの直列化時に`: `固定ではなく
+     * 元の空白数で復元できるようにする。
      */
     function buildFootnotesSectionHtml(defs) {
         if (!defs.length) {
@@ -314,7 +321,8 @@ window.MarkdownModule = (function() {
         }
         let html = '<section class="footnotes" data-footnotes="true"><ol>';
         defs.forEach(function (def) {
-            html += '<li id="fn-' + def.label + '" data-footnote-label="' + def.label + '">' +
+            html += '<li id="fn-' + def.label + '" data-footnote-label="' + def.label +
+                '" data-footnote-sep="' + def.sep + '">' +
                 convertInline(escapeHtml(def.text)) +
                 ' <a href="#fnref-' + def.label + '" class="footnote-backref">↩</a></li>';
         });
@@ -1097,6 +1105,10 @@ window.MarkdownModule = (function() {
                 }
                 const lines = items.map(li => {
                     const label = li.getAttribute('data-footnote-label') || '';
+                    // `:`直後の元の空白を復元する（属性が無い＝この機能追加前に生成された
+                    // HTML等の場合は従来どおり半角スペース1つへフォールバック）。
+                    const sepAttr = li.getAttribute('data-footnote-sep');
+                    const sep = sepAttr === null ? ' ' : sepAttr;
                     // 脚注本文の直列化時は戻りリンク（↩）を除いてから行う
                     const clone = li.cloneNode(true);
                     const backref = clone.querySelector('.footnote-backref');
@@ -1104,7 +1116,7 @@ window.MarkdownModule = (function() {
                         backref.remove();
                     }
                     const text = serializeInlineChildren(clone).trim();
-                    return `[^${label}]: ${text}`;
+                    return `[^${label}]:${sep}${text}`;
                 });
                 return lines.join('\n') + '\n\n';
             }

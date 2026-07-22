@@ -24,7 +24,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 脚注定義行（`[^label]: 本文`）のコロン直後の空白が2つ以上あると往復で1つに正規化される | S | `FOOTNOTE_DEF_PATTERN`（`markdown.js`）は`:`の後の空白を`\s?`（0または1文字）で吸収するため、`[^1]:  本文`のように空白が2つ以上あると余分な空白が本文側の先頭空白として残り、直列化時に`trim()`で失われる（往復後は常に`[^label]: 本文`＝空白1つに正規化される）。実害は乏しいが厳密な往復を求めるなら元の空白数を保持する対応が要る。`/local-review`指摘（severity low）由来 |
 | todo | 脚注ホバーツールチップの`mouseover`/`mouseout`が`<sup>`内側の`<a>`との出入りで再発火する | S | `editor.js`の`setupFootnoteTooltipEvents`は`sup.footnote-ref`への`mouseover`/`mouseout`をイベント委譲で監視しているが、`<sup>`とその内側の`<a>`の間でマウスが出入りするたびにバブリングで再発火し、300msデバウンス用の`clearTimeout`/`setTimeout`が毎回リセットされる（機能停止には至らない軽微な非効率）。同一refへの再入場を無視するガードを足すか、素直に判定方法を見直すと良い。`/local-review`指摘（severity low）由来 |
 
 ## 優先度: 低
