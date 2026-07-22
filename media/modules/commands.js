@@ -2283,11 +2283,48 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * テキストノードの直近ブロック祖先タグ名を返す（脚注参照ライブ変換の対象判定用）。
+     * markdown.js の markdownToHtml は段落（<p>）変換にだけ footnoteInfo.labels を渡しており、
+     * 見出し・リスト項目・テーブルセル・引用・アラート本文はいずれも脚注参照を変換しない
+     * （それらの内容は<p>で包まれず各タグ直下に置かれる）。ライブ変換をこの仕様に揃えないと、
+     * 編集中は見出し等でも脚注リンクに見えるのに保存/再読込で消える非対称が生じる。
+     */
+    function nearestBlockTag(node) {
+        let current = node.parentNode;
+        while (current && current !== state.editor) {
+            if (current.nodeType === Node.ELEMENT_NODE) {
+                const tag = current.tagName;
+                if (tag === 'P' || tag === 'LI' || tag === 'BLOCKQUOTE' || tag === 'TD' || tag === 'TH' ||
+                    tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4' || tag === 'H5' ||
+                    tag === 'H6' || tag === 'DIV' || tag === 'SECTION') {
+                    return tag;
+                }
+            }
+            current = current.parentNode;
+        }
+        return null;
+    }
+
+    /**
      * インラインフォーマットを適用
      */
     function walkInline(root) {
         const selection = window.getSelection();
         const focusNode = selection ? selection.focusNode : null;
+
+        // 脚注参照（[^label]）のライブ変換対象ラベル集合。すでに脚注一覧
+        // セクション（section.footnotes、markdownToHtmlの再パースで生成される）が
+        // 存在するラベルだけを対象にする＝軽量な1回のDOMクエリで済ませる意図的な
+        // 制約（「参照・定義とも今まさに入力中で、まだ一度も保存/Raw切替を経て
+        // いない」新規の脚注ペアはこの場ではライブ変換されず、保存や再読込時に
+        // markdownToHtmlが変換する）。
+        const footnoteLabels = new Set();
+        root.querySelectorAll('section.footnotes li[data-footnote-label]').forEach(function (li) {
+            const label = li.getAttribute('data-footnote-label');
+            if (label) {
+                footnoteLabels.add(label);
+            }
+        });
 
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
         const toReplace = [];
@@ -2299,7 +2336,8 @@ window.CommandsModule = (function() {
                 continue;
             }
 
-            const converted = convertInlineText(node.textContent);
+            const labelsForNode = nearestBlockTag(node) === 'P' ? footnoteLabels : null;
+            const converted = convertInlineText(node.textContent, labelsForNode);
             if (converted !== node.textContent) {
                 toReplace.push({ node, html: converted });
             }
@@ -2334,7 +2372,7 @@ window.CommandsModule = (function() {
     /**
      * インラインテキストを変換
      */
-    function convertInlineText(text) {
+    function convertInlineText(text, footnoteLabels) {
         // インラインコードを先にプレースホルダ（NUL文字＋通し番号）へ退避し、
         // コード内の文字列に他のインライン整形（リンク・強調・取り消し線など）が
         // 適用されて `**太字**` 等が装飾に化けるのを防ぐ。整形後に復元する。
@@ -2386,6 +2424,27 @@ window.CommandsModule = (function() {
         // リンク
         html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
+        // 脚注参照（[^label]）。対応する脚注定義がすでにエディタ内に存在する場合
+        // （footnoteLabelsに含まれるラベル）のみ変換し、無ければリテラルテキストの
+        // まま残す（markdown.jsのconvertInlineと同じ判定方針。`(?!:)`で定義行自身の
+        // 体裁を誤って参照変換しない）。他の記法（コード・数式・画像・エスケープ$）と
+        // 同様、ここでは実HTMLを直接埋め込まずデリミタ付きプレースホルダへ退避する。
+        // 理由: この時点ではまだ数式/画像/太字/斜体などの変換が残っており、実HTMLを
+        // 埋めるとその中の `_` や `*` などが後続の変換に巻き込まれたり、逆に数式/画像の
+        // 復元（下記）が完了したあとの属性値に `[^label]` 相当の文字列がたまたま含まれて
+        // いた場合に誤って再変換されてしまう。プレースホルダ化しておけば両方を防げる。
+        const footnoteSpans = [];
+        if (footnoteLabels) {
+            html = html.replace(/\[\^([A-Za-z0-9_-]+)\](?!:)/g, function (match, label) {
+                if (!footnoteLabels.has(label)) {
+                    return match;
+                }
+                footnoteSpans.push('<sup class="footnote-ref" data-footnote-label="' + label + '">' +
+                    '<a href="#fn-' + label + '" id="fnref-' + label + '">' + label + '</a></sup>');
+                return '' + (footnoteSpans.length - 1) + '';
+            });
+        }
+
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
 
@@ -2412,6 +2471,11 @@ window.CommandsModule = (function() {
         // 退避した \$ をリテラルのドル記号として復元（この時点なら数式判定は済んでいる）
         html = html.replace(/(\d+)/g, function (_m, i) {
             return escapedDollars[Number(i)];
+        });
+
+        // 退避した脚注参照を <sup> として復元（デリミタ付きなので他の復元順序に依存しない）
+        html = html.replace(/(\d+)/g, function (_m, i) {
+            return footnoteSpans[Number(i)];
         });
 
         // 退避したインラインコードを <code> として復元（中身は整形しない）
