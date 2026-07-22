@@ -255,17 +255,33 @@ window.MarkdownModule = (function() {
      * そのため`seamIndices`（`contentLines`中で「直前の行との隣接性が失われている
      * 位置」の集合）を合わせて返し、`scanDefListTerms`だけがこれを参照して
      * 縫い目をまたいだ用語/定義行の結合を防ぐ。
+     * `frontMatterEndIndex`（呼び出し側が`lines`自体から`parseFrontMatter`で計算した
+     * front matter終端行index。無ければ-1やundefined）以下の行はコードフェンス・
+     * ブロック数式と同様に生テキストとして保護し、脚注定義/参照として解釈しない
+     * （front matter内に偶然`[^label]:`に一致する行があっても剥がされないように）。
+     * この判定を関数内で`lines`から再計算せず引数として受け取るのは、呼び出し側
+     * （`markdownToHtml`）が同じ`lines`に対して一度だけfront matter判定を行い、
+     * その結果を本関数と本文パースの両方で共有するため（別々に`parseFrontMatter`を
+     * 呼ぶと、本関数が返す`contentLines`＝脚注除去後の行配列に対して呼び出し側が
+     * 再度判定した場合に、たまたま除去後の行が`---`で始まってしまうケースなどで
+     * 判定がずれる可能性があった。/local-review指摘対応）。
      * @returns {{ defs: {label:string, sep:string, text:string}[], labels: Set<string>,
      *            contentLines: string[], seamIndices: Set<number> }}
      */
-    function extractFootnoteDefinitions(lines) {
+    function extractFootnoteDefinitions(lines, frontMatterEndIndex) {
+        const boundary = typeof frontMatterEndIndex === 'number' ? frontMatterEndIndex : -1;
+
         // 1st pass: コードフェンス/ブロック数式の中かどうかを行ごとに判定しつつ、
         // 定義行らしき行を仮判定する（まだ確定しない＝参照の有無を見てから決める）。
         const entries = [];
         let inFence = false;
         let inMathBlock = false;
 
-        lines.forEach(function (line) {
+        lines.forEach(function (line, index) {
+            if (index <= boundary) {
+                entries.push({ line: line, def: null, scannable: false });
+                return;
+            }
             if (!inMathBlock && matchFence(line)) {
                 inFence = !inFence;
                 entries.push({ line: line, def: null, scannable: false });
@@ -360,6 +376,57 @@ window.MarkdownModule = (function() {
         return /^\s*\|.*\|\s*$/.test(line) &&
             nextLine !== undefined &&
             /^\s*\|[\s\-:|]+\|\s*$/.test(nextLine);
+    }
+
+    /**
+     * 文書先頭のYAML front matter（`---`で始まり`---`で閉じるブロック）を検出する。
+     * 文書の絶対先頭（lines[0]）にのみ有効（本文中に現れる`---`は水平線として扱う。
+     * 水平線判定 HR_PATTERN と記法が重なるが、呼び出し側は`i === 0`のときだけ
+     * この判定を試みるため衝突しない）。閉じの`---`が見つからない場合はfront matter
+     * として扱わず null を返す（通常のブロックパースへフォールバック＝安全側）。
+     * @returns {{ raw: string, endIndex: number } | null} endIndexは閉じ`---`の行index
+     */
+    function parseFrontMatter(lines) {
+        if (!lines.length || lines[0] !== '---') {
+            return null;
+        }
+        for (let k = 1; k < lines.length; k++) {
+            if (lines[k] === '---') {
+                return { raw: lines.slice(1, k).join('\n'), endIndex: k };
+            }
+        }
+        return null;
+    }
+
+    /**
+     * front matterの生YAMLテキストから折りたたみ表示用のHTMLを組み立てる。
+     * YAMLはMarkdownのインライン記法（強調等）を持たないためconvertInlineは通さず、
+     * escapeHtmlのみ適用する。既定は折りたたみ状態（editor.css側で`.frontmatter-body`を
+     * 非表示にする）。ヘッダをクリックすると`frontmatter-expanded`クラスがトグルされる
+     * （配線はcommands.js）。折りたたみ状態はUI表示のみの一時状態であり、Markdown文書の
+     * 内容には影響しないため往復対象にしない（保存・再読込のたびに既定の折りたたみへ戻る）。
+     * 注意: 「本文0行（`---\n---`）」と「空行1行だけ（`---\n\n---`）」はどちらも`raw`が
+     * 空文字列になり区別できない。パース時に判明する行数をdata属性へ保持する案も検討したが、
+     * `.frontmatter-body`はcontenteditableでユーザーが自由に編集できるため、その属性は
+     * 編集直後に実際の内容と食い違う「陳腐化した値」になり、直列化時にユーザーが入力した
+     * 内容そのものを誤って捨ててしまう重大なデータ消失リスクがあった（/local-review指摘）。
+     * そのため実装せず、保存のたびに「空行1行だけの本文」は「本文0行」へ正規化される仕様
+     * として受け入れる（実害の乏しい稀なケースであり、静的属性によるデータ消失リスクの
+     * 方が明確に深刻なため）。
+     */
+    function buildFrontMatterHtml(raw) {
+        // HTML仕様上、<pre>開始タグ直後の最初のLFトークンはパース時に無視される
+        // （<textarea>も同様）。rawの先頭行が空行の場合にこの1文字が失われるのを
+        // 防ぐため、常にダミーの改行を1つ先頭へ足しておく（パーサーが必ずこの分だけ
+        // 食うので、rawの実際の内容には影響しない。実際に<div>へinnerHTML経由で
+        // 反映される際・htmlToMarkdownでcontainer.innerHTMLへ設定する際の両方で
+        // このパース仕様が働くため、常に付与しておく必要がある）。
+        return '<div class="frontmatter">' +
+            '<div class="frontmatter-header" contenteditable="false">' +
+            '<span class="frontmatter-toggle-icon">▶</span> Front Matter' +
+            '</div>' +
+            '<pre class="frontmatter-body">' + '\n' + escapeHtml(raw) + '</pre>' +
+            '</div>';
     }
 
     // 定義リストの定義行（`: 定義本文`）の判定。用語行はこの形にマッチしない
@@ -626,14 +693,23 @@ window.MarkdownModule = (function() {
      */
     function markdownToHtml(markdown) {
         const src = stripZeroWidth(markdown).replace(/\r\n?/g, '\n');
+        // 末尾の空行はここで落としておく（末尾の空行はhtmlToMarkdown側で常に
+        // 1つの改行へ正規化され往復に影響しないが、定義行が文末近くにあると
+        // 除去後に隣接する空行と連結して余分な空段落が生じるため、先に潰しておく）。
+        const rawLines = src.replace(/\n+$/, '').split('\n');
+        // YAML front matterの判定は元の行配列（rawLines）に対して一度だけ行い、
+        // extractFootnoteDefinitions（保護対象の判定に使う）と本文パースループの
+        // 両方でこの同じ結果を共有する。脚注除去後の行配列（contentLines）に対して
+        // 別途再判定すると、たまたま除去後の行が`---`で始まってしまうケースなどで
+        // front matterの判定がずれる可能性があるため（/local-review指摘対応）。
+        const frontMatter = parseFrontMatter(rawLines);
         // 脚注定義行（`[^label]: 本文`）は通常のブロックパースの対象から外し、
         // 文書末尾の脚注一覧セクションとして別途組み立てる（末尾に集約するのは
         // 一般的な脚注表示の慣習に合わせたもの＝定義が文書中程にあった場合、
         // 保存すると末尾へ移動する。既知の仕様）。
-        // 末尾の空行はここで落としておく（末尾の空行はhtmlToMarkdown側で常に
-        // 1つの改行へ正規化され往復に影響しないが、定義行が文末近くにあると
-        // 除去後に隣接する空行と連結して余分な空段落が生じるため、先に潰しておく）。
-        const footnoteInfo = extractFootnoteDefinitions(src.replace(/\n+$/, '').split('\n'));
+        const footnoteInfo = extractFootnoteDefinitions(
+            rawLines, frontMatter ? frontMatter.endIndex : -1
+        );
         const lines = footnoteInfo.contentLines;
         const out = [];
         let i = 0;
@@ -642,6 +718,15 @@ window.MarkdownModule = (function() {
 
         while (i < lines.length) {
             const line = lines[i];
+
+            // --- YAML front matter（文書の絶対先頭にのみ有効） ---
+            if (i === 0) {
+                if (frontMatter) {
+                    out.push(buildFrontMatterHtml(frontMatter.raw));
+                    i = frontMatter.endIndex + 1;
+                    continue;
+                }
+            }
 
             // --- コードブロック ---
             const fence = matchFence(line);
@@ -1207,6 +1292,18 @@ window.MarkdownModule = (function() {
                 if (el.classList && el.classList.contains('math-block')) {
                     return '$$\n' + (el.getAttribute('data-math') || '') + '\n$$\n\n';
                 }
+                // YAML front matterは`.frontmatter-body`（<pre>、textContentがそのまま
+                // 生YAML）から`---\n...\n---`を復元する。折りたたみ状態（UI表示のみ）は
+                // 復元に含めない。「本文0行」と「空行1行だけ」はどちらも`raw`が空文字列に
+                // なり区別できないが、後者は前者へ正規化される仕様として受け入れる
+                // （`buildFrontMatterHtml`のコメント参照。パース時の行数をdata属性へ
+                // 保持する案は、contenteditableな本文を編集すると属性が陳腐化しユーザーの
+                // 入力内容を誤って捨てるデータ消失リスクがあるため見送った）。
+                if (el.classList && el.classList.contains('frontmatter')) {
+                    const body = el.querySelector('.frontmatter-body');
+                    const raw = body ? stripZeroWidth(body.textContent || '') : '';
+                    return raw ? ('---\n' + raw + '\n---\n\n') : '---\n---\n\n';
+                }
                 // ブロック子要素を含む場合はコンテナとして再帰
                 const hasBlockChild = Array.from(el.children).some(c => BLOCK_TAGS.has(c.tagName));
                 if (hasBlockChild) {
@@ -1625,6 +1722,9 @@ window.MarkdownModule = (function() {
         buildFootnotesSectionHtml: buildFootnotesSectionHtml,
         // 定義リスト（Term\n: Definition）のサポート
         scanDefListTerms: scanDefListTerms,
-        buildDefListHtml: buildDefListHtml
+        buildDefListHtml: buildDefListHtml,
+        // YAML front matter の折りたたみ表示
+        parseFrontMatter: parseFrontMatter,
+        buildFrontMatterHtml: buildFrontMatterHtml
     };
 })();

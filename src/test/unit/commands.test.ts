@@ -1358,6 +1358,46 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('toggleFrontMatter（YAML front matterの折りたたみ/展開トグル）', () => {
+        function frontMatterHtml() {
+            return '<div class="frontmatter">' +
+                '<div class="frontmatter-header" contenteditable="false">' +
+                '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>' +
+                '<pre class="frontmatter-body">\ntitle: x</pre></div>';
+        }
+
+        test('既定（折りたたみ）状態のヘッダをクリックするとfrontmatter-expandedが付与される', () => {
+            env.editor.innerHTML = frontMatterHtml();
+            const header = env.editor.querySelector('.frontmatter-header') as HTMLElement;
+            env.commands.toggleFrontMatter(header);
+            const frontMatter = env.editor.querySelector('.frontmatter')!;
+            assert.strictEqual(frontMatter.classList.contains('frontmatter-expanded'), true);
+        });
+
+        test('展開状態でもう一度クリックするとfrontmatter-expandedが外れる（トグル）', () => {
+            env.editor.innerHTML = frontMatterHtml();
+            const header = env.editor.querySelector('.frontmatter-header') as HTMLElement;
+            env.commands.toggleFrontMatter(header);
+            env.commands.toggleFrontMatter(header);
+            const frontMatter = env.editor.querySelector('.frontmatter')!;
+            assert.strictEqual(frontMatter.classList.contains('frontmatter-expanded'), false);
+        });
+
+        test('祖先に.frontmatterが無い場合は何もしない（例外を投げない）', () => {
+            env.editor.innerHTML = '<div class="frontmatter-header" contenteditable="false">Front Matter</div>';
+            const header = env.editor.querySelector('.frontmatter-header') as HTMLElement;
+            assert.doesNotThrow(() => env.commands.toggleFrontMatter(header));
+        });
+
+        test('トグルしてもMarkdownは変わらない（往復不変）', () => {
+            env.editor.innerHTML = frontMatterHtml();
+            const before = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            env.commands.toggleFrontMatter(env.editor.querySelector('.frontmatter-header') as HTMLElement);
+            const after = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(after, before, JSON.stringify(after));
+        });
+    });
+
     suite('handleAlertEnter（アラートbox本文内のEnter/Shift+Enter）', () => {
         const ALERT = '<div class="markdown-alert markdown-alert-note" data-alert-type="NOTE">' +
             '<p class="markdown-alert-title" contenteditable="false">Note</p>' +
@@ -1617,6 +1657,15 @@ suite('CommandsModule', () => {
             const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
             assert.ok(/\* \[Title\]\(#title\)/.test(md), md);
             assert.ok(/ {2}\* \[Sub\]\(#sub\)/.test(md), md);
+        });
+
+        test('文書先頭がYAML front matterの場合、目次はその直後に挿入され先頭に割り込まない（front matterは絶対先頭でなければならないため）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: x\n---\n\n# Title') +
+                heading(2, 'Sub');
+            env.commands.insertToc();
+            assert.ok(env.editor.firstElementChild!.classList.contains('frontmatter'), env.editor.innerHTML);
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(md.startsWith('---\ntitle: x\n---\n'), md);
         });
     });
 

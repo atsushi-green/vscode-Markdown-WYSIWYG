@@ -676,6 +676,45 @@ body.vscode-dark #editor strong {
     --alert-accent: var(--vscode-editorError-foreground, var(--vscode-charts-red));
 }
 
+/* YAML front matter（文書先頭の `---` ブロック）。既定は折りたたみ表示。 */
+#editor .frontmatter {
+    margin: 0 0 1em 0;
+    border: 1px solid var(--vscode-editorGroup-border);
+    border-radius: 3px;
+    background-color: var(--vscode-textCodeBlock-background);
+}
+
+#editor .frontmatter-header {
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.9em;
+}
+
+#editor .frontmatter-toggle-icon {
+    display: inline-block;
+    transition: transform 0.1s ease;
+}
+
+#editor .frontmatter.frontmatter-expanded .frontmatter-toggle-icon {
+    transform: rotate(90deg);
+}
+
+#editor .frontmatter-body {
+    display: none;
+    margin: 0;
+    padding: 0 10px 10px;
+    background: transparent;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    white-space: pre-wrap;
+}
+
+#editor .frontmatter.frontmatter-expanded .frontmatter-body {
+    display: block;
+}
+
 #editor ul,
 #editor ol {
     margin: 1em 0;

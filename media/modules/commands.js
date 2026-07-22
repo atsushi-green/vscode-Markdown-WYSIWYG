@@ -358,6 +358,13 @@ window.CommandsModule = (function() {
                 return;
             }
 
+            // front matterヘッダも同様にキャレットが入らないよう抑止し、実処理はclickで実行
+            if (target.closest('.frontmatter-header')) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+
             const selector = target.closest('.code-lang-selector');
             if (!selector) {
                 return;
@@ -387,6 +394,16 @@ window.CommandsModule = (function() {
                 e.preventDefault();
                 e.stopPropagation();
                 handleMathClick(mathEl);
+                return;
+            }
+            // YAML front matterのヘッダクリックで折りたたみ/展開をトグルする
+            // （`contenteditable="false"`なのでキャレットは入らない。折りたたみ状態は
+            // UI表示のみで文書には影響しないため保存対象にしない＝クラスの付け外しのみ）。
+            const frontMatterHeader = target.closest('.frontmatter-header');
+            if (frontMatterHeader) {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleFrontMatter(frontMatterHeader);
                 return;
             }
             // 通常クリックでリンク先へ飛ばないよう既定遷移を抑止する
@@ -712,10 +729,24 @@ window.CommandsModule = (function() {
                 ref = n;
             });
         } else {
+            // YAML front matterは文書の絶対先頭でなければ再パース時に認識されなくなる
+            // （通常の水平線として扱われてしまう）ため、先頭がfront matterブロックなら
+            // その直後へ挿入する（先頭に割り込ませない）。
             const first = state.editor.firstChild;
-            nodes.forEach(n => {
-                state.editor.insertBefore(n, first);
-            });
+            const frontMatter = first && first.classList && first.classList.contains('frontmatter')
+                ? first
+                : null;
+            if (frontMatter) {
+                let ref = frontMatter;
+                nodes.forEach(n => {
+                    ref.after(n);
+                    ref = n;
+                });
+            } else {
+                nodes.forEach(n => {
+                    state.editor.insertBefore(n, first);
+                });
+            }
         }
 
         // 文書へ反映
@@ -1448,6 +1479,19 @@ window.CommandsModule = (function() {
         const isBlock = el.classList.contains('math-block');
         const raw = expandMathToRaw(el);
         utils.placeCaretAt(raw, isBlock ? 3 : 1);
+    }
+
+    /**
+     * YAML front matterヘッダのクリックで折りたたみ/展開をトグルする。
+     * `headerEl`は`.frontmatter-header`要素（またはその子孫）を受け取り、
+     * 祖先の`.frontmatter`に`frontmatter-expanded`クラスを付け外しする。
+     * 折りたたみ状態はUI表示のみで文書の内容には影響しないため、保存対象にしない。
+     */
+    function toggleFrontMatter(headerEl) {
+        const frontMatter = headerEl.closest('.frontmatter');
+        if (frontMatter) {
+            frontMatter.classList.toggle('frontmatter-expanded');
+        }
     }
 
     /**
@@ -2751,6 +2795,7 @@ window.CommandsModule = (function() {
         syncRawMarkdownToCaret: syncRawMarkdownToCaret,
         expandMathToRaw: expandMathToRaw,
         handleMathClick: handleMathClick,
+        toggleFrontMatter: toggleFrontMatter,
         handleLinkClick: handleLinkClick,
         handleTaskListEnter: handleTaskListEnter,
         applyInlineFormatting: applyInlineFormatting,

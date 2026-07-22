@@ -465,6 +465,33 @@ suite('MarkdownModule', () => {
                 assert.ok(!html.includes('footnotes'), html);
             });
 
+            test('YAML front matter内が`[^label]: ...`形式に一致しても脚注定義として剥がさない（front matterはコードフェンス同様に保護される）', () => {
+                const html = env.markdown.markdownToHtml(
+                    '---\n[^ref]: front matter内の行\n---\n\n本文[^ref]。\n\n[^ref]: 本物の定義。'
+                );
+                // front matter内の行は脚注定義として剥がされず、そのままpre内に残る
+                assert.ok(
+                    html.includes('<pre class="frontmatter-body">\n[^ref]: front matter内の行</pre>'),
+                    html
+                );
+                // 文書末尾の本物の定義だけが脚注として認識される
+                assert.ok(html.includes('<li id="fn-ref" data-footnote-label="ref"'), html);
+                assert.ok(html.includes('本物の定義。'), html);
+            });
+
+            test('文書の1行目が参照済み脚注定義行の場合、除去後に偶然---で始まる行が現れても誤ってfront matterと認識しない（/local-review再指摘対応）', () => {
+                // extractFootnoteDefinitionsは元の行配列（1行目は脚注定義行で"---"では
+                // ない）に対してfront matter判定するため、除去後の行配列（contentLines）が
+                // たまたま"---"で始まっていても、本文パースループはfront matterとして
+                // 再判定しない（同じfront matter判定結果を共有する設計のため）。
+                const html = env.markdown.markdownToHtml(
+                    '[^1]: 参照される脚注\n---\na: 1\n---\n本文[^1]。'
+                );
+                assert.ok(!html.includes('frontmatter'), html);
+                assert.ok(html.includes('<hr>'), html);
+                assert.ok(html.includes('<p>a: 1</p>'), html);
+            });
+
             test('同じラベルが複数定義された場合は最初の定義を脚注として使い、二番目は通常の段落として残す（データを失わない）', () => {
                 const html = env.markdown.markdownToHtml(
                     '本文[^1]。\n\n[^1]: 最初の定義。\n[^1]: 二番目の定義（無視される）。'
@@ -662,6 +689,74 @@ suite('MarkdownModule', () => {
             test('見出し等の他ブロック開始行は用語として取り込まない', () => {
                 const result = env.markdown.scanDefListTerms(['## 見出し', ': 定義'], 0);
                 assert.strictEqual(result, null);
+            });
+        });
+
+        suite('YAML front matter（文書先頭の折りたたみ表示）', () => {
+            test('文書先頭の---〜---を折りたたみ可能なdivへ変換する', () => {
+                const html = env.markdown.markdownToHtml('---\ntitle: サンプル\ndate: 2026-01-01\n---\n\n本文です。');
+                assert.ok(html.includes('<div class="frontmatter">'), html);
+                assert.ok(html.includes(
+                    '<div class="frontmatter-header" contenteditable="false">' +
+                    '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>'
+                ), html);
+                assert.ok(html.includes(
+                    '<pre class="frontmatter-body">\ntitle: サンプル\ndate: 2026-01-01</pre>'
+                ), html);
+                assert.ok(html.includes('<p>本文です。</p>'), html);
+            });
+
+            test('先頭以外に現れる---は水平線として扱う（front matterと誤認しない）', () => {
+                const html = env.markdown.markdownToHtml('本文\n\n---\n\n続き');
+                assert.ok(!html.includes('frontmatter'), html);
+                assert.ok(html.includes('<hr>'), html);
+            });
+
+            test('閉じの---が無ければfront matterとして扱わない（水平線として処理される）', () => {
+                const html = env.markdown.markdownToHtml('---\ntitle: 閉じ忘れ');
+                assert.ok(!html.includes('frontmatter'), html);
+                assert.ok(html.includes('<hr>'), html);
+            });
+
+            test('中身が空のfront matterにも対応する', () => {
+                const html = env.markdown.markdownToHtml('---\n---\n\n本文。');
+                assert.ok(html.includes('<pre class="frontmatter-body">\n</pre>'), html);
+            });
+
+            test('中身が空行1つだけのfront matterは「本文0行」へ正規化される（既知の仕様。'
+                + '.frontmatter-bodyはcontenteditableなためパース時の行数をdata属性で'
+                + '保持するとユーザーの編集内容を誤って捨てるデータ消失リスクがあり見送った）', () => {
+                const html = env.markdown.markdownToHtml('---\n\n---\n\n本文。');
+                assert.ok(html.includes('<pre class="frontmatter-body">\n</pre>'), html);
+            });
+
+            test('YAML内の記号はインライン記法へ変換されない（**や_を含んでもそのまま）', () => {
+                const html = env.markdown.markdownToHtml('---\ntags: [a_b, **not-bold**]\n---\n\n本文');
+                assert.ok(
+                    html.includes('<pre class="frontmatter-body">\ntags: [a_b, **not-bold**]</pre>'),
+                    html
+                );
+                assert.ok(!html.includes('<strong>'), html);
+                assert.ok(!html.includes('<em>'), html);
+            });
+        });
+
+        suite('parseFrontMatter', () => {
+            test('---で始まり---で閉じる区間を読み取る', () => {
+                const result = env.markdown.parseFrontMatter(['---', 'a: 1', 'b: 2', '---', '本文']);
+                assert.deepStrictEqual({ ...result }, { raw: 'a: 1\nb: 2', endIndex: 3 });
+            });
+
+            test('先頭が---でなければnullを返す', () => {
+                assert.strictEqual(env.markdown.parseFrontMatter(['本文', '---']), null);
+            });
+
+            test('閉じの---が無ければnullを返す', () => {
+                assert.strictEqual(env.markdown.parseFrontMatter(['---', 'a: 1']), null);
+            });
+
+            test('空配列でもnullを返す（例外を投げない）', () => {
+                assert.strictEqual(env.markdown.parseFrontMatter([]), null);
             });
         });
     });
@@ -954,6 +1049,36 @@ suite('MarkdownModule', () => {
                 assert.strictEqual(threeSep, '用語\n:   定義\n');
             });
         });
+
+        suite('YAML front matter（div.frontmatter）', () => {
+            test('---\\n...\\n---へ復元する', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<div class="frontmatter"><div class="frontmatter-header" contenteditable="false">' +
+                    '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>' +
+                    '<pre class="frontmatter-body">title: サンプル\ndate: 2026-01-01</pre></div>'
+                );
+                assert.strictEqual(md, '---\ntitle: サンプル\ndate: 2026-01-01\n---\n');
+            });
+
+            test('中身が空でも---\\n---として復元する', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<div class="frontmatter"><div class="frontmatter-header" contenteditable="false">' +
+                    '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>' +
+                    '<pre class="frontmatter-body"></pre></div>'
+                );
+                assert.strictEqual(md, '---\n---\n');
+            });
+
+            test('折りたたみ状態（frontmatter-expandedクラスの有無）は復元結果に影響しない', () => {
+                const expanded = env.markdown.htmlToMarkdown(
+                    '<div class="frontmatter frontmatter-expanded">' +
+                    '<div class="frontmatter-header" contenteditable="false">' +
+                    '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>' +
+                    '<pre class="frontmatter-body">a: 1</pre></div>'
+                );
+                assert.strictEqual(expanded, '---\na: 1\n---\n');
+            });
+        });
     });
 
     suite('数式（インライン $...$ / ブロック $$...$$）', () => {
@@ -1206,6 +1331,33 @@ suite('MarkdownModule', () => {
                 const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
                 assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
             });
+        });
+
+        test('YAML front matterが変換往復で保存される', () => {
+            [
+                '---\ntitle: サンプル\ndate: 2026-01-01\n---\n\n本文です。\n',
+                '---\n---\n\n本文のみ。\n',
+                '---\ntags: [a_b, **not-bold**]\n---\n\n本文\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('本文が空行1つだけのfront matterは往復で本文0行へ正規化される（既知の仕様。'
+            + '.frontmatter-bodyがcontenteditableなため区別する情報をdata属性で保持すると'
+            + 'ユーザー編集時にデータ消失リスクがあり、あえて実装していない）', () => {
+            const original = '---\n\n---\n\n本文。\n';
+            const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+            assert.strictEqual(rt, '---\n---\n\n本文。\n');
+        });
+
+        test('front matter本文の先頭行が空行でも変換往復で保持される（<pre>開始タグ直後のLFがパース時に無視される仕様への対処）', () => {
+            const original = '---\n\ntitle: 先頭が空行\n---\n\n本文\n';
+            const html = env.markdown.markdownToHtml(original);
+            // 実際にHTMLパーサーを通した後の内容で検証する（htmlToMarkdownと同じ経路）。
+            const rt = env.markdown.htmlToMarkdown(html);
+            assert.strictEqual(rt, original);
         });
 
         test('用語と定義行の間に脚注定義行が挟まっても、無関係な行同士が定義リストとして誤結合されない（/local-review指摘対応）', () => {
