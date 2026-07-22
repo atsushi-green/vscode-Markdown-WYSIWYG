@@ -24,7 +24,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 脚注ホバーツールチップの`mouseover`/`mouseout`が`<sup>`内側の`<a>`との出入りで再発火する | S | `editor.js`の`setupFootnoteTooltipEvents`は`sup.footnote-ref`への`mouseover`/`mouseout`をイベント委譲で監視しているが、`<sup>`とその内側の`<a>`の間でマウスが出入りするたびにバブリングで再発火し、300msデバウンス用の`clearTimeout`/`setTimeout`が毎回リセットされる（機能停止には至らない軽微な非効率）。同一refへの再入場を無視するガードを足すか、素直に判定方法を見直すと良い。`/local-review`指摘（severity low）由来 |
 
 ## 優先度: 低
 

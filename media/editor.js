@@ -581,6 +581,10 @@
     // markdownEditor.ts 非変更・body直下へ動的生成（mermaid/math/tableの各メニューと同パターン）。
     let footnoteTooltipEl = null;
     let footnoteTooltipTimeout = null;
+    // 現在ホバー対象として処理中の脚注参照（<sup class="footnote-ref">）要素。
+    // <sup>とその内側の<a>の間でマウスが出入りするたびmouseover/mouseoutが
+    // 再発火するが、同じrefへの再入場ではタイマーをリセットしない（下記参照）。
+    let activeFootnoteRef = null;
 
     /**
      * ツールチップ要素（無ければ生成）を返す。
@@ -635,6 +639,7 @@
         if (footnoteTooltipEl) {
             footnoteTooltipEl.style.display = 'none';
         }
+        activeFootnoteRef = null;
     }
 
     /**
@@ -642,13 +647,18 @@
      * `mouseenter`/`mouseleave`はバブリングしないため、委譲には`mouseover`/`mouseout`＋
      * `closest`を使う（`table.js`のセル範囲選択と異なりホバーのみで良いため間引きは
      * 表示側をsetTimeoutでデバウンスするだけで十分）。
+     * `<sup>`とその内側の`<a>`の間でマウスが出入りするたびmouseoverが再発火するが、
+     * `activeFootnoteRef`で「既に処理中の同じref」への再入場を検知し、その場合は
+     * タイマーの再設定をスキップする（`/local-review`指摘・機能に影響は無い軽微な
+     * 非効率だったが、無駄なclearTimeout/setTimeoutの繰り返しを避ける）。
      */
     function setupFootnoteTooltipEvents() {
         state.editor.addEventListener('mouseover', function (e) {
             const ref = e.target && e.target.closest && e.target.closest('sup.footnote-ref');
-            if (!ref) {
+            if (!ref || ref === activeFootnoteRef) {
                 return;
             }
+            activeFootnoteRef = ref;
             clearTimeout(footnoteTooltipTimeout);
             footnoteTooltipTimeout = setTimeout(function () {
                 showFootnoteTooltip(ref);
