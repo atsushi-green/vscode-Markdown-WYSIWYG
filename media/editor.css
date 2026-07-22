@@ -682,6 +682,19 @@ body.vscode-dark #editor strong {
     padding-left: 2em;
 }
 
+/* 定義リスト（Term\n: Definition） */
+#editor dl {
+    margin: 1em 0;
+}
+
+#editor dt {
+    font-weight: 600;
+}
+
+#editor dd {
+    margin: 0.2em 0 0.8em 2em;
+}
+
 #editor li {
     margin: 0.5em 0;
 }

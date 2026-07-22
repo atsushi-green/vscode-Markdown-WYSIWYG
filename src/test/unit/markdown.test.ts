@@ -492,7 +492,16 @@ suite('MarkdownModule', () => {
                 ]);
                 assert.strictEqual(result.labels.has('1'), true);
                 assert.strictEqual(result.labels.has('note'), true);
-                assert.deepStrictEqual(Array.from(result.contentLines), ['本文行[^1][^note]', '別の本文行']);
+                // 除去した定義行は単純に取り除かれる（リスト・引用・テーブルは各行自身が
+                // 記法で自己申告するため、前後が直接隣接しても正しく結合される＝望ましい）。
+                assert.deepStrictEqual(
+                    Array.from(result.contentLines),
+                    ['本文行[^1][^note]', '別の本文行']
+                );
+                // 除去によって隣接性が失われた位置（本文行の直後）はseamIndicesに記録される。
+                // 定義リスト（scanDefListTerms）はこれを見て縫い目をまたいだ誤結合を避ける。
+                assert.strictEqual(result.seamIndices.has(1), true);
+                assert.strictEqual(result.seamIndices.size, 1);
             });
 
             test('参照が無い（地の文が偶然この形をしていただけの）定義行らしき行は通常の行として残す（誤検知防止・/local-review指摘A対応）', () => {
@@ -527,6 +536,8 @@ suite('MarkdownModule', () => {
                 assert.deepStrictEqual(Array.from(result.contentLines), [
                     '参照[^3]', '```', '[^1]: コード内', '```', '$$', '[^2]: 数式内', '$$'
                 ]);
+                // 末尾の[^3]定義行を除去した後に続く行は無い＝seamIndicesは記録されない
+                assert.strictEqual(result.seamIndices.size, 0);
             });
 
             test('コロン直後の空白の個数をsepとしてそのまま保持する（0個・1個・2個以上）', () => {
@@ -556,6 +567,101 @@ suite('MarkdownModule', () => {
                 ]);
                 assert.ok(html.includes('data-footnote-sep=""'), html);
                 assert.ok(html.includes('data-footnote-sep="   "'), html);
+            });
+        });
+
+        suite('定義リスト（Term / : Definition）', () => {
+            test('用語行とその直後の定義行を<dl><dt><dd>へ変換する', () => {
+                const html = env.markdown.markdownToHtml('用語\n: 定義本文');
+                assert.strictEqual(html, '<dl><dt>用語</dt><dd data-def-sep=" ">定義本文</dd></dl>');
+            });
+
+            test('1つの用語に複数の定義行が続く場合は<dd>を複数生成する', () => {
+                const html = env.markdown.markdownToHtml('用語\n: 定義1\n: 定義2');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語</dt><dd data-def-sep=" ">定義1</dd>' +
+                    '<dd data-def-sep=" ">定義2</dd></dl>'
+                );
+            });
+
+            test('複数の用語行が同じ定義群を共有する場合は<dt>を複数生成する', () => {
+                const html = env.markdown.markdownToHtml('用語A\n用語B\n: 共有の定義');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語A</dt><dt>用語B</dt><dd data-def-sep=" ">共有の定義</dd></dl>'
+                );
+            });
+
+            test('複数の用語・定義グループが連続する場合は1つの<dl>にまとめる', () => {
+                const html = env.markdown.markdownToHtml('用語1\n: 定義1\n用語2\n: 定義2');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語1</dt><dd data-def-sep=" ">定義1</dd>' +
+                    '<dt>用語2</dt><dd data-def-sep=" ">定義2</dd></dl>'
+                );
+            });
+
+            test('定義本文にもインライン記法（強調等）を適用する', () => {
+                const html = env.markdown.markdownToHtml('用語\n: **重要**な定義');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語</dt><dd data-def-sep=" "><strong>重要</strong>な定義</dd></dl>'
+                );
+            });
+
+            test('直後に定義行が続かない通常行は定義リストとして扱わない（普通の段落のまま）', () => {
+                const html = env.markdown.markdownToHtml('ただの本文\n続きの行');
+                assert.ok(!html.includes('<dl>'), html);
+                assert.ok(html.includes('<p>ただの本文<br>続きの行</p>'), html);
+            });
+
+            test('空行を挟むと別々の<dl>として分離される', () => {
+                const html = env.markdown.markdownToHtml('用語A\n: 定義A\n\n用語B\n: 定義B');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語A</dt><dd data-def-sep=" ">定義A</dd></dl>' +
+                    '<dl><dt>用語B</dt><dd data-def-sep=" ">定義B</dd></dl>'
+                );
+            });
+
+            test('空行を挟まず前の行に続けて定義リストが始まると、その行も共有の用語として扱われる（Pandoc等と同じ規則。分離したい場合は空行を挟む）', () => {
+                const html = env.markdown.markdownToHtml('前置きの行\n用語\n: 定義');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>前置きの行</dt><dt>用語</dt><dd data-def-sep=" ">定義</dd></dl>'
+                );
+            });
+
+            test('コロン直後の空白の個数（0個・1個・3個）をdata-def-sepへそのまま保持する', () => {
+                assert.ok(
+                    env.markdown.markdownToHtml('用語\n:空白無し').includes('data-def-sep=""'),
+                    '空白0個'
+                );
+                assert.ok(
+                    env.markdown.markdownToHtml('用語\n:   空白3つ').includes('data-def-sep="   "'),
+                    '空白3個'
+                );
+            });
+        });
+
+        suite('scanDefListTerms', () => {
+            test('用語1つ・定義1つを読み取る', () => {
+                const result = env.markdown.scanDefListTerms(['用語', ': 定義', '次の行'], 0);
+                assert.deepStrictEqual(
+                    { terms: Array.from(result.terms), afterTermsIndex: result.afterTermsIndex },
+                    { terms: ['用語'], afterTermsIndex: 1 }
+                );
+            });
+
+            test('直後に定義行が無ければnullを返す', () => {
+                const result = env.markdown.scanDefListTerms(['ただの行', '別の行'], 0);
+                assert.strictEqual(result, null);
+            });
+
+            test('見出し等の他ブロック開始行は用語として取り込まない', () => {
+                const result = env.markdown.scanDefListTerms(['## 見出し', ': 定義'], 0);
+                assert.strictEqual(result, null);
             });
         });
     });
@@ -799,6 +905,55 @@ suite('MarkdownModule', () => {
                 assert.strictEqual(md, '本文\n');
             });
         });
+
+        suite('定義リスト（dl/dt/dd）', () => {
+            test('<dt><dd>をTerm / : Definitionへ復元する', () => {
+                const md = env.markdown.htmlToMarkdown('<dl><dt>用語</dt><dd>定義本文</dd></dl>');
+                assert.strictEqual(md, '用語\n: 定義本文\n');
+            });
+
+            test('複数の<dd>は複数の定義行として並べる', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語</dt><dd>定義1</dd><dd>定義2</dd></dl>'
+                );
+                assert.strictEqual(md, '用語\n: 定義1\n: 定義2\n');
+            });
+
+            test('複数の<dt>が連続する場合は用語行を複数並べる（定義群の共有）', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語A</dt><dt>用語B</dt><dd>共有の定義</dd></dl>'
+                );
+                assert.strictEqual(md, '用語A\n用語B\n: 共有の定義\n');
+            });
+
+            test('複数の用語・定義グループを出現順で並べる', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語1</dt><dd>定義1</dd><dt>用語2</dt><dd>定義2</dd></dl>'
+                );
+                assert.strictEqual(md, '用語1\n: 定義1\n用語2\n: 定義2\n');
+            });
+
+            test('子要素が無ければ空文字を返す', () => {
+                assert.strictEqual(env.markdown.htmlToMarkdown('<dl></dl>'), '');
+            });
+
+            test('data-def-sepが無いdd（この機能追加前のHTML等）は半角スペース1つへフォールバックする', () => {
+                const md = env.markdown.htmlToMarkdown('<dl><dt>用語</dt><dd>定義</dd></dl>');
+                assert.strictEqual(md, '用語\n: 定義\n');
+            });
+
+            test('data-def-sepの空白をそのまま復元する（0個・3個）', () => {
+                const noSep = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語</dt><dd data-def-sep="">定義</dd></dl>'
+                );
+                assert.strictEqual(noSep, '用語\n:定義\n');
+
+                const threeSep = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語</dt><dd data-def-sep="   ">定義</dd></dl>'
+                );
+                assert.strictEqual(threeSep, '用語\n:   定義\n');
+            });
+        });
     });
 
     suite('数式（インライン $...$ / ブロック $$...$$）', () => {
@@ -1018,6 +1173,98 @@ suite('MarkdownModule', () => {
             assert.ok(rt.trim().endsWith('[^1]: 脚注の本文。'), rt);
             assert.ok(rt.includes('続きの本文。'), rt);
             assert.ok(rt.indexOf('続きの本文。') < rt.indexOf('[^1]: 脚注の本文。'), '本文の後に脚注一覧が来る');
+        });
+
+        test('空行を挟まず段落中に脚注定義行があると、除去後に前後の行が誤って同じ段落へ結合されない（seamIndices対応）', () => {
+            const html = env.markdown.markdownToHtml(
+                'ref[^1]\n\nPara lineA\n[^1]: footnote text\nPara lineB'
+            );
+            assert.ok(html.includes('<p>Para lineA</p>'), html);
+            assert.ok(html.includes('<p>Para lineB</p>'), html);
+            assert.ok(!html.includes('Para lineA<br>Para lineB'), html);
+        });
+
+        test('定義リスト（Term / : Definition）が変換往復で保存される', () => {
+            [
+                '用語\n: 定義本文\n',
+                '用語\n: 定義1\n: 定義2\n',
+                '用語A\n用語B\n: 共有の定義\n',
+                '用語1\n: 定義1\n用語2\n: 定義2\n',
+                '定義に**強調**を含む用語\n: **重要**な定義\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('定義リストのコロン直後の空白数（0個・1個・3個）が変換往復で保持される', () => {
+            [
+                '用語\n:空白無し\n',
+                '用語\n: 空白1つ\n',
+                '用語\n:   空白3つ\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('用語と定義行の間に脚注定義行が挟まっても、無関係な行同士が定義リストとして誤結合されない（/local-review指摘対応）', () => {
+            // 脚注定義行（[^1]: ...）は本文パース前にcontentLinesから除去されるため、
+            // 除去後に前後の行が直接隣接し、scanDefListTermsが無関係な「用語」と
+            // 「: 定義」を1つの定義リストへ誤って結合してしまう回帰があった。
+            // 脚注は末尾へ再配置される既知の仕様上、周辺の改行までの完全往復は
+            // 保証されない（上の「脚注定義が文書中程にある場合」テストと同じ理由）ため、
+            // ここでは「誤って<dl>へ結合されないこと」と「内容が失われないこと」を検証する。
+            const original = '参照[^1]する。\n\nTerm\n[^1]: 脚注の本文。\n: Definition\n';
+            const html = env.markdown.markdownToHtml(original);
+            assert.ok(!html.includes('<dl>'), html);
+            const rt = env.markdown.htmlToMarkdown(html);
+            assert.ok(rt.includes('Term'), rt);
+            assert.ok(rt.includes(': Definition'), rt);
+            assert.ok(rt.trim().endsWith('[^1]: 脚注の本文。'), rt);
+        });
+
+        test('リスト項目の間に脚注定義行が挟まっても1つのリストとして結合される（自己申告的な記法を持つブロックは縫い目の影響を受けない）', () => {
+            const original = '参照[^1]。\n\n- item1\n[^1]: 脚注の本文。\n- item2\n';
+            const html = env.markdown.markdownToHtml(original);
+            assert.ok(/<ul[^>]*><li>item1<\/li><li>item2<\/li><\/ul>/.test(html), html);
+        });
+
+        test('引用行の間に脚注定義行が挟まっても1つの引用として結合される', () => {
+            const original = '参照[^1]。\n\n> line1\n[^1]: 脚注の本文。\n> line2\n';
+            const html = env.markdown.markdownToHtml(original);
+            assert.ok(/<blockquote>line1<br>line2<\/blockquote>/.test(html), html);
+        });
+
+        test('段落継続も縫い目で止まる。脚注定義行を挟んだ直後の複数用語行が誤って前の段落へ吸収されず、正しく定義リストの共有用語として認識される（/local-review再指摘対応）', () => {
+            // 段落継続ループがseamIndicesを見ていなかったため、TermAが本来のIntro側の
+            // 段落へ誤って<br>結合され、後続のTermBだけが単独<dt>になる回帰があった。
+            const html = env.markdown.markdownToHtml(
+                'ref[^1]\n\nIntro line\nMoreIntro\n[^1]: footnote text\nTermA\nTermB\n: Def'
+            );
+            assert.ok(html.includes('<p>Intro line<br>MoreIntro</p>'), html);
+            assert.ok(
+                html.includes('<dl><dt>TermA</dt><dt>TermB</dt><dd data-def-sep=" ">Def</dd></dl>'),
+                html
+            );
+        });
+
+        test('複数の定義行(: )が続く途中に脚注定義行が挟まっても、縫い目より後ろの定義行は同じ用語へ結合されない（/local-review再指摘対応）', () => {
+            const html = env.markdown.markdownToHtml(
+                'ref[^1]\n\nTerm\n: Def1\n[^1]: footnote text\n: Def2'
+            );
+            assert.ok(html.includes('<dl><dt>Term</dt><dd data-def-sep=" ">Def1</dd></dl>'), html);
+            assert.ok(html.includes('<p>: Def2</p>'), html);
+        });
+
+        test('1つの用語/定義グループの直後（縫い目）に別の用語/定義グループが続いても、同じ<dl>へ結合されず別の<dl>になる（/local-review再指摘対応）', () => {
+            const html = env.markdown.markdownToHtml(
+                'ref[^1]\n\nTerm1\n: Def1\n[^1]: footnote text\nTerm2\n: Def2'
+            );
+            assert.ok(html.includes(
+                '<dl><dt>Term1</dt><dd data-def-sep=" ">Def1</dd></dl>' +
+                '<dl><dt>Term2</dt><dd data-def-sep=" ">Def2</dd></dl>'
+            ), html);
         });
     });
 

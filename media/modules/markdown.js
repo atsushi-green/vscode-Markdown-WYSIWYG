@@ -18,7 +18,7 @@ window.MarkdownModule = (function() {
     // ブロックレベル要素のタグ集合（シリアライズ時の判定に使用）
     const BLOCK_TAGS = new Set([
         'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE', 'HR', 'SECTION'
+        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE', 'HR', 'SECTION', 'DL'
     ]);
 
     // 水平線（--- / *** / ___ 3文字以上の単独行）の判定
@@ -243,7 +243,20 @@ window.MarkdownModule = (function() {
      * コードフェンス（```）・ブロック数式（$$）の中は定義としても参照としても
      * 解釈しない（中で使われている記法例をうっかり実際の脚注として扱わないため）。
      * 同じラベルが複数回定義された場合は最初のものを使う。
-     * @returns {{ defs: {label:string, sep:string, text:string}[], labels: Set<string>, contentLines: string[] }}
+     *
+     * 確定した定義行は`contentLines`から単純に取り除く（リスト・引用・テーブルは
+     * 各行自身が`- `/`>`/`|`等の記法で自己申告するため、間の行が抜けて前後が
+     * 直接隣接しても元々同じブロックだった行同士が正しく結合される＝望ましい動作）。
+     * ただし、用語行の直後に`: `定義行が続くかどうかだけで判定する定義リスト
+     * （`scanDefListTerms`）は行の中身に自己申告的な記法が無いため、除去によって
+     * 生じた「本来隣接していなかった行同士の隣接」を区別できず誤結合し得る
+     * （例: `Term`\n`[^1]: 本文`\n`: Definition` で `[^1]: 本文` を除去すると
+     * `Term`と`: Definition`が隣接し、無関係な定義リストとして誤結合される）。
+     * そのため`seamIndices`（`contentLines`中で「直前の行との隣接性が失われている
+     * 位置」の集合）を合わせて返し、`scanDefListTerms`だけがこれを参照して
+     * 縫い目をまたいだ用語/定義行の結合を防ぐ。
+     * @returns {{ defs: {label:string, sep:string, text:string}[], labels: Set<string>,
+     *            contentLines: string[], seamIndices: Set<number> }}
      */
     function extractFootnoteDefinitions(lines) {
         // 1st pass: コードフェンス/ブロック数式の中かどうかを行ごとに判定しつつ、
@@ -292,19 +305,29 @@ window.MarkdownModule = (function() {
 
         // 3rd pass: 参照が実在する定義候補だけを本物の定義として確定する。
         // 参照が無い（＝地の文が偶然この形をしていただけ）候補は通常の行として残す。
+        // 確定した定義行は削除し、直後にpushされる行の位置をseamIndicesへ記録する
+        // （複数行が連続して除去されても、次に実際にpushされる1箇所だけに立てれば
+        // 十分＝「その位置は直前の行と本来隣接していなかった」という情報として足りる）。
         const defs = [];
         const labels = new Set();
         const contentLines = [];
+        const seamIndices = new Set();
+        let pendingSeam = false;
         entries.forEach(function (entry) {
             if (entry.def && referencedLabels.has(entry.def.label) && !labels.has(entry.def.label)) {
                 labels.add(entry.def.label);
                 defs.push(entry.def);
+                pendingSeam = true;
                 return;
+            }
+            if (pendingSeam) {
+                seamIndices.add(contentLines.length);
+                pendingSeam = false;
             }
             contentLines.push(entry.line);
         });
 
-        return { defs: defs, labels: labels, contentLines: contentLines };
+        return { defs: defs, labels: labels, contentLines: contentLines, seamIndices: seamIndices };
     }
 
     /**
@@ -339,16 +362,74 @@ window.MarkdownModule = (function() {
             /^\s*\|[\s\-:|]+\|\s*$/.test(nextLine);
     }
 
+    // 定義リストの定義行（`: 定義本文`）の判定。用語行はこの形にマッチしない
+    // 通常のテキスト行という以外の制約は無い（他のブロック開始行との衝突は
+    // 呼び出し側で isOtherBlockStart 等により先に弾かれている前提）。
+    // `:`直後の空白（0文字以上）は第1キャプチャで独立して取り出す（脚注定義行の
+    // `FOOTNOTE_DEF_PATTERN`と同じ設計）。これにより`: 定義`（空白1つ）と
+    // `:   定義`（空白3つ）などの元の空白数を変換往復で保持できる。
+    const DEFLIST_DEF_PATTERN = /^:(\s*)(.*)$/;
+
     /**
-     * ブロック要素の開始行か判定（段落の継続判定に使用）
+     * 定義リスト以外のブロック開始行か判定する（フェンス・見出し・引用・水平線・
+     * リスト・テーブル）。`isBlockStart`から定義リスト判定を除いた部分を切り出した
+     * もので、`scanDefListTerms`が用語候補を「他ブロックの開始行ではない」という
+     * 条件で絞り込む際に使う（`isBlockStart`をそのまま使うと、定義リスト自身の
+     * 判定が混ざり用語行を「ブロック開始＝除外対象」と誤検知して自己矛盾する）。
      */
-    function isBlockStart(line, nextLine) {
+    function isOtherBlockStart(line, nextLine) {
         if (matchFence(line)) return true;
         if (/^(#{1,6}) /.test(line)) return true;
         if (/^> ?/.test(line)) return true;
         if (HR_PATTERN.test(line)) return true;
         if (/^(\s*)([-*]|\d+\.) /.test(line)) return true;
         if (isTableStart(line, nextLine)) return true;
+        return false;
+    }
+
+    /**
+     * lines[i] から定義リストの「用語行の並び」を読み取る。
+     * 用語候補（空行でも`:`定義行でも他ブロックの開始行でもない通常行）を
+     * 連続する限り集め、直後に`: `定義行が最低1つ続く場合のみ結果を返す
+     * （続かなければ定義リストではないので null＝呼び出し側は通常の段落等へ委ねる）。
+     * 複数の用語行が同じ定義群を共有するケース（`Term A`\n`Term B`\n`: 定義`）に対応する。
+     * `seamIndices`（`extractFootnoteDefinitions`が返す、除去された脚注定義行を
+     * 挟んで前後の隣接性が失われている位置の集合）を渡すと、その縫い目をまたいで
+     * 用語行を集めたり定義行を確定したりしない（無関係な行同士の誤結合防止）。
+     * @returns {{ terms: string[], afterTermsIndex: number } | null}
+     */
+    function scanDefListTerms(lines, i, seamIndices) {
+        const terms = [];
+        let j = i;
+        while (j < lines.length) {
+            if (j > i && seamIndices && seamIndices.has(j)) {
+                break;
+            }
+            const l = lines[j];
+            if (!l.trim() || DEFLIST_DEF_PATTERN.test(l) || isOtherBlockStart(l, lines[j + 1])) {
+                break;
+            }
+            terms.push(l);
+            j++;
+        }
+        if (!terms.length) {
+            return null;
+        }
+        if (seamIndices && seamIndices.has(j)) {
+            return null;
+        }
+        if (!DEFLIST_DEF_PATTERN.test(lines[j] || '')) {
+            return null;
+        }
+        return { terms: terms, afterTermsIndex: j };
+    }
+
+    /**
+     * ブロック要素の開始行か判定（段落の継続判定に使用）
+     */
+    function isBlockStart(line, nextLine) {
+        if (isOtherBlockStart(line, nextLine)) return true;
+        if (!DEFLIST_DEF_PATTERN.test(line) && DEFLIST_DEF_PATTERN.test(nextLine || '')) return true;
         return false;
     }
 
@@ -425,6 +506,30 @@ window.MarkdownModule = (function() {
         }
 
         return items.length ? build(items[0].level) : '';
+    }
+
+    /**
+     * 定義リストアイテム配列（`scanDefListTerms`が集めたグループの並び）から
+     * `<dl>` HTMLを構築する。1グループにつき用語の数だけ`<dt>`、定義の数だけ
+     * `<dd>`を並べる（複数用語が定義群を共有する`Term A`/`Term B`/`: 定義`にも対応）。
+     * `:`直後の元の空白（`def.sep`。空白のみで構成されるため属性値として安全）を
+     * `data-def-sep`へ保持し、htmlToMarkdownの直列化時に`: `固定ではなく
+     * 元の空白数で復元できるようにする（脚注定義行の`data-footnote-sep`と同じ設計）。
+     * items: [{ terms: string[], defs: {sep:string, text:string}[] }]
+     */
+    function buildDefListHtml(items) {
+        let html = '<dl>';
+        items.forEach(function (item) {
+            item.terms.forEach(function (term) {
+                html += '<dt>' + convertInline(escapeHtml(term)) + '</dt>';
+            });
+            item.defs.forEach(function (def) {
+                html += '<dd data-def-sep="' + def.sep + '">' +
+                    convertInline(escapeHtml(def.text)) + '</dd>';
+            });
+        });
+        html += '</dl>';
+        return html;
     }
 
     // GitHubアラートのタイプ→表示タイトル
@@ -707,10 +812,44 @@ window.MarkdownModule = (function() {
                 continue;
             }
 
+            // --- 定義リスト（Term\n: Definition ...） ---
+            {
+                let defScan = scanDefListTerms(lines, i, footnoteInfo.seamIndices);
+                if (defScan) {
+                    const items = [];
+                    while (defScan) {
+                        i = defScan.afterTermsIndex;
+                        const defs = [];
+                        // 縫い目（除去された脚注定義行の跡）をまたいで後続の`: `行を
+                        // 同じ定義として取り込まない（/local-review再指摘対応）。
+                        while (i < lines.length && DEFLIST_DEF_PATTERN.test(lines[i]) &&
+                            !footnoteInfo.seamIndices.has(i)) {
+                            const dm = DEFLIST_DEF_PATTERN.exec(lines[i]);
+                            defs.push({ sep: dm[1], text: dm[2] });
+                            i++;
+                        }
+                        items.push({ terms: defScan.terms, defs: defs });
+                        // 次の用語/定義グループの開始位置自体が縫い目なら、同じ<dl>へは
+                        // 続けない（外側のディスパッチループへ戻り、別の<dl>として扱う）。
+                        if (footnoteInfo.seamIndices.has(i)) {
+                            break;
+                        }
+                        defScan = scanDefListTerms(lines, i, footnoteInfo.seamIndices);
+                    }
+                    out.push(buildDefListHtml(items));
+                    continue;
+                }
+            }
+
             // --- 段落（連続する通常行をまとめ、行内の改行は<br>） ---
+            // 除去された脚注定義行を挟む「縫い目」（footnoteInfo.seamIndices）では
+            // 段落を継続しない。段落は各行が自己申告的な記法を持たないため、
+            // scanDefListTerms同様、縫い目をまたぐと本来隣接していなかった行を
+            // 誤って同じ段落へ結合してしまう（/local-review指摘対応）。
             const paraLines = [line];
             i++;
-            while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i], lines[i + 1])) {
+            while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i], lines[i + 1]) &&
+                !footnoteInfo.seamIndices.has(i)) {
                 paraLines.push(lines[i]);
                 i++;
             }
@@ -1093,6 +1232,25 @@ window.MarkdownModule = (function() {
                 return serializeTable(el);
             case 'HR':
                 return '---\n\n';
+            case 'DL': {
+                // 定義リスト（<dt>用語</dt><dd>定義</dd>...）を`Term`/`: 定義`の並びへ復元する。
+                // 子要素の出現順をそのまま辿るだけで、複数用語が定義群を共有するケース
+                // （<dt><dt><dd>）も自然に処理できる。
+                const lines = [];
+                Array.from(el.children).forEach(child => {
+                    const text = serializeInlineChildren(child).trim();
+                    if (child.tagName === 'DT') {
+                        lines.push(text);
+                    } else if (child.tagName === 'DD') {
+                        // `:`直後の元の空白を復元する（属性が無い＝この機能追加前に生成された
+                        // HTML等の場合は従来どおり半角スペース1つへフォールバック）。
+                        const sepAttr = child.getAttribute('data-def-sep');
+                        const sep = sepAttr === null ? ' ' : sepAttr;
+                        lines.push(':' + sep + text);
+                    }
+                });
+                return lines.length ? lines.join('\n') + '\n\n' : '';
+            }
             case 'SECTION': {
                 // 脚注一覧セクション（<section class="footnotes"><ol><li>…</li></ol></section>）
                 // を `[^label]: 本文` の並びへ復元する。それ以外のsectionはブロックコンテナとして再帰。
@@ -1464,6 +1622,9 @@ window.MarkdownModule = (function() {
         computeEditorLineMap: computeEditorLineMap,
         // 脚注（[^label] / [^label]: 本文）のサポート
         extractFootnoteDefinitions: extractFootnoteDefinitions,
-        buildFootnotesSectionHtml: buildFootnotesSectionHtml
+        buildFootnotesSectionHtml: buildFootnotesSectionHtml,
+        // 定義リスト（Term\n: Definition）のサポート
+        scanDefListTerms: scanDefListTerms,
+        buildDefListHtml: buildDefListHtml
     };
 })();
