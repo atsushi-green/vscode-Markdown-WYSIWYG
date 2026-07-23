@@ -132,9 +132,19 @@ body {
     border: none;
     resize: none;
     /* 行番号を論理行と1対1で揃えるため折り返さない（VS Codeの既定＝
-       行折り返しオフと同じ。長い行は横スクロールで確認する）。 */
+       行折り返しオフと同じ。長い行は横スクロールで確認する）。
+       折り返しON（.raw-wrap-on）時は下のルールで上書きする。 */
     white-space: pre;
     overflow-wrap: normal;
+}
+
+/* Rawモードの行折り返しON時。white-spaceをpre-wrapへ切り替えて折り返す。
+   行番号ガターは論理行1つ＝固定22px行高の前提で作られており、折り返した行では
+   視覚行とガターの番号送りがずれるため、ON中はガター自体をJS側（editor.jsの
+   applyRawWrapMode）で非表示にする。 */
+.raw-editor-wrap.raw-wrap-on #rawEditor {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
 }
 
 #rawEditor:focus {

@@ -93,6 +93,7 @@
 
     // Rawモードの行番号ガター（初期化時に生成）
     let rawEditorWrap = null;
+    let rawGutter = null;
     let rawGutterInner = null;
 
     /**
@@ -126,6 +127,7 @@
         ta.style.display = 'block';
 
         rawEditorWrap = wrap;
+        rawGutter = gutter;
         rawGutterInner = inner;
 
         // 縦スクロールに追従（横スクロールでは動かさない）。リサイズでも再同期
@@ -171,6 +173,39 @@
         if (rawEditorWrap) {
             rawEditorWrap.style.display = 'none';
         }
+    }
+
+    /**
+     * Rawモードの行折り返し設定（state.isRawWrapEnabled）を実際のDOM・ボタン表示へ反映する。
+     * ONにすると`.raw-wrap-on`クラス経由で`#rawEditor`を`white-space: pre-wrap`へ切り替え
+     * 長い行を折り返す。行番号ガターは「論理行1つ＝固定22px」の前提で作られており、
+     * 折り返した行では視覚行とガターの番号送りがずれてしまうため、ON中はガター自体
+     * （`.raw-line-gutter`）を非表示にする（ガター付きラッパー全体を隠す
+     * `hideRawLineGutter`とは別物＝textareaは表示したまま）。
+     */
+    function applyRawWrapMode() {
+        if (rawEditorWrap) {
+            rawEditorWrap.classList.toggle('raw-wrap-on', state.isRawWrapEnabled);
+        }
+        if (rawGutter) {
+            rawGutter.style.display = state.isRawWrapEnabled ? 'none' : '';
+        }
+        if (state.toggleRawWrapBtn) {
+            state.toggleRawWrapBtn.classList.toggle('active', state.isRawWrapEnabled);
+        }
+    }
+
+    /**
+     * 行折り返しトグルボタンの設定。
+     */
+    function setupRawWrapToggle() {
+        if (!state.toggleRawWrapBtn) {
+            return;
+        }
+        state.toggleRawWrapBtn.addEventListener('click', () => {
+            state.isRawWrapEnabled = !state.isRawWrapEnabled;
+            applyRawWrapMode();
+        });
     }
 
     // WYSIWYG（プレビュー）モードの行番号ガター（初期化時に生成）
@@ -722,6 +757,9 @@
         // トグルボタンのクリックイベント
         setupToggleButton();
 
+        // Rawモードの行折り返しトグルボタン
+        setupRawWrapToggle();
+
         // グローバルキーボードショートカット
         setupGlobalKeyboardShortcuts();
 
@@ -752,6 +790,7 @@
 
         // Rawモードの行番号ガターを生成（rawEditorをラッパーで包む）
         initRawLineGutter();
+        applyRawWrapMode();
 
         // 見出しパンくずバーを生成（ツールバー直下・#editorの直前）。
         // #editor がまだ行番号ガターのラッパーで包まれる前（親がbody直下）に挿す必要があるため、

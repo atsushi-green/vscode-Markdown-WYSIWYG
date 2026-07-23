@@ -18,6 +18,7 @@ const FIXTURE_HTML = `<!DOCTYPE html>
 <html lang="ja">
 <body>
     <div class="toolbar">
+        <button class="toolbar-btn toggle-btn" id="toggleRawWrap">↩️ 折り返し</button>
         <button class="toolbar-btn toggle-btn" id="toggleView">📄 Raw</button>
     </div>
     <div id="findWidget" class="find-widget" style="display: none;">

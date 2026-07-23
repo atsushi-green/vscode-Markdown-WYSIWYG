@@ -29,7 +29,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | Rawモードの行折り返し ON/OFF トグル | S | 行番号ガター(1/3, `fcf630e`)で Raw の textarea を `white-space: pre`（折り返しオフ・横スクロール＝VS Code既定）に変更した。長い散文を書く人向けに折り返しONへ切り替える手段があると親切。ツールバーかコンテキストで `pre`⇔`pre-wrap` を切り替える。**注意**: 折り返しONにすると行番号ガターが論理行とずれるため、折り返し時は「開始行のみ番号を出す」ミラー測定（隠しdivで各論理行の表示高さを測ってガター側の各番号の高さを合わせる）が要る＝Sを超える可能性あり。まず折り返しトグル＋折り返し時はガター非表示（or 開始行のみ簡易対応）から検討 |
 | todo | 表の挿入ダイアログの表示位置を右クリック位置の近くにする | S | 現状 `table.js` の `ensureInsertDialog` は `.link-dialog`（`position:absolute; top:48px; right:20px`）を `document.body` 直下へ挿すため、右クリック位置に関わらず画面右上に出る（`#linkDialog` はエディタコンテナ内にあり基準が異なる）。`/local-review` B-1。右クリック座標付近やエディタ中央に出す方が自然。`computeMenuPosition` を流用してダイアログも同様に配置するか、既存 `#linkDialog` と同じ配置基準に揃える。実機で見た目確認前提 |
 | todo | 画像貼り付けの `buildImageMarkdown` でMarkdownアクティブ文字もエンコードする | S | `commands.js` の `buildImageMarkdown` は現状パスの空白/丸括弧のみ `%20`/`%28`/`%29` へエンコードする。パスに `_`（2個以上）や `*`・バッククォート等が含まれると再読込時に `convertInline` の強調/コード正規表現にマッチして往復が壊れる潜在リスク。今は生成ファイル名がハイフン＋数字＋同一フォルダ限定で**実害なし**だが、サブディレクトリ保存やalt付与へ拡張する際に対処が要る（URLエンコード or `<...>` 表記）。`/local-review` B-1 由来 |
 | todo | 画像・リンクのタイトル記法 `![alt](url "title")` / `[text](url "title")` 対応 | S | 現状 `convertInline`/`convertInlineText` の画像・リンク正規表現は `([^)]+)` で `url "title"` 全体をURLに取り込み、`"` が `&quot;` 化されて壊れる（往復も崩れる）。タイトル部分を分離して `title` 属性へ、直列化で `(url "title")` へ戻す。画像・リンク共通の既存制約（今回の画像対応起因ではない）。`/local-review` B-1 由来 |
@@ -51,6 +50,7 @@
 | todo | front matterヘッダの折りたたみ/展開トグルがマウス操作限定でキーボード操作不可 | S | `.frontmatter-header`は`contenteditable="false"`のプレーンな`<div>`で、`tabindex`/`keydown`/`aria-expanded`が無い。既存の`.code-lang-selector`・数式クリック展開も同様にマウス操作限定であり既存方針を踏襲しているだけだが、a11y改善候補として記録。`tabindex="0"`＋`Enter`/`Space`ハンドラ、`role="button"`＋`aria-expanded`の付与を検討。front matter機能追加時の`/local-review`指摘（severity low）由来 |
 | todo | front matterヘッダのラベルが英語表記（"Front Matter"）で他のUI文言と不統一 | S | 他のUI文言（「コードをコピー」「見出しが見つかりません」等）は日本語だが、front matterヘッダだけ`Front Matter`と英語表記になっている。日本語ラベル（例:「フロントマター」）への統一を検討。front matter機能追加時の`/local-review`指摘（severity low）由来 |
 | todo | 文書が水平線（`---`）から始まり後方にも`---`があると、内容を検証せずfront matterと誤認される | S | `parseFrontMatter`は「1行目が`---`」「後続のどこかに`---`」という位置関係のみで判定し、中身がYAMLらしいか等は検証しない。文書が装飾目的の水平線から始まり、後方に別の水平線がある通常のMarkdown文書（稀なケース）だと、間の内容が丸ごと折りたたみ済みfront matterとして表示されてしまう（保存されるMarkdown自体は保たれるが表示が崩れる）。実際のJekyll/Hugo等も同様に内容検証をしない設計のため妥当な面もあるが、実害があれば内容行がYAMLの`key: value`らしいかを軽く検証するなど再検討する。front matter機能追加時の`/local-review`指摘（severity low〜medium, 確信度中）由来 |
+| todo | Rawモードの行折り返しトグルボタンがWYSIWYGモード中も常時表示・クリック可能で、効果が見えず誤解を招きうる | S | `#toggleRawWrap`は`#toggleView`（Raw/WYSIWYG切替）と異なり、モードに応じた表示/無効化制御が無い。WYSIWYGモード中にクリックしてもRawモードに入るまでボタンの`active`表示以外に見た目の変化が無いため、初見のユーザーが「効いていない」と誤解しうる（title属性で補足説明済みのため実害は小さい）。Rawモード中のみ表示・有効化する、または常時表示のままでも問題ないと判断するかを検討。行折り返しトグル機能追加時の`/local-review`指摘（severity low, 確信度中）由来 |
 
 ## 完了 (done)
 
