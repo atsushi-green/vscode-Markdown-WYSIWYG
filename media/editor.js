@@ -579,7 +579,17 @@
             }
         } else if (action === 'table') {
             tableModule.setPendingInsertRange(range);
-            tableModule.showInsertDialog(clearPlaceholder);
+            // キャレット位置（「/」を打った場所）の近くへダイアログを出す
+            // （右クリックメニュー由来の位置指定と同じ仕組み。範囲は折りたたみ済みの
+            // 点なのでrectの左端・下端がキャレット位置に一致する）。
+            // 稀に（レイアウトのタイミング等で）全て0の矩形が返ることがあるため、
+            // その場合はキャレット位置不明として中央フォールバックへ委ねる
+            // （左上(0,0)付近に出てしまうのを防ぐ）。
+            const caretRect = range.getBoundingClientRect();
+            const hasCaretRect = caretRect.left !== 0 || caretRect.top !== 0 ||
+                caretRect.width !== 0 || caretRect.height !== 0;
+            const anchor = hasCaretRect ? { x: caretRect.left, y: caretRect.bottom + 4 } : undefined;
+            tableModule.showInsertDialog(clearPlaceholder, anchor);
         }
     }
 
