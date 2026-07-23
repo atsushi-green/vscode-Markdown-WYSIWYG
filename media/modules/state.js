@@ -17,6 +17,7 @@ window.EditorState = (function() {
         editor: null,
         rawEditor: null,
         toggleBtn: null,
+        toggleRawWrapBtn: null,
         mermaidContextMenu: null,
         findWidget: null,
         findInput: null,
@@ -43,6 +44,10 @@ window.EditorState = (function() {
         isFormatting: false,
         isCreatingCodeBlock: false,
         isRawMode: false,
+        // Rawモードの行折り返し（既定はOFF＝`white-space: pre`で行番号ガターと1対1）。
+        // ONにすると`pre-wrap`で折り返すが、行番号ガターは論理行1つ=固定22px高さの
+        // 前提で作られており折り返し時は視覚行とずれるため、ON中はガターを非表示にする。
+        isRawWrapEnabled: false,
         isEditingMermaid: false,
         isEditingTable: false,
 
@@ -92,6 +97,7 @@ window.EditorState = (function() {
         state.editor = document.getElementById('editor');
         state.rawEditor = document.getElementById('rawEditor');
         state.toggleBtn = document.getElementById('toggleView');
+        state.toggleRawWrapBtn = document.getElementById('toggleRawWrap');
         state.mermaidContextMenu = document.getElementById('mermaidContextMenu');
         state.findWidget = document.getElementById('findWidget');
         state.findInput = document.getElementById('findInput');
@@ -137,6 +143,7 @@ window.EditorState = (function() {
         get editor() { return state.editor; },
         get rawEditor() { return state.rawEditor; },
         get toggleBtn() { return state.toggleBtn; },
+        get toggleRawWrapBtn() { return state.toggleRawWrapBtn; },
         get mermaidContextMenu() { return state.mermaidContextMenu; },
         get findWidget() { return state.findWidget; },
         get findInput() { return state.findInput; },
@@ -177,6 +184,9 @@ window.EditorState = (function() {
 
         get isRawMode() { return state.isRawMode; },
         set isRawMode(v) { state.isRawMode = v; },
+
+        get isRawWrapEnabled() { return state.isRawWrapEnabled; },
+        set isRawWrapEnabled(v) { state.isRawWrapEnabled = v; },
 
         get isEditingMermaid() { return state.isEditingMermaid; },
         set isEditingMermaid(v) { state.isEditingMermaid = v; },

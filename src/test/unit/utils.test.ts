@@ -644,6 +644,7 @@ suite('EditorState', () => {
         assert.ok(env.state.editor);
         assert.ok(env.state.rawEditor);
         assert.ok(env.state.toggleBtn);
+        assert.ok(env.state.toggleRawWrapBtn);
         assert.ok(env.state.findWidget);
         assert.ok(env.state.vscode);
     });
@@ -668,5 +669,11 @@ suite('EditorState', () => {
         assert.strictEqual(env.state.editSeq, 0);
         env.state.editSeq = env.state.editSeq + 1;
         assert.strictEqual(env.state.editSeq, 1);
+    });
+
+    test('isRawWrapEnabledは初期値falseで、getter/setterで読み書きできる', () => {
+        assert.strictEqual(env.state.isRawWrapEnabled, false);
+        env.state.isRawWrapEnabled = true;
+        assert.strictEqual(env.state.isRawWrapEnabled, true);
     });
 });

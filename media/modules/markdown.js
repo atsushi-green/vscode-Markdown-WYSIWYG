@@ -18,7 +18,7 @@ window.MarkdownModule = (function() {
     // ブロックレベル要素のタグ集合（シリアライズ時の判定に使用）
     const BLOCK_TAGS = new Set([
         'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE', 'HR'
+        'P', 'DIV', 'PRE', 'UL', 'OL', 'BLOCKQUOTE', 'TABLE', 'HR', 'SECTION', 'DL'
     ]);
 
     // 水平線（--- / *** / ___ 3文字以上の単独行）の判定
@@ -67,7 +67,7 @@ window.MarkdownModule = (function() {
      * インラインMarkdown記法をHTMLへ変換（エスケープ済みテキストに適用）
      * commands.jsのライブ変換（convertInlineText）と同じ記法をサポートする
      */
-    function convertInline(escapedText) {
+    function convertInline(escapedText, footnoteLabels) {
         // インラインコードを最初にプレースホルダ（NUL文字で囲んだ通し番号）へ退避し、
         // コード内の文字列に他のインライン整形（リンク・強調・取り消し線など）が
         // 適用されて `<code>**太字**</code>` が `<code><strong>太字</strong></code>`
@@ -120,6 +120,23 @@ window.MarkdownModule = (function() {
 
         // リンク
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+        // 脚注参照（[^label]）。対応する脚注定義（footnoteLabelsに含まれるラベル）が
+        // 実在する場合のみ変換し、無ければリテラルテキストのまま残す
+        // （未定義ラベルを誤って脚注扱いしない・呼び出し元がfootnoteLabelsを渡さない
+        // 場合＝見出し・リスト等は現状この変換の対象外＝本文段落のみが対象）。
+        // 直後に`:`が続くもの（`[^label]:`＝定義行の体裁。重複ラベルで無効化された
+        // 定義が通常の段落へ回されたケースなど）は参照として変換しない
+        // （extractFootnoteDefinitionsの参照カウント側と同じ`(?!:)`ガード）。
+        if (footnoteLabels) {
+            html = html.replace(/\[\^([A-Za-z0-9_-]+)\](?!:)/g, function (match, label) {
+                if (!footnoteLabels.has(label)) {
+                    return match;
+                }
+                return '<sup class="footnote-ref" data-footnote-label="' + label + '">' +
+                    '<a href="#fn-' + label + '" id="fnref-' + label + '">' + label + '</a></sup>';
+            });
+        }
 
         // 下線（++text++）
         html = html.replace(/\+\+([^+]+)\+\+/g, '<u>$1</u>');
@@ -205,6 +222,153 @@ window.MarkdownModule = (function() {
         return /^```(\S*)\s*$/.exec(line);
     }
 
+    // 脚注定義行（`[^label]: 本文`）の判定。ラベルはid/href属性にそのまま使うため
+    // 英数字・アンダースコア・ハイフンのみに制限する（それ以外の文字を含む見た目の
+    // 定義行は通常のテキスト行として扱う＝安全側のフォールバック）。
+    // `:`直後の空白（0文字以上）は第2キャプチャで独立して取り出し、往復時に
+    // 元の空白数（例: `[^1]:  本文`の空白2つ）をそのまま復元できるようにする
+    // （`\s?`で1文字だけ吸収し残りを本文側に混ぜていた旧実装は、本文の
+    // 直列化時にtrim()され余分な空白が失われていた）。
+    const FOOTNOTE_DEF_PATTERN = /^\[\^([A-Za-z0-9_-]+)\]:(\s*)(.*)$/;
+
+    // 脚注「参照」（`[^label]`）の判定。定義行自身のラベル（`[^label]:`）と区別する
+    // ため、直後に`:`が続くものは除外する（負の先読み）。
+    const FOOTNOTE_REF_PATTERN = /\[\^([A-Za-z0-9_-]+)\](?!:)/g;
+
+    /**
+     * Markdownソースの行配列から脚注定義行（`[^label]: 本文`）を抜き出す。
+     * **同じ文書内でそのラベルが実際に参照（`[^label]`）されている場合のみ**定義として
+     * 認める。これが無いと、正規表現の説明（`[^0-9]: 数字以外にマッチ`のような普通の
+     * 文章）が誤って脚注定義として剥がされてしまう（脚注機能と無関係な地の文の事故）。
+     * コードフェンス（```）・ブロック数式（$$）の中は定義としても参照としても
+     * 解釈しない（中で使われている記法例をうっかり実際の脚注として扱わないため）。
+     * 同じラベルが複数回定義された場合は最初のものを使う。
+     *
+     * 確定した定義行は`contentLines`から単純に取り除く（リスト・引用・テーブルは
+     * 各行自身が`- `/`>`/`|`等の記法で自己申告するため、間の行が抜けて前後が
+     * 直接隣接しても元々同じブロックだった行同士が正しく結合される＝望ましい動作）。
+     * ただし、用語行の直後に`: `定義行が続くかどうかだけで判定する定義リスト
+     * （`scanDefListTerms`）は行の中身に自己申告的な記法が無いため、除去によって
+     * 生じた「本来隣接していなかった行同士の隣接」を区別できず誤結合し得る
+     * （例: `Term`\n`[^1]: 本文`\n`: Definition` で `[^1]: 本文` を除去すると
+     * `Term`と`: Definition`が隣接し、無関係な定義リストとして誤結合される）。
+     * そのため`seamIndices`（`contentLines`中で「直前の行との隣接性が失われている
+     * 位置」の集合）を合わせて返し、`scanDefListTerms`だけがこれを参照して
+     * 縫い目をまたいだ用語/定義行の結合を防ぐ。
+     * `frontMatterEndIndex`（呼び出し側が`lines`自体から`parseFrontMatter`で計算した
+     * front matter終端行index。無ければ-1やundefined）以下の行はコードフェンス・
+     * ブロック数式と同様に生テキストとして保護し、脚注定義/参照として解釈しない
+     * （front matter内に偶然`[^label]:`に一致する行があっても剥がされないように）。
+     * この判定を関数内で`lines`から再計算せず引数として受け取るのは、呼び出し側
+     * （`markdownToHtml`）が同じ`lines`に対して一度だけfront matter判定を行い、
+     * その結果を本関数と本文パースの両方で共有するため（別々に`parseFrontMatter`を
+     * 呼ぶと、本関数が返す`contentLines`＝脚注除去後の行配列に対して呼び出し側が
+     * 再度判定した場合に、たまたま除去後の行が`---`で始まってしまうケースなどで
+     * 判定がずれる可能性があった。/local-review指摘対応）。
+     * @returns {{ defs: {label:string, sep:string, text:string}[], labels: Set<string>,
+     *            contentLines: string[], seamIndices: Set<number> }}
+     */
+    function extractFootnoteDefinitions(lines, frontMatterEndIndex) {
+        const boundary = typeof frontMatterEndIndex === 'number' ? frontMatterEndIndex : -1;
+
+        // 1st pass: コードフェンス/ブロック数式の中かどうかを行ごとに判定しつつ、
+        // 定義行らしき行を仮判定する（まだ確定しない＝参照の有無を見てから決める）。
+        const entries = [];
+        let inFence = false;
+        let inMathBlock = false;
+
+        lines.forEach(function (line, index) {
+            if (index <= boundary) {
+                entries.push({ line: line, def: null, scannable: false });
+                return;
+            }
+            if (!inMathBlock && matchFence(line)) {
+                inFence = !inFence;
+                entries.push({ line: line, def: null, scannable: false });
+                return;
+            }
+            if (!inFence && /^\$\$\s*$/.test(line)) {
+                inMathBlock = !inMathBlock;
+                entries.push({ line: line, def: null, scannable: false });
+                return;
+            }
+            if (inFence || inMathBlock) {
+                entries.push({ line: line, def: null, scannable: false });
+                return;
+            }
+            const m = FOOTNOTE_DEF_PATTERN.exec(line);
+            if (m) {
+                entries.push({ line: line, def: { label: m[1], sep: m[2], text: m[3] }, scannable: true });
+                return;
+            }
+            entries.push({ line: line, def: null, scannable: true });
+        });
+
+        // 2nd pass: フェンス/数式ブロックの外側から参照ラベルを集める
+        // （定義候補行は本文側＝`: `以降のテキストのみを対象にする）。
+        const referencedLabels = new Set();
+        entries.forEach(function (entry) {
+            if (!entry.scannable) {
+                return;
+            }
+            const text = entry.def ? entry.def.text : entry.line;
+            FOOTNOTE_REF_PATTERN.lastIndex = 0;
+            let m;
+            while ((m = FOOTNOTE_REF_PATTERN.exec(text))) {
+                referencedLabels.add(m[1]);
+            }
+        });
+
+        // 3rd pass: 参照が実在する定義候補だけを本物の定義として確定する。
+        // 参照が無い（＝地の文が偶然この形をしていただけ）候補は通常の行として残す。
+        // 確定した定義行は削除し、直後にpushされる行の位置をseamIndicesへ記録する
+        // （複数行が連続して除去されても、次に実際にpushされる1箇所だけに立てれば
+        // 十分＝「その位置は直前の行と本来隣接していなかった」という情報として足りる）。
+        const defs = [];
+        const labels = new Set();
+        const contentLines = [];
+        const seamIndices = new Set();
+        let pendingSeam = false;
+        entries.forEach(function (entry) {
+            if (entry.def && referencedLabels.has(entry.def.label) && !labels.has(entry.def.label)) {
+                labels.add(entry.def.label);
+                defs.push(entry.def);
+                pendingSeam = true;
+                return;
+            }
+            if (pendingSeam) {
+                seamIndices.add(contentLines.length);
+                pendingSeam = false;
+            }
+            contentLines.push(entry.line);
+        });
+
+        return { defs: defs, labels: labels, contentLines: contentLines, seamIndices: seamIndices };
+    }
+
+    /**
+     * 脚注定義配列から脚注一覧セクションのHTMLを組み立てる。ラベルは
+     * `FOOTNOTE_DEF_PATTERN` で既に英数字・アンダースコア・ハイフンのみに
+     * 制限されているため、id/href属性へそのまま使ってよい（エスケープ不要）。
+     * `:`直後の元の空白（`def.sep`。空白のみで構成されるため属性値として安全）を
+     * `data-footnote-sep`へ保持し、htmlToMarkdownの直列化時に`: `固定ではなく
+     * 元の空白数で復元できるようにする。
+     */
+    function buildFootnotesSectionHtml(defs) {
+        if (!defs.length) {
+            return '';
+        }
+        let html = '<section class="footnotes" data-footnotes="true"><ol>';
+        defs.forEach(function (def) {
+            html += '<li id="fn-' + def.label + '" data-footnote-label="' + def.label +
+                '" data-footnote-sep="' + def.sep + '">' +
+                convertInline(escapeHtml(def.text)) +
+                ' <a href="#fnref-' + def.label + '" class="footnote-backref">↩</a></li>';
+        });
+        html += '</ol></section>';
+        return html;
+    }
+
     /**
      * テーブル開始の判定（現在行がヘッダー行、次行がセパレーター行）
      */
@@ -215,15 +379,124 @@ window.MarkdownModule = (function() {
     }
 
     /**
-     * ブロック要素の開始行か判定（段落の継続判定に使用）
+     * 文書先頭のYAML front matter（`---`で始まり`---`で閉じるブロック）を検出する。
+     * 文書の絶対先頭（lines[0]）にのみ有効（本文中に現れる`---`は水平線として扱う。
+     * 水平線判定 HR_PATTERN と記法が重なるが、呼び出し側は`i === 0`のときだけ
+     * この判定を試みるため衝突しない）。閉じの`---`が見つからない場合はfront matter
+     * として扱わず null を返す（通常のブロックパースへフォールバック＝安全側）。
+     * @returns {{ raw: string, endIndex: number } | null} endIndexは閉じ`---`の行index
      */
-    function isBlockStart(line, nextLine) {
+    function parseFrontMatter(lines) {
+        if (!lines.length || lines[0] !== '---') {
+            return null;
+        }
+        for (let k = 1; k < lines.length; k++) {
+            if (lines[k] === '---') {
+                return { raw: lines.slice(1, k).join('\n'), endIndex: k };
+            }
+        }
+        return null;
+    }
+
+    /**
+     * front matterの生YAMLテキストから折りたたみ表示用のHTMLを組み立てる。
+     * YAMLはMarkdownのインライン記法（強調等）を持たないためconvertInlineは通さず、
+     * escapeHtmlのみ適用する。既定は折りたたみ状態（editor.css側で`.frontmatter-body`を
+     * 非表示にする）。ヘッダをクリックすると`frontmatter-expanded`クラスがトグルされる
+     * （配線はcommands.js）。折りたたみ状態はUI表示のみの一時状態であり、Markdown文書の
+     * 内容には影響しないため往復対象にしない（保存・再読込のたびに既定の折りたたみへ戻る）。
+     * 注意: 「本文0行（`---\n---`）」と「空行1行だけ（`---\n\n---`）」はどちらも`raw`が
+     * 空文字列になり区別できない。パース時に判明する行数をdata属性へ保持する案も検討したが、
+     * `.frontmatter-body`はcontenteditableでユーザーが自由に編集できるため、その属性は
+     * 編集直後に実際の内容と食い違う「陳腐化した値」になり、直列化時にユーザーが入力した
+     * 内容そのものを誤って捨ててしまう重大なデータ消失リスクがあった（/local-review指摘）。
+     * そのため実装せず、保存のたびに「空行1行だけの本文」は「本文0行」へ正規化される仕様
+     * として受け入れる（実害の乏しい稀なケースであり、静的属性によるデータ消失リスクの
+     * 方が明確に深刻なため）。
+     */
+    function buildFrontMatterHtml(raw) {
+        // HTML仕様上、<pre>開始タグ直後の最初のLFトークンはパース時に無視される
+        // （<textarea>も同様）。rawの先頭行が空行の場合にこの1文字が失われるのを
+        // 防ぐため、常にダミーの改行を1つ先頭へ足しておく（パーサーが必ずこの分だけ
+        // 食うので、rawの実際の内容には影響しない。実際に<div>へinnerHTML経由で
+        // 反映される際・htmlToMarkdownでcontainer.innerHTMLへ設定する際の両方で
+        // このパース仕様が働くため、常に付与しておく必要がある）。
+        return '<div class="frontmatter">' +
+            '<div class="frontmatter-header" contenteditable="false">' +
+            '<span class="frontmatter-toggle-icon">▶</span> Front Matter' +
+            '</div>' +
+            '<pre class="frontmatter-body">' + '\n' + escapeHtml(raw) + '</pre>' +
+            '</div>';
+    }
+
+    // 定義リストの定義行（`: 定義本文`）の判定。用語行はこの形にマッチしない
+    // 通常のテキスト行という以外の制約は無い（他のブロック開始行との衝突は
+    // 呼び出し側で isOtherBlockStart 等により先に弾かれている前提）。
+    // `:`直後の空白（0文字以上）は第1キャプチャで独立して取り出す（脚注定義行の
+    // `FOOTNOTE_DEF_PATTERN`と同じ設計）。これにより`: 定義`（空白1つ）と
+    // `:   定義`（空白3つ）などの元の空白数を変換往復で保持できる。
+    const DEFLIST_DEF_PATTERN = /^:(\s*)(.*)$/;
+
+    /**
+     * 定義リスト以外のブロック開始行か判定する（フェンス・見出し・引用・水平線・
+     * リスト・テーブル）。`isBlockStart`から定義リスト判定を除いた部分を切り出した
+     * もので、`scanDefListTerms`が用語候補を「他ブロックの開始行ではない」という
+     * 条件で絞り込む際に使う（`isBlockStart`をそのまま使うと、定義リスト自身の
+     * 判定が混ざり用語行を「ブロック開始＝除外対象」と誤検知して自己矛盾する）。
+     */
+    function isOtherBlockStart(line, nextLine) {
         if (matchFence(line)) return true;
         if (/^(#{1,6}) /.test(line)) return true;
         if (/^> ?/.test(line)) return true;
         if (HR_PATTERN.test(line)) return true;
         if (/^(\s*)([-*]|\d+\.) /.test(line)) return true;
         if (isTableStart(line, nextLine)) return true;
+        return false;
+    }
+
+    /**
+     * lines[i] から定義リストの「用語行の並び」を読み取る。
+     * 用語候補（空行でも`:`定義行でも他ブロックの開始行でもない通常行）を
+     * 連続する限り集め、直後に`: `定義行が最低1つ続く場合のみ結果を返す
+     * （続かなければ定義リストではないので null＝呼び出し側は通常の段落等へ委ねる）。
+     * 複数の用語行が同じ定義群を共有するケース（`Term A`\n`Term B`\n`: 定義`）に対応する。
+     * `seamIndices`（`extractFootnoteDefinitions`が返す、除去された脚注定義行を
+     * 挟んで前後の隣接性が失われている位置の集合）を渡すと、その縫い目をまたいで
+     * 用語行を集めたり定義行を確定したりしない（無関係な行同士の誤結合防止）。
+     * @returns {{ terms: string[], afterTermsIndex: number } | null}
+     */
+    function scanDefListTerms(lines, i, seamIndices) {
+        const terms = [];
+        let j = i;
+        while (j < lines.length) {
+            if (j > i && seamIndices && seamIndices.has(j)) {
+                break;
+            }
+            const l = lines[j];
+            if (!l.trim() || DEFLIST_DEF_PATTERN.test(l) || isOtherBlockStart(l, lines[j + 1])) {
+                break;
+            }
+            terms.push(l);
+            j++;
+        }
+        if (!terms.length) {
+            return null;
+        }
+        if (seamIndices && seamIndices.has(j)) {
+            return null;
+        }
+        if (!DEFLIST_DEF_PATTERN.test(lines[j] || '')) {
+            return null;
+        }
+        return { terms: terms, afterTermsIndex: j };
+    }
+
+    /**
+     * ブロック要素の開始行か判定（段落の継続判定に使用）
+     */
+    function isBlockStart(line, nextLine) {
+        if (isOtherBlockStart(line, nextLine)) return true;
+        if (!DEFLIST_DEF_PATTERN.test(line) && DEFLIST_DEF_PATTERN.test(nextLine || '')) return true;
         return false;
     }
 
@@ -300,6 +573,30 @@ window.MarkdownModule = (function() {
         }
 
         return items.length ? build(items[0].level) : '';
+    }
+
+    /**
+     * 定義リストアイテム配列（`scanDefListTerms`が集めたグループの並び）から
+     * `<dl>` HTMLを構築する。1グループにつき用語の数だけ`<dt>`、定義の数だけ
+     * `<dd>`を並べる（複数用語が定義群を共有する`Term A`/`Term B`/`: 定義`にも対応）。
+     * `:`直後の元の空白（`def.sep`。空白のみで構成されるため属性値として安全）を
+     * `data-def-sep`へ保持し、htmlToMarkdownの直列化時に`: `固定ではなく
+     * 元の空白数で復元できるようにする（脚注定義行の`data-footnote-sep`と同じ設計）。
+     * items: [{ terms: string[], defs: {sep:string, text:string}[] }]
+     */
+    function buildDefListHtml(items) {
+        let html = '<dl>';
+        items.forEach(function (item) {
+            item.terms.forEach(function (term) {
+                html += '<dt>' + convertInline(escapeHtml(term)) + '</dt>';
+            });
+            item.defs.forEach(function (def) {
+                html += '<dd data-def-sep="' + def.sep + '">' +
+                    convertInline(escapeHtml(def.text)) + '</dd>';
+            });
+        });
+        html += '</dl>';
+        return html;
     }
 
     // GitHubアラートのタイプ→表示タイトル
@@ -396,7 +693,24 @@ window.MarkdownModule = (function() {
      */
     function markdownToHtml(markdown) {
         const src = stripZeroWidth(markdown).replace(/\r\n?/g, '\n');
-        const lines = src.split('\n');
+        // 末尾の空行はここで落としておく（末尾の空行はhtmlToMarkdown側で常に
+        // 1つの改行へ正規化され往復に影響しないが、定義行が文末近くにあると
+        // 除去後に隣接する空行と連結して余分な空段落が生じるため、先に潰しておく）。
+        const rawLines = src.replace(/\n+$/, '').split('\n');
+        // YAML front matterの判定は元の行配列（rawLines）に対して一度だけ行い、
+        // extractFootnoteDefinitions（保護対象の判定に使う）と本文パースループの
+        // 両方でこの同じ結果を共有する。脚注除去後の行配列（contentLines）に対して
+        // 別途再判定すると、たまたま除去後の行が`---`で始まってしまうケースなどで
+        // front matterの判定がずれる可能性があるため（/local-review指摘対応）。
+        const frontMatter = parseFrontMatter(rawLines);
+        // 脚注定義行（`[^label]: 本文`）は通常のブロックパースの対象から外し、
+        // 文書末尾の脚注一覧セクションとして別途組み立てる（末尾に集約するのは
+        // 一般的な脚注表示の慣習に合わせたもの＝定義が文書中程にあった場合、
+        // 保存すると末尾へ移動する。既知の仕様）。
+        const footnoteInfo = extractFootnoteDefinitions(
+            rawLines, frontMatter ? frontMatter.endIndex : -1
+        );
+        const lines = footnoteInfo.contentLines;
         const out = [];
         let i = 0;
         // 見出しidの重複を連番（-1, -2 ...）で解消する。buildTocMarkdownと同じ規則。
@@ -404,6 +718,15 @@ window.MarkdownModule = (function() {
 
         while (i < lines.length) {
             const line = lines[i];
+
+            // --- YAML front matter（文書の絶対先頭にのみ有効） ---
+            if (i === 0) {
+                if (frontMatter) {
+                    out.push(buildFrontMatterHtml(frontMatter.raw));
+                    i = frontMatter.endIndex + 1;
+                    continue;
+                }
+            }
 
             // --- コードブロック ---
             const fence = matchFence(line);
@@ -574,15 +897,51 @@ window.MarkdownModule = (function() {
                 continue;
             }
 
+            // --- 定義リスト（Term\n: Definition ...） ---
+            {
+                let defScan = scanDefListTerms(lines, i, footnoteInfo.seamIndices);
+                if (defScan) {
+                    const items = [];
+                    while (defScan) {
+                        i = defScan.afterTermsIndex;
+                        const defs = [];
+                        // 縫い目（除去された脚注定義行の跡）をまたいで後続の`: `行を
+                        // 同じ定義として取り込まない（/local-review再指摘対応）。
+                        while (i < lines.length && DEFLIST_DEF_PATTERN.test(lines[i]) &&
+                            !footnoteInfo.seamIndices.has(i)) {
+                            const dm = DEFLIST_DEF_PATTERN.exec(lines[i]);
+                            defs.push({ sep: dm[1], text: dm[2] });
+                            i++;
+                        }
+                        items.push({ terms: defScan.terms, defs: defs });
+                        // 次の用語/定義グループの開始位置自体が縫い目なら、同じ<dl>へは
+                        // 続けない（外側のディスパッチループへ戻り、別の<dl>として扱う）。
+                        if (footnoteInfo.seamIndices.has(i)) {
+                            break;
+                        }
+                        defScan = scanDefListTerms(lines, i, footnoteInfo.seamIndices);
+                    }
+                    out.push(buildDefListHtml(items));
+                    continue;
+                }
+            }
+
             // --- 段落（連続する通常行をまとめ、行内の改行は<br>） ---
+            // 除去された脚注定義行を挟む「縫い目」（footnoteInfo.seamIndices）では
+            // 段落を継続しない。段落は各行が自己申告的な記法を持たないため、
+            // scanDefListTerms同様、縫い目をまたぐと本来隣接していなかった行を
+            // 誤って同じ段落へ結合してしまう（/local-review指摘対応）。
             const paraLines = [line];
             i++;
-            while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i], lines[i + 1])) {
+            while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i], lines[i + 1]) &&
+                !footnoteInfo.seamIndices.has(i)) {
                 paraLines.push(lines[i]);
                 i++;
             }
-            out.push('<p>' + paraLines.map(l => convertInline(escapeHtml(l))).join('<br>') + '</p>');
+            out.push('<p>' + paraLines.map(l => convertInline(escapeHtml(l), footnoteInfo.labels)).join('<br>') + '</p>');
         }
+
+        out.push(buildFootnotesSectionHtml(footnoteInfo.defs));
 
         return out.join('');
     }
@@ -672,6 +1031,15 @@ window.MarkdownModule = (function() {
             case 'A': {
                 const href = node.getAttribute('href') || '';
                 return `[${serializeInlineChildren(node)}](${href})`;
+            }
+            case 'SUP': {
+                // 脚注参照（<sup class="footnote-ref"><a>label</a></sup>）は
+                // 中のリンクを辿らず、保持しておいたラベルから `[^label]` を復元する。
+                if (node.classList && node.classList.contains('footnote-ref')) {
+                    const label = node.getAttribute('data-footnote-label') || '';
+                    return label ? `[^${label}]` : '';
+                }
+                return serializeInlineChildren(node);
             }
             case 'IMG': {
                 // 画像は void 要素で子を持たない。元のパスは `data-original-src`
@@ -924,6 +1292,18 @@ window.MarkdownModule = (function() {
                 if (el.classList && el.classList.contains('math-block')) {
                     return '$$\n' + (el.getAttribute('data-math') || '') + '\n$$\n\n';
                 }
+                // YAML front matterは`.frontmatter-body`（<pre>、textContentがそのまま
+                // 生YAML）から`---\n...\n---`を復元する。折りたたみ状態（UI表示のみ）は
+                // 復元に含めない。「本文0行」と「空行1行だけ」はどちらも`raw`が空文字列に
+                // なり区別できないが、後者は前者へ正規化される仕様として受け入れる
+                // （`buildFrontMatterHtml`のコメント参照。パース時の行数をdata属性へ
+                // 保持する案は、contenteditableな本文を編集すると属性が陳腐化しユーザーの
+                // 入力内容を誤って捨てるデータ消失リスクがあるため見送った）。
+                if (el.classList && el.classList.contains('frontmatter')) {
+                    const body = el.querySelector('.frontmatter-body');
+                    const raw = body ? stripZeroWidth(body.textContent || '') : '';
+                    return raw ? ('---\n' + raw + '\n---\n\n') : '---\n---\n\n';
+                }
                 // ブロック子要素を含む場合はコンテナとして再帰
                 const hasBlockChild = Array.from(el.children).some(c => BLOCK_TAGS.has(c.tagName));
                 if (hasBlockChild) {
@@ -949,6 +1329,52 @@ window.MarkdownModule = (function() {
                 return serializeTable(el);
             case 'HR':
                 return '---\n\n';
+            case 'DL': {
+                // 定義リスト（<dt>用語</dt><dd>定義</dd>...）を`Term`/`: 定義`の並びへ復元する。
+                // 子要素の出現順をそのまま辿るだけで、複数用語が定義群を共有するケース
+                // （<dt><dt><dd>）も自然に処理できる。
+                const lines = [];
+                Array.from(el.children).forEach(child => {
+                    const text = serializeInlineChildren(child).trim();
+                    if (child.tagName === 'DT') {
+                        lines.push(text);
+                    } else if (child.tagName === 'DD') {
+                        // `:`直後の元の空白を復元する（属性が無い＝この機能追加前に生成された
+                        // HTML等の場合は従来どおり半角スペース1つへフォールバック）。
+                        const sepAttr = child.getAttribute('data-def-sep');
+                        const sep = sepAttr === null ? ' ' : sepAttr;
+                        lines.push(':' + sep + text);
+                    }
+                });
+                return lines.length ? lines.join('\n') + '\n\n' : '';
+            }
+            case 'SECTION': {
+                // 脚注一覧セクション（<section class="footnotes"><ol><li>…</li></ol></section>）
+                // を `[^label]: 本文` の並びへ復元する。それ以外のsectionはブロックコンテナとして再帰。
+                if (!el.classList || !el.classList.contains('footnotes')) {
+                    return serializeBlocks(el);
+                }
+                const items = Array.from(el.querySelectorAll('li'));
+                if (!items.length) {
+                    return '';
+                }
+                const lines = items.map(li => {
+                    const label = li.getAttribute('data-footnote-label') || '';
+                    // `:`直後の元の空白を復元する（属性が無い＝この機能追加前に生成された
+                    // HTML等の場合は従来どおり半角スペース1つへフォールバック）。
+                    const sepAttr = li.getAttribute('data-footnote-sep');
+                    const sep = sepAttr === null ? ' ' : sepAttr;
+                    // 脚注本文の直列化時は戻りリンク（↩）を除いてから行う
+                    const clone = li.cloneNode(true);
+                    const backref = clone.querySelector('.footnote-backref');
+                    if (backref) {
+                        backref.remove();
+                    }
+                    const text = serializeInlineChildren(clone).trim();
+                    return `[^${label}]:${sep}${text}`;
+                });
+                return lines.join('\n') + '\n\n';
+            }
             default:
                 return serializeInlineChildren(el);
         }
@@ -1290,6 +1716,15 @@ window.MarkdownModule = (function() {
         coreLinesOf: coreLinesOf,
         computeBlockStartLines: computeBlockStartLines,
         // 行番号表示（3/3 橋渡し）: 表示中ブロック→開始行の対応（DOM／レイアウト非依存）。
-        computeEditorLineMap: computeEditorLineMap
+        computeEditorLineMap: computeEditorLineMap,
+        // 脚注（[^label] / [^label]: 本文）のサポート
+        extractFootnoteDefinitions: extractFootnoteDefinitions,
+        buildFootnotesSectionHtml: buildFootnotesSectionHtml,
+        // 定義リスト（Term\n: Definition）のサポート
+        scanDefListTerms: scanDefListTerms,
+        buildDefListHtml: buildDefListHtml,
+        // YAML front matter の折りたたみ表示
+        parseFrontMatter: parseFrontMatter,
+        buildFrontMatterHtml: buildFrontMatterHtml
     };
 })();

@@ -409,6 +409,356 @@ suite('MarkdownModule', () => {
             const html = env.markdown.markdownToHtml(`abc${env.state.ZERO_WIDTH}def`);
             assert.strictEqual(html, '<p>abcdef</p>');
         });
+
+        suite('脚注（[^label] / [^label]: 本文）', () => {
+            test('参照を脚注リンク（sup>a）へ変換し、文書末尾に脚注一覧セクションを追加する', () => {
+                const html = env.markdown.markdownToHtml('本文[^1]です。\n\n[^1]: 脚注の本文。');
+                assert.ok(html.includes(
+                    '<sup class="footnote-ref" data-footnote-label="1"><a href="#fn-1" id="fnref-1">1</a></sup>'
+                ), html);
+                assert.ok(html.includes(
+                    '<section class="footnotes" data-footnotes="true"><ol>' +
+                    '<li id="fn-1" data-footnote-label="1" data-footnote-sep=" ">脚注の本文。 ' +
+                    '<a href="#fnref-1" class="footnote-backref">↩</a></li></ol></section>'
+                ), html);
+            });
+
+            test('英数字・アンダースコア・ハイフンのラベルを扱える', () => {
+                const html = env.markdown.markdownToHtml('参照[^note-1]。\n\n[^note-1]: 本文。');
+                assert.ok(html.includes('data-footnote-label="note-1"'), html);
+            });
+
+            test('対応する定義が無い参照はリテラルテキストのまま残す（誤変換しない）', () => {
+                const html = env.markdown.markdownToHtml('本文[^1]です。');
+                assert.ok(html.includes('本文[^1]です。'), html);
+                assert.ok(!html.includes('footnote-ref'), html);
+            });
+
+            test('脚注定義が無ければ脚注一覧セクションも生成しない', () => {
+                const html = env.markdown.markdownToHtml('ただの本文です。');
+                assert.ok(!html.includes('footnotes'), html);
+            });
+
+            test('参照されていない「定義行らしき」地の文は脚注として剥がさない（誤検知防止・/local-review指摘A対応）', () => {
+                // 正規表現の説明文などで `[^0-9]: ...` の形が偶然出てきても、
+                // どこにも `[^0-9]`（参照）が無ければ普通の段落として保持する。
+                const md = '正規表現の説明です。\n\n[^0-9]: 数字以外にマッチする文字クラスの例です。';
+                const html = env.markdown.markdownToHtml(md);
+                assert.ok(!html.includes('footnotes'), html);
+                assert.ok(html.includes('[^0-9]: 数字以外にマッチする文字クラスの例です。'), html);
+                // 参照が無いため、そのまま書き戻しても内容は変わらない
+                assert.strictEqual(env.markdown.htmlToMarkdown(html), md + '\n');
+            });
+
+            test('脚注本文にもインライン記法（強調等）を適用する', () => {
+                const html = env.markdown.markdownToHtml('本文[^1]。\n\n[^1]: **重要**な注釈。');
+                assert.ok(html.includes(
+                    '<li id="fn-1" data-footnote-label="1" data-footnote-sep=" "><strong>重要</strong>な注釈。'
+                ), html);
+            });
+
+            test('コードフェンス内の `[^1]: ...` は脚注定義として扱わない', () => {
+                const html = env.markdown.markdownToHtml(
+                    '```\n[^1]: これはコード例\n```'
+                );
+                assert.ok(html.includes('[^1]: これはコード例'), html);
+                assert.ok(!html.includes('footnotes'), html);
+            });
+
+            test('YAML front matter内が`[^label]: ...`形式に一致しても脚注定義として剥がさない（front matterはコードフェンス同様に保護される）', () => {
+                const html = env.markdown.markdownToHtml(
+                    '---\n[^ref]: front matter内の行\n---\n\n本文[^ref]。\n\n[^ref]: 本物の定義。'
+                );
+                // front matter内の行は脚注定義として剥がされず、そのままpre内に残る
+                assert.ok(
+                    html.includes('<pre class="frontmatter-body">\n[^ref]: front matter内の行</pre>'),
+                    html
+                );
+                // 文書末尾の本物の定義だけが脚注として認識される
+                assert.ok(html.includes('<li id="fn-ref" data-footnote-label="ref"'), html);
+                assert.ok(html.includes('本物の定義。'), html);
+            });
+
+            test('文書の1行目が参照済み脚注定義行の場合、除去後に偶然---で始まる行が現れても誤ってfront matterと認識しない（/local-review再指摘対応）', () => {
+                // extractFootnoteDefinitionsは元の行配列（1行目は脚注定義行で"---"では
+                // ない）に対してfront matter判定するため、除去後の行配列（contentLines）が
+                // たまたま"---"で始まっていても、本文パースループはfront matterとして
+                // 再判定しない（同じfront matter判定結果を共有する設計のため）。
+                const html = env.markdown.markdownToHtml(
+                    '[^1]: 参照される脚注\n---\na: 1\n---\n本文[^1]。'
+                );
+                assert.ok(!html.includes('frontmatter'), html);
+                assert.ok(html.includes('<hr>'), html);
+                assert.ok(html.includes('<p>a: 1</p>'), html);
+            });
+
+            test('同じラベルが複数定義された場合は最初の定義を脚注として使い、二番目は通常の段落として残す（データを失わない）', () => {
+                const html = env.markdown.markdownToHtml(
+                    '本文[^1]。\n\n[^1]: 最初の定義。\n[^1]: 二番目の定義（無視される）。'
+                );
+                assert.ok(html.includes(
+                    '<li id="fn-1" data-footnote-label="1" data-footnote-sep=" ">最初の定義。'
+                ), html);
+                // 二番目は脚注としては無視されるが、内容は通常の段落として保持される
+                // （誤って脚注参照へ変換されないことも確認: /local-review 指摘由来）
+                assert.ok(html.includes('<p>[^1]: 二番目の定義（無視される）。</p>'), html);
+            });
+        });
+
+        suite('extractFootnoteDefinitions', () => {
+            test('参照（[^label]）が実在する定義行だけを抜き出し、残りの行と定義済みラベルを返す', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '本文行[^1][^note]',
+                    '[^1]: 定義1',
+                    '[^note]: 定義2',
+                    '別の本文行'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: '1', sep: ' ', text: '定義1' },
+                    { label: 'note', sep: ' ', text: '定義2' }
+                ]);
+                assert.strictEqual(result.labels.has('1'), true);
+                assert.strictEqual(result.labels.has('note'), true);
+                // 除去した定義行は単純に取り除かれる（リスト・引用・テーブルは各行自身が
+                // 記法で自己申告するため、前後が直接隣接しても正しく結合される＝望ましい）。
+                assert.deepStrictEqual(
+                    Array.from(result.contentLines),
+                    ['本文行[^1][^note]', '別の本文行']
+                );
+                // 除去によって隣接性が失われた位置（本文行の直後）はseamIndicesに記録される。
+                // 定義リスト（scanDefListTerms）はこれを見て縫い目をまたいだ誤結合を避ける。
+                assert.strictEqual(result.seamIndices.has(1), true);
+                assert.strictEqual(result.seamIndices.size, 1);
+            });
+
+            test('参照が無い（地の文が偶然この形をしていただけの）定義行らしき行は通常の行として残す（誤検知防止・/local-review指摘A対応）', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '正規表現の説明:',
+                    '[^0-9]: 数字以外にマッチする文字クラスの例です。',
+                    '本文はここまで'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs), []);
+                assert.strictEqual(result.labels.size, 0);
+                assert.deepStrictEqual(Array.from(result.contentLines), [
+                    '正規表現の説明:',
+                    '[^0-9]: 数字以外にマッチする文字クラスの例です。',
+                    '本文はここまで'
+                ]);
+            });
+
+            test('コードフェンス・ブロック数式の中は定義としても参照としても解釈しない', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^3]',
+                    '```',
+                    '[^1]: コード内',
+                    '```',
+                    '$$',
+                    '[^2]: 数式内',
+                    '$$',
+                    '[^3]: 本物の定義'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: '3', sep: ' ', text: '本物の定義' }
+                ]);
+                assert.deepStrictEqual(Array.from(result.contentLines), [
+                    '参照[^3]', '```', '[^1]: コード内', '```', '$$', '[^2]: 数式内', '$$'
+                ]);
+                // 末尾の[^3]定義行を除去した後に続く行は無い＝seamIndicesは記録されない
+                assert.strictEqual(result.seamIndices.size, 0);
+            });
+
+            test('コロン直後の空白の個数をsepとしてそのまま保持する（0個・1個・2個以上）', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^a][^b][^c]',
+                    '[^a]:空白無し',
+                    '[^b]: 空白1つ',
+                    '[^c]:   空白3つ'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: 'a', sep: '', text: '空白無し' },
+                    { label: 'b', sep: ' ', text: '空白1つ' },
+                    { label: 'c', sep: '   ', text: '空白3つ' }
+                ]);
+            });
+        });
+
+        suite('buildFootnotesSectionHtml', () => {
+            test('定義が無ければ空文字を返す', () => {
+                assert.strictEqual(env.markdown.buildFootnotesSectionHtml([]), '');
+            });
+
+            test('data-footnote-sepへ元の空白をそのまま埋め込む', () => {
+                const html = env.markdown.buildFootnotesSectionHtml([
+                    { label: '1', sep: '', text: '空白無し' },
+                    { label: '2', sep: '   ', text: '空白3つ' }
+                ]);
+                assert.ok(html.includes('data-footnote-sep=""'), html);
+                assert.ok(html.includes('data-footnote-sep="   "'), html);
+            });
+        });
+
+        suite('定義リスト（Term / : Definition）', () => {
+            test('用語行とその直後の定義行を<dl><dt><dd>へ変換する', () => {
+                const html = env.markdown.markdownToHtml('用語\n: 定義本文');
+                assert.strictEqual(html, '<dl><dt>用語</dt><dd data-def-sep=" ">定義本文</dd></dl>');
+            });
+
+            test('1つの用語に複数の定義行が続く場合は<dd>を複数生成する', () => {
+                const html = env.markdown.markdownToHtml('用語\n: 定義1\n: 定義2');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語</dt><dd data-def-sep=" ">定義1</dd>' +
+                    '<dd data-def-sep=" ">定義2</dd></dl>'
+                );
+            });
+
+            test('複数の用語行が同じ定義群を共有する場合は<dt>を複数生成する', () => {
+                const html = env.markdown.markdownToHtml('用語A\n用語B\n: 共有の定義');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語A</dt><dt>用語B</dt><dd data-def-sep=" ">共有の定義</dd></dl>'
+                );
+            });
+
+            test('複数の用語・定義グループが連続する場合は1つの<dl>にまとめる', () => {
+                const html = env.markdown.markdownToHtml('用語1\n: 定義1\n用語2\n: 定義2');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語1</dt><dd data-def-sep=" ">定義1</dd>' +
+                    '<dt>用語2</dt><dd data-def-sep=" ">定義2</dd></dl>'
+                );
+            });
+
+            test('定義本文にもインライン記法（強調等）を適用する', () => {
+                const html = env.markdown.markdownToHtml('用語\n: **重要**な定義');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語</dt><dd data-def-sep=" "><strong>重要</strong>な定義</dd></dl>'
+                );
+            });
+
+            test('直後に定義行が続かない通常行は定義リストとして扱わない（普通の段落のまま）', () => {
+                const html = env.markdown.markdownToHtml('ただの本文\n続きの行');
+                assert.ok(!html.includes('<dl>'), html);
+                assert.ok(html.includes('<p>ただの本文<br>続きの行</p>'), html);
+            });
+
+            test('空行を挟むと別々の<dl>として分離される', () => {
+                const html = env.markdown.markdownToHtml('用語A\n: 定義A\n\n用語B\n: 定義B');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>用語A</dt><dd data-def-sep=" ">定義A</dd></dl>' +
+                    '<dl><dt>用語B</dt><dd data-def-sep=" ">定義B</dd></dl>'
+                );
+            });
+
+            test('空行を挟まず前の行に続けて定義リストが始まると、その行も共有の用語として扱われる（Pandoc等と同じ規則。分離したい場合は空行を挟む）', () => {
+                const html = env.markdown.markdownToHtml('前置きの行\n用語\n: 定義');
+                assert.strictEqual(
+                    html,
+                    '<dl><dt>前置きの行</dt><dt>用語</dt><dd data-def-sep=" ">定義</dd></dl>'
+                );
+            });
+
+            test('コロン直後の空白の個数（0個・1個・3個）をdata-def-sepへそのまま保持する', () => {
+                assert.ok(
+                    env.markdown.markdownToHtml('用語\n:空白無し').includes('data-def-sep=""'),
+                    '空白0個'
+                );
+                assert.ok(
+                    env.markdown.markdownToHtml('用語\n:   空白3つ').includes('data-def-sep="   "'),
+                    '空白3個'
+                );
+            });
+        });
+
+        suite('scanDefListTerms', () => {
+            test('用語1つ・定義1つを読み取る', () => {
+                const result = env.markdown.scanDefListTerms(['用語', ': 定義', '次の行'], 0);
+                assert.deepStrictEqual(
+                    { terms: Array.from(result.terms), afterTermsIndex: result.afterTermsIndex },
+                    { terms: ['用語'], afterTermsIndex: 1 }
+                );
+            });
+
+            test('直後に定義行が無ければnullを返す', () => {
+                const result = env.markdown.scanDefListTerms(['ただの行', '別の行'], 0);
+                assert.strictEqual(result, null);
+            });
+
+            test('見出し等の他ブロック開始行は用語として取り込まない', () => {
+                const result = env.markdown.scanDefListTerms(['## 見出し', ': 定義'], 0);
+                assert.strictEqual(result, null);
+            });
+        });
+
+        suite('YAML front matter（文書先頭の折りたたみ表示）', () => {
+            test('文書先頭の---〜---を折りたたみ可能なdivへ変換する', () => {
+                const html = env.markdown.markdownToHtml('---\ntitle: サンプル\ndate: 2026-01-01\n---\n\n本文です。');
+                assert.ok(html.includes('<div class="frontmatter">'), html);
+                assert.ok(html.includes(
+                    '<div class="frontmatter-header" contenteditable="false">' +
+                    '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>'
+                ), html);
+                assert.ok(html.includes(
+                    '<pre class="frontmatter-body">\ntitle: サンプル\ndate: 2026-01-01</pre>'
+                ), html);
+                assert.ok(html.includes('<p>本文です。</p>'), html);
+            });
+
+            test('先頭以外に現れる---は水平線として扱う（front matterと誤認しない）', () => {
+                const html = env.markdown.markdownToHtml('本文\n\n---\n\n続き');
+                assert.ok(!html.includes('frontmatter'), html);
+                assert.ok(html.includes('<hr>'), html);
+            });
+
+            test('閉じの---が無ければfront matterとして扱わない（水平線として処理される）', () => {
+                const html = env.markdown.markdownToHtml('---\ntitle: 閉じ忘れ');
+                assert.ok(!html.includes('frontmatter'), html);
+                assert.ok(html.includes('<hr>'), html);
+            });
+
+            test('中身が空のfront matterにも対応する', () => {
+                const html = env.markdown.markdownToHtml('---\n---\n\n本文。');
+                assert.ok(html.includes('<pre class="frontmatter-body">\n</pre>'), html);
+            });
+
+            test('中身が空行1つだけのfront matterは「本文0行」へ正規化される（既知の仕様。'
+                + '.frontmatter-bodyはcontenteditableなためパース時の行数をdata属性で'
+                + '保持するとユーザーの編集内容を誤って捨てるデータ消失リスクがあり見送った）', () => {
+                const html = env.markdown.markdownToHtml('---\n\n---\n\n本文。');
+                assert.ok(html.includes('<pre class="frontmatter-body">\n</pre>'), html);
+            });
+
+            test('YAML内の記号はインライン記法へ変換されない（**や_を含んでもそのまま）', () => {
+                const html = env.markdown.markdownToHtml('---\ntags: [a_b, **not-bold**]\n---\n\n本文');
+                assert.ok(
+                    html.includes('<pre class="frontmatter-body">\ntags: [a_b, **not-bold**]</pre>'),
+                    html
+                );
+                assert.ok(!html.includes('<strong>'), html);
+                assert.ok(!html.includes('<em>'), html);
+            });
+        });
+
+        suite('parseFrontMatter', () => {
+            test('---で始まり---で閉じる区間を読み取る', () => {
+                const result = env.markdown.parseFrontMatter(['---', 'a: 1', 'b: 2', '---', '本文']);
+                assert.deepStrictEqual({ ...result }, { raw: 'a: 1\nb: 2', endIndex: 3 });
+            });
+
+            test('先頭が---でなければnullを返す', () => {
+                assert.strictEqual(env.markdown.parseFrontMatter(['本文', '---']), null);
+            });
+
+            test('閉じの---が無ければnullを返す', () => {
+                assert.strictEqual(env.markdown.parseFrontMatter(['---', 'a: 1']), null);
+            });
+
+            test('空配列でもnullを返す（例外を投げない）', () => {
+                assert.strictEqual(env.markdown.parseFrontMatter([]), null);
+            });
+        });
     });
 
     suite('htmlToMarkdown', () => {
@@ -614,6 +964,121 @@ suite('MarkdownModule', () => {
             const md = env.markdown.htmlToMarkdown('<p>a b</p>');
             assert.strictEqual(md, 'a b\n');
         });
+
+        suite('脚注（sup.footnote-ref / section.footnotes）', () => {
+            test('脚注参照（sup）を[^label]へ復元する', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<p>本文' +
+                    '<sup class="footnote-ref" data-footnote-label="1"><a href="#fn-1" id="fnref-1">1</a></sup>' +
+                    'です。</p>'
+                );
+                assert.strictEqual(md, '本文[^1]です。\n');
+            });
+
+            test('脚注一覧セクションを[^label]: 本文へ復元し、戻りリンクは含めない', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<section class="footnotes"><ol>' +
+                    '<li id="fn-1" data-footnote-label="1">脚注本文。 ' +
+                    '<a href="#fnref-1" class="footnote-backref">back</a></li>' +
+                    '</ol></section>'
+                );
+                assert.strictEqual(md, '[^1]: 脚注本文。\n');
+            });
+
+            test('複数の脚注定義は定義順で並べる', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<section class="footnotes"><ol>' +
+                    '<li id="fn-1" data-footnote-label="1">最初。</li>' +
+                    '<li id="fn-2" data-footnote-label="2">次。</li>' +
+                    '</ol></section>'
+                );
+                assert.strictEqual(md, '[^1]: 最初。\n[^2]: 次。\n');
+            });
+
+            test('footnotesクラスを持たないsectionは通常のブロックコンテナとして再帰する', () => {
+                const md = env.markdown.htmlToMarkdown('<section><p>本文</p></section>');
+                assert.strictEqual(md, '本文\n');
+            });
+        });
+
+        suite('定義リスト（dl/dt/dd）', () => {
+            test('<dt><dd>をTerm / : Definitionへ復元する', () => {
+                const md = env.markdown.htmlToMarkdown('<dl><dt>用語</dt><dd>定義本文</dd></dl>');
+                assert.strictEqual(md, '用語\n: 定義本文\n');
+            });
+
+            test('複数の<dd>は複数の定義行として並べる', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語</dt><dd>定義1</dd><dd>定義2</dd></dl>'
+                );
+                assert.strictEqual(md, '用語\n: 定義1\n: 定義2\n');
+            });
+
+            test('複数の<dt>が連続する場合は用語行を複数並べる（定義群の共有）', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語A</dt><dt>用語B</dt><dd>共有の定義</dd></dl>'
+                );
+                assert.strictEqual(md, '用語A\n用語B\n: 共有の定義\n');
+            });
+
+            test('複数の用語・定義グループを出現順で並べる', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語1</dt><dd>定義1</dd><dt>用語2</dt><dd>定義2</dd></dl>'
+                );
+                assert.strictEqual(md, '用語1\n: 定義1\n用語2\n: 定義2\n');
+            });
+
+            test('子要素が無ければ空文字を返す', () => {
+                assert.strictEqual(env.markdown.htmlToMarkdown('<dl></dl>'), '');
+            });
+
+            test('data-def-sepが無いdd（この機能追加前のHTML等）は半角スペース1つへフォールバックする', () => {
+                const md = env.markdown.htmlToMarkdown('<dl><dt>用語</dt><dd>定義</dd></dl>');
+                assert.strictEqual(md, '用語\n: 定義\n');
+            });
+
+            test('data-def-sepの空白をそのまま復元する（0個・3個）', () => {
+                const noSep = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語</dt><dd data-def-sep="">定義</dd></dl>'
+                );
+                assert.strictEqual(noSep, '用語\n:定義\n');
+
+                const threeSep = env.markdown.htmlToMarkdown(
+                    '<dl><dt>用語</dt><dd data-def-sep="   ">定義</dd></dl>'
+                );
+                assert.strictEqual(threeSep, '用語\n:   定義\n');
+            });
+        });
+
+        suite('YAML front matter（div.frontmatter）', () => {
+            test('---\\n...\\n---へ復元する', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<div class="frontmatter"><div class="frontmatter-header" contenteditable="false">' +
+                    '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>' +
+                    '<pre class="frontmatter-body">title: サンプル\ndate: 2026-01-01</pre></div>'
+                );
+                assert.strictEqual(md, '---\ntitle: サンプル\ndate: 2026-01-01\n---\n');
+            });
+
+            test('中身が空でも---\\n---として復元する', () => {
+                const md = env.markdown.htmlToMarkdown(
+                    '<div class="frontmatter"><div class="frontmatter-header" contenteditable="false">' +
+                    '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>' +
+                    '<pre class="frontmatter-body"></pre></div>'
+                );
+                assert.strictEqual(md, '---\n---\n');
+            });
+
+            test('折りたたみ状態（frontmatter-expandedクラスの有無）は復元結果に影響しない', () => {
+                const expanded = env.markdown.htmlToMarkdown(
+                    '<div class="frontmatter frontmatter-expanded">' +
+                    '<div class="frontmatter-header" contenteditable="false">' +
+                    '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>' +
+                    '<pre class="frontmatter-body">a: 1</pre></div>'
+                );
+                assert.strictEqual(expanded, '---\na: 1\n---\n');
+            });
+        });
     });
 
     suite('数式（インライン $...$ / ブロック $$...$$）', () => {
@@ -796,6 +1261,162 @@ suite('MarkdownModule', () => {
                 );
                 assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
             });
+        });
+
+        test('脚注（[^label] / [^label]: 本文）が変換往復で保存される（定義が文書末尾にある場合）', () => {
+            [
+                '本文[^1]です。\n\n[^1]: 脚注の本文。\n',
+                '複数[^1]の脚注[^2]。\n\n[^1]: 最初。\n[^2]: 次。\n',
+                'ラベルにハイフンを含む[^note-1]。\n\n[^note-1]: 本文。\n',
+                '脚注本文に**強調**を含む[^1]。\n\n[^1]: **重要**な注釈。\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('脚注定義行のコロン直後の空白数（0個・1個・2個以上）が変換往復で保持される', () => {
+            [
+                '空白無し[^a]。\n\n[^a]:空白無し。\n',
+                '空白1つ[^b]。\n\n[^b]: 空白1つ。\n',
+                '空白3つ[^c]。\n\n[^c]:   空白3つ。\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('未定義ラベルの参照はリテラルテキストのまま変換往復で保存される', () => {
+            const original = '本文[^does-not-exist]です。\n';
+            const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+            assert.strictEqual(rt, original);
+        });
+
+        test('脚注定義が文書中程にある場合は末尾へ再配置される（既知の仕様・脚注は常に末尾へ集約）', () => {
+            const original = '本文[^1]。\n\n[^1]: 脚注の本文。\n\n続きの本文。';
+            const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+            assert.ok(rt.trim().endsWith('[^1]: 脚注の本文。'), rt);
+            assert.ok(rt.includes('続きの本文。'), rt);
+            assert.ok(rt.indexOf('続きの本文。') < rt.indexOf('[^1]: 脚注の本文。'), '本文の後に脚注一覧が来る');
+        });
+
+        test('空行を挟まず段落中に脚注定義行があると、除去後に前後の行が誤って同じ段落へ結合されない（seamIndices対応）', () => {
+            const html = env.markdown.markdownToHtml(
+                'ref[^1]\n\nPara lineA\n[^1]: footnote text\nPara lineB'
+            );
+            assert.ok(html.includes('<p>Para lineA</p>'), html);
+            assert.ok(html.includes('<p>Para lineB</p>'), html);
+            assert.ok(!html.includes('Para lineA<br>Para lineB'), html);
+        });
+
+        test('定義リスト（Term / : Definition）が変換往復で保存される', () => {
+            [
+                '用語\n: 定義本文\n',
+                '用語\n: 定義1\n: 定義2\n',
+                '用語A\n用語B\n: 共有の定義\n',
+                '用語1\n: 定義1\n用語2\n: 定義2\n',
+                '定義に**強調**を含む用語\n: **重要**な定義\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('定義リストのコロン直後の空白数（0個・1個・3個）が変換往復で保持される', () => {
+            [
+                '用語\n:空白無し\n',
+                '用語\n: 空白1つ\n',
+                '用語\n:   空白3つ\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('YAML front matterが変換往復で保存される', () => {
+            [
+                '---\ntitle: サンプル\ndate: 2026-01-01\n---\n\n本文です。\n',
+                '---\n---\n\n本文のみ。\n',
+                '---\ntags: [a_b, **not-bold**]\n---\n\n本文\n'
+            ].forEach(original => {
+                const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+                assert.strictEqual(rt, original, `roundtrip: ${JSON.stringify(original)}`);
+            });
+        });
+
+        test('本文が空行1つだけのfront matterは往復で本文0行へ正規化される（既知の仕様。'
+            + '.frontmatter-bodyがcontenteditableなため区別する情報をdata属性で保持すると'
+            + 'ユーザー編集時にデータ消失リスクがあり、あえて実装していない）', () => {
+            const original = '---\n\n---\n\n本文。\n';
+            const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(original));
+            assert.strictEqual(rt, '---\n---\n\n本文。\n');
+        });
+
+        test('front matter本文の先頭行が空行でも変換往復で保持される（<pre>開始タグ直後のLFがパース時に無視される仕様への対処）', () => {
+            const original = '---\n\ntitle: 先頭が空行\n---\n\n本文\n';
+            const html = env.markdown.markdownToHtml(original);
+            // 実際にHTMLパーサーを通した後の内容で検証する（htmlToMarkdownと同じ経路）。
+            const rt = env.markdown.htmlToMarkdown(html);
+            assert.strictEqual(rt, original);
+        });
+
+        test('用語と定義行の間に脚注定義行が挟まっても、無関係な行同士が定義リストとして誤結合されない（/local-review指摘対応）', () => {
+            // 脚注定義行（[^1]: ...）は本文パース前にcontentLinesから除去されるため、
+            // 除去後に前後の行が直接隣接し、scanDefListTermsが無関係な「用語」と
+            // 「: 定義」を1つの定義リストへ誤って結合してしまう回帰があった。
+            // 脚注は末尾へ再配置される既知の仕様上、周辺の改行までの完全往復は
+            // 保証されない（上の「脚注定義が文書中程にある場合」テストと同じ理由）ため、
+            // ここでは「誤って<dl>へ結合されないこと」と「内容が失われないこと」を検証する。
+            const original = '参照[^1]する。\n\nTerm\n[^1]: 脚注の本文。\n: Definition\n';
+            const html = env.markdown.markdownToHtml(original);
+            assert.ok(!html.includes('<dl>'), html);
+            const rt = env.markdown.htmlToMarkdown(html);
+            assert.ok(rt.includes('Term'), rt);
+            assert.ok(rt.includes(': Definition'), rt);
+            assert.ok(rt.trim().endsWith('[^1]: 脚注の本文。'), rt);
+        });
+
+        test('リスト項目の間に脚注定義行が挟まっても1つのリストとして結合される（自己申告的な記法を持つブロックは縫い目の影響を受けない）', () => {
+            const original = '参照[^1]。\n\n- item1\n[^1]: 脚注の本文。\n- item2\n';
+            const html = env.markdown.markdownToHtml(original);
+            assert.ok(/<ul[^>]*><li>item1<\/li><li>item2<\/li><\/ul>/.test(html), html);
+        });
+
+        test('引用行の間に脚注定義行が挟まっても1つの引用として結合される', () => {
+            const original = '参照[^1]。\n\n> line1\n[^1]: 脚注の本文。\n> line2\n';
+            const html = env.markdown.markdownToHtml(original);
+            assert.ok(/<blockquote>line1<br>line2<\/blockquote>/.test(html), html);
+        });
+
+        test('段落継続も縫い目で止まる。脚注定義行を挟んだ直後の複数用語行が誤って前の段落へ吸収されず、正しく定義リストの共有用語として認識される（/local-review再指摘対応）', () => {
+            // 段落継続ループがseamIndicesを見ていなかったため、TermAが本来のIntro側の
+            // 段落へ誤って<br>結合され、後続のTermBだけが単独<dt>になる回帰があった。
+            const html = env.markdown.markdownToHtml(
+                'ref[^1]\n\nIntro line\nMoreIntro\n[^1]: footnote text\nTermA\nTermB\n: Def'
+            );
+            assert.ok(html.includes('<p>Intro line<br>MoreIntro</p>'), html);
+            assert.ok(
+                html.includes('<dl><dt>TermA</dt><dt>TermB</dt><dd data-def-sep=" ">Def</dd></dl>'),
+                html
+            );
+        });
+
+        test('複数の定義行(: )が続く途中に脚注定義行が挟まっても、縫い目より後ろの定義行は同じ用語へ結合されない（/local-review再指摘対応）', () => {
+            const html = env.markdown.markdownToHtml(
+                'ref[^1]\n\nTerm\n: Def1\n[^1]: footnote text\n: Def2'
+            );
+            assert.ok(html.includes('<dl><dt>Term</dt><dd data-def-sep=" ">Def1</dd></dl>'), html);
+            assert.ok(html.includes('<p>: Def2</p>'), html);
+        });
+
+        test('1つの用語/定義グループの直後（縫い目）に別の用語/定義グループが続いても、同じ<dl>へ結合されず別の<dl>になる（/local-review再指摘対応）', () => {
+            const html = env.markdown.markdownToHtml(
+                'ref[^1]\n\nTerm1\n: Def1\n[^1]: footnote text\nTerm2\n: Def2'
+            );
+            assert.ok(html.includes(
+                '<dl><dt>Term1</dt><dd data-def-sep=" ">Def1</dd></dl>' +
+                '<dl><dt>Term2</dt><dd data-def-sep=" ">Def2</dd></dl>'
+            ), html);
         });
     });
 

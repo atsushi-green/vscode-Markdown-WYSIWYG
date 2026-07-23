@@ -586,35 +586,68 @@ window.TableModule = (function() {
     }
 
     /**
-     * テーブルデータを貼り付け
+     * 貼り付けデータ（文字列の二次元配列）を、指定した左上位置（アンカー行・列。
+     * `cellPosition`/`isCellInRange`と同じtable.rows基準の表示順インデックス）を起点に
+     * 書き込み先の行・列インデックスへ展開する純粋関数。`rowCount`/`colCount`
+     * （テーブルの実際の行数・列数）を超える位置は結果に含めない＝はみ出し分は無視し、
+     * 自動での行・列追加はしない（範囲選択よりデータが大きい場合はデータ側の
+     * 行列数がそのまま優先される＝範囲はアンカー位置を決めるだけで敷き詰め先の
+     * サイズには使わない）。
+     * @returns {{row:number, col:number, value:string}[]}
+     */
+    function computePasteTargets(anchorRow, anchorCol, data, rowCount, colCount) {
+        const targets = [];
+        data.forEach((rowData, rowOffset) => {
+            const row = anchorRow + rowOffset;
+            if (row < 0 || row >= rowCount) {
+                return;
+            }
+            rowData.forEach((value, colOffset) => {
+                const col = anchorCol + colOffset;
+                if (col < 0 || col >= colCount) {
+                    return;
+                }
+                targets.push({ row: row, col: col, value: value });
+            });
+        });
+        return targets;
+    }
+
+    /**
+     * 貼り付けデータをテーブルへ書き込む（DOM操作）。見出しセル（`<th>`）は
+     * 個別に書き込み対象から除外する（見出しセルのみスキップし、同じ貼り付けに
+     * 含まれる本文行側のセルへは書き込む＝旧実装が見出しセル起点だと貼り付け
+     * 全体を無条件でno-opにしていたのとは異なる、意図した挙動変更）。
+     */
+    function writeMatrixIntoTable(table, anchorRow, anchorCol, data) {
+        const rows = Array.from(table.rows);
+        const colCount = rows.length ? Array.from(rows[0].cells).length : 0;
+        const targets = computePasteTargets(anchorRow, anchorCol, data, rows.length, colCount);
+        targets.forEach(({ row, col, value }) => {
+            const cell = Array.from(rows[row].cells)[col];
+            if (!cell || cell.tagName === 'TH') {
+                return;
+            }
+            cell.textContent = value;
+        });
+    }
+
+    /**
+     * テーブルデータを貼り付け。矩形範囲選択（`currentCellRange`）がこのテーブルに
+     * 対して確定している場合はその範囲の左上を起点に、無ければ貼り付け先セル
+     * （`startCell`）を起点に展開する（`copy`の範囲優先ロジックと同じ考え方）。
+     * データの行列数が範囲より小さい場合、書き込まれなかった残りのセルは元の値の
+     * まま変更しない（Excel等の一般的な挙動と同じ・範囲を空欄でクリアはしない）。
      */
     function pasteData(startCell, table, text) {
         const lines = text.split('\n').filter(line => line.trim());
         const data = lines.map(line => line.split('\t'));
 
-        const tbody = table.querySelector('tbody');
-        const startRow = startCell.parentElement;
-        const rows = tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
-        const startRowIndex = rows.indexOf(startRow);
-        const cellsInStartRow = Array.from(startRow.querySelectorAll('th, td'));
-        const startColIndex = cellsInStartRow.indexOf(startCell);
+        const anchor = (currentCellRange && currentCellRange.table === table)
+            ? { row: currentCellRange.range.minRow, col: currentCellRange.range.minCol }
+            : cellPosition(table, startCell);
 
-        if (startRowIndex === -1) return;
-
-        data.forEach((rowData, rowOffset) => {
-            const targetRowIndex = startRowIndex + rowOffset;
-            if (targetRowIndex >= rows.length) return;
-
-            const targetRow = rows[targetRowIndex];
-            const cells = Array.from(targetRow.querySelectorAll('td'));
-
-            rowData.forEach((cellData, colOffset) => {
-                const targetColIndex = startColIndex + colOffset;
-                if (targetColIndex >= cells.length) return;
-
-                cells[targetColIndex].textContent = cellData;
-            });
-        });
+        writeMatrixIntoTable(table, anchor.row, anchor.col, data);
 
         updateDocument();
         utils.showToast('✅ データを貼り付けました');
@@ -1240,6 +1273,9 @@ window.TableModule = (function() {
         getCurrentCellRange: function () { return currentCellRange; },
         extractCellTextMatrix: extractCellTextMatrix,
         buildTsvFromMatrix: buildTsvFromMatrix,
-        buildHtmlTableFragment: buildHtmlTableFragment
+        buildHtmlTableFragment: buildHtmlTableFragment,
+        computePasteTargets: computePasteTargets,
+        writeMatrixIntoTable: writeMatrixIntoTable,
+        pasteData: pasteData
     };
 })();

@@ -1358,6 +1358,46 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('toggleFrontMatter（YAML front matterの折りたたみ/展開トグル）', () => {
+        function frontMatterHtml() {
+            return '<div class="frontmatter">' +
+                '<div class="frontmatter-header" contenteditable="false">' +
+                '<span class="frontmatter-toggle-icon">▶</span> Front Matter</div>' +
+                '<pre class="frontmatter-body">\ntitle: x</pre></div>';
+        }
+
+        test('既定（折りたたみ）状態のヘッダをクリックするとfrontmatter-expandedが付与される', () => {
+            env.editor.innerHTML = frontMatterHtml();
+            const header = env.editor.querySelector('.frontmatter-header') as HTMLElement;
+            env.commands.toggleFrontMatter(header);
+            const frontMatter = env.editor.querySelector('.frontmatter')!;
+            assert.strictEqual(frontMatter.classList.contains('frontmatter-expanded'), true);
+        });
+
+        test('展開状態でもう一度クリックするとfrontmatter-expandedが外れる（トグル）', () => {
+            env.editor.innerHTML = frontMatterHtml();
+            const header = env.editor.querySelector('.frontmatter-header') as HTMLElement;
+            env.commands.toggleFrontMatter(header);
+            env.commands.toggleFrontMatter(header);
+            const frontMatter = env.editor.querySelector('.frontmatter')!;
+            assert.strictEqual(frontMatter.classList.contains('frontmatter-expanded'), false);
+        });
+
+        test('祖先に.frontmatterが無い場合は何もしない（例外を投げない）', () => {
+            env.editor.innerHTML = '<div class="frontmatter-header" contenteditable="false">Front Matter</div>';
+            const header = env.editor.querySelector('.frontmatter-header') as HTMLElement;
+            assert.doesNotThrow(() => env.commands.toggleFrontMatter(header));
+        });
+
+        test('トグルしてもMarkdownは変わらない（往復不変）', () => {
+            env.editor.innerHTML = frontMatterHtml();
+            const before = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            env.commands.toggleFrontMatter(env.editor.querySelector('.frontmatter-header') as HTMLElement);
+            const after = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.strictEqual(after, before, JSON.stringify(after));
+        });
+    });
+
     suite('handleAlertEnter（アラートbox本文内のEnter/Shift+Enter）', () => {
         const ALERT = '<div class="markdown-alert markdown-alert-note" data-alert-type="NOTE">' +
             '<p class="markdown-alert-title" contenteditable="false">Note</p>' +
@@ -1618,6 +1658,15 @@ suite('CommandsModule', () => {
             assert.ok(/\* \[Title\]\(#title\)/.test(md), md);
             assert.ok(/ {2}\* \[Sub\]\(#sub\)/.test(md), md);
         });
+
+        test('文書先頭がYAML front matterの場合、目次はその直後に挿入され先頭に割り込まない（front matterは絶対先頭でなければならないため）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: x\n---\n\n# Title') +
+                heading(2, 'Sub');
+            env.commands.insertToc();
+            assert.ok(env.editor.firstElementChild!.classList.contains('frontmatter'), env.editor.innerHTML);
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(md.startsWith('---\ntitle: x\n---\n'), md);
+        });
     });
 
     suite('handleHeadingConfirm（見出しのEnter確定）', () => {
@@ -1868,6 +1917,104 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('脚注参照（[^label]）の入力時ライブ変換', () => {
+        /** 既存の脚注定義（脚注一覧セクション）付きの初期HTMLを組み立てる */
+        function withExistingFootnote(bodyHtml: string): string {
+            return bodyHtml +
+                '<section class="footnotes" data-footnotes="true"><ol>' +
+                '<li id="fn-1" data-footnote-label="1">最初の脚注。' +
+                '<a href="#fnref-1" class="footnote-backref">back</a></li>' +
+                '</ol></section>';
+        }
+
+        test('既存の脚注定義があれば、新たに入力した参照はライブで上付きリンクへ変換される', () => {
+            env.editor.innerHTML = withExistingFootnote('<p>本文[^1]です。</p>');
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, true, env.editor.innerHTML);
+            const ref = env.editor.querySelector('sup.footnote-ref');
+            assert.ok(ref, env.editor.innerHTML);
+            assert.strictEqual(ref!.getAttribute('data-footnote-label'), '1');
+            assert.strictEqual(ref!.querySelector('a')!.getAttribute('href'), '#fn-1');
+        });
+
+        test('対応する脚注一覧セクションがまだ無い参照はライブ変換されない（リテラルのまま）', () => {
+            env.editor.innerHTML = '<p>本文[^1]です。</p>';
+            const { didFormat } = env.commands.applyInlineFormatting();
+            assert.strictEqual(didFormat, false, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelector('sup.footnote-ref'), null);
+            assert.ok(env.editor.textContent!.includes('[^1]'), env.editor.innerHTML);
+        });
+
+        test('脚注定義行そのもの（[^1]: 本文）は参照として誤変換されない', () => {
+            env.editor.innerHTML = withExistingFootnote('<p>[^1]: 二つ目の定義文。</p>');
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('p sup.footnote-ref'), null, env.editor.innerHTML);
+        });
+
+        test('ライブ変換された参照は保存（htmlToMarkdown）で[^label]へ正しく戻る', () => {
+            env.editor.innerHTML = withExistingFootnote('<p>本文[^1]です。</p>');
+            env.commands.applyInlineFormatting();
+            const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
+            assert.ok(md.includes('本文[^1]です。'), md);
+        });
+
+        test('見出し・リスト項目・表セル・引用内の参照はライブ変換しない（markdown.jsが段落以外で脚注を変換しない仕様と揃える）', () => {
+            // markdownToHtml は footnoteInfo.labels を段落（<p>）変換にしか渡していないため、
+            // 見出し等でライブ変換してしまうと「編集中はリンクに見えるが保存/再読込で消える」
+            // 非対称が生じる。ライブ変換もこれらのブロックでは無変換のままにする。
+            env.editor.innerHTML = withExistingFootnote('<h2>Heading[^1]</h2>');
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('h2 sup.footnote-ref'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('h2')!.textContent!.includes('[^1]'), env.editor.innerHTML);
+
+            env.editor.innerHTML = withExistingFootnote('<ul><li>item[^1]</li></ul>');
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('li sup.footnote-ref'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('li')!.textContent!.includes('[^1]'), env.editor.innerHTML);
+
+            env.editor.innerHTML = withExistingFootnote('<table><tr><td>cell[^1]</td></tr></table>');
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('td sup.footnote-ref'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('td')!.textContent!.includes('[^1]'), env.editor.innerHTML);
+
+            env.editor.innerHTML = withExistingFootnote('<blockquote>quote[^1]</blockquote>');
+            env.commands.applyInlineFormatting();
+            assert.strictEqual(env.editor.querySelector('blockquote sup.footnote-ref'), null, env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('blockquote')!.textContent!.includes('[^1]'), env.editor.innerHTML);
+        });
+
+        test('数式・画像・コードを含む同じテキストノードでも脚注変換が数字を誤って消費しない', () => {
+            env.editor.innerHTML = withExistingFootnote('<p>式$x^2$と参照[^1]と`code1`。</p>');
+            env.commands.applyInlineFormatting();
+            const p = env.editor.querySelector('p')!;
+            assert.ok(p.querySelector('.math-inline'), p.innerHTML);
+            assert.ok(p.querySelector('sup.footnote-ref'), p.innerHTML);
+            assert.strictEqual(p.querySelector('code')!.textContent, 'code1');
+        });
+
+        test('数式・画像の記法中に脚注ラベルと同じ文字列があっても属性値を破壊しない', () => {
+            // "1" が既存の脚注ラベルの場合、数式内・画像alt内にたまたま `[^1]` 相当の
+            // 文字列が含まれていても、それらは脚注参照ではなく数式/画像の中身として
+            // 保持されなければならない（対応する [^1] 参照ではないため誤変換は不可）。
+            env.editor.innerHTML = withExistingFootnote('<p>value $a[^1]b$ end</p>');
+            env.commands.applyInlineFormatting();
+            const p = env.editor.querySelector('p')!;
+            const math = p.querySelector('.math-inline');
+            assert.ok(math, p.innerHTML);
+            assert.strictEqual(math!.getAttribute('data-math'), 'a[^1]b', p.innerHTML);
+            assert.strictEqual(math!.querySelector('sup'), null, p.innerHTML);
+
+            // alt側は `]` を含められない構文上の制約があるため、url側（`)` を含まなければ
+            // 任意の文字を許容する）に脚注ラベルと同じ文字列を仕込んで検証する。
+            env.editor.innerHTML = withExistingFootnote('<p>見出し![alt](http://example.com/[^1]x.png)終わり</p>');
+            env.commands.applyInlineFormatting();
+            const p2 = env.editor.querySelector('p')!;
+            const img = p2.querySelector('img');
+            assert.ok(img, p2.innerHTML);
+            assert.strictEqual(img!.getAttribute('src'), 'http://example.com/[^1]x.png', p2.innerHTML);
+        });
+    });
+
     suite('scrollToAnchor（TOCアンカーの遷移）', () => {
         test('#slug に対応するid要素へscrollIntoViewする', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml('# Title\n\n## Section A');
@@ -1978,6 +2125,42 @@ suite('CommandsModule', () => {
                 const chain = env.commands.buildBreadcrumbChain([H1], 0);
                 assert.deepStrictEqual(Array.from(chain), [H1]);
             });
+        });
+    });
+
+    suite('getFootnoteDefinitionText（脚注ホバーツールチップ用の本文取得）', () => {
+        test('対応する脚注定義（#fn-label）の本文を、戻りリンクを除いて返す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '本文[^1]。\n\n[^1]: これが脚注の本文です。'
+            );
+            const text = env.commands.getFootnoteDefinitionText(env.editor, '1');
+            assert.strictEqual(text, 'これが脚注の本文です。');
+        });
+
+        test('脚注本文のインライン装飾はテキストとして取り出す（タグは含まない）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '本文[^1]。\n\n[^1]: **重要**な注釈です。'
+            );
+            const text = env.commands.getFootnoteDefinitionText(env.editor, '1');
+            assert.strictEqual(text, '重要な注釈です。');
+        });
+
+        test('対応する定義が存在しなければ空文字を返す', () => {
+            env.editor.innerHTML = '<p>本文だけ</p>';
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(env.editor, '1'), '');
+        });
+
+        test('editorやlabelが無ければ空文字を返す（例外を投げない）', () => {
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(null as any, '1'), '');
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(env.editor, ''), '');
+        });
+
+        test('複数の脚注があっても該当ラベルの本文だけを返す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '参照[^1]と[^note]。\n\n[^1]: 最初の脚注。\n[^note]: 二番目の脚注。'
+            );
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(env.editor, '1'), '最初の脚注。');
+            assert.strictEqual(env.commands.getFootnoteDefinitionText(env.editor, 'note'), '二番目の脚注。');
         });
     });
 

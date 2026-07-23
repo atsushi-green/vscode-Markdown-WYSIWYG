@@ -132,9 +132,19 @@ body {
     border: none;
     resize: none;
     /* 行番号を論理行と1対1で揃えるため折り返さない（VS Codeの既定＝
-       行折り返しオフと同じ。長い行は横スクロールで確認する）。 */
+       行折り返しオフと同じ。長い行は横スクロールで確認する）。
+       折り返しON（.raw-wrap-on）時は下のルールで上書きする。 */
     white-space: pre;
     overflow-wrap: normal;
+}
+
+/* Rawモードの行折り返しON時。white-spaceをpre-wrapへ切り替えて折り返す。
+   行番号ガターは論理行1つ＝固定22px行高の前提で作られており、折り返した行では
+   視覚行とガターの番号送りがずれるため、ON中はガター自体をJS側（editor.jsの
+   applyRawWrapMode）で非表示にする。 */
+.raw-editor-wrap.raw-wrap-on #rawEditor {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
 }
 
 #rawEditor:focus {
@@ -676,10 +686,62 @@ body.vscode-dark #editor strong {
     --alert-accent: var(--vscode-editorError-foreground, var(--vscode-charts-red));
 }
 
+/* YAML front matter（文書先頭の `---` ブロック）。既定は折りたたみ表示。 */
+#editor .frontmatter {
+    margin: 0 0 1em 0;
+    border: 1px solid var(--vscode-editorGroup-border);
+    border-radius: 3px;
+    background-color: var(--vscode-textCodeBlock-background);
+}
+
+#editor .frontmatter-header {
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.9em;
+}
+
+#editor .frontmatter-toggle-icon {
+    display: inline-block;
+    transition: transform 0.1s ease;
+}
+
+#editor .frontmatter.frontmatter-expanded .frontmatter-toggle-icon {
+    transform: rotate(90deg);
+}
+
+#editor .frontmatter-body {
+    display: none;
+    margin: 0;
+    padding: 0 10px 10px;
+    background: transparent;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    white-space: pre-wrap;
+}
+
+#editor .frontmatter.frontmatter-expanded .frontmatter-body {
+    display: block;
+}
+
 #editor ul,
 #editor ol {
     margin: 1em 0;
     padding-left: 2em;
+}
+
+/* 定義リスト（Term\n: Definition） */
+#editor dl {
+    margin: 1em 0;
+}
+
+#editor dt {
+    font-weight: 600;
+}
+
+#editor dd {
+    margin: 0.2em 0 0.8em 2em;
 }
 
 #editor li {
@@ -716,6 +778,54 @@ body.vscode-dark #editor strong {
 #editor img {
     max-width: 100%;
     height: auto;
+}
+
+/* 脚注参照（[^label] → <sup class="footnote-ref">）: 上付き・下線無しリンク */
+#editor sup.footnote-ref a {
+    color: var(--vscode-textLink-foreground);
+    text-decoration: none;
+}
+
+#editor sup.footnote-ref a:hover {
+    text-decoration: underline;
+}
+
+/* 脚注一覧セクション（文書末尾に集約） */
+#editor section.footnotes {
+    margin-top: 2em;
+    padding-top: 0.5em;
+    border-top: 1px solid var(--vscode-editorGroup-border);
+    font-size: 0.9em;
+    color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+}
+
+#editor section.footnotes ol {
+    padding-left: 1.5em;
+}
+
+#editor section.footnotes .footnote-backref {
+    text-decoration: none;
+    margin-left: 0.25em;
+}
+
+/* 脚注参照ホバー時のツールチップ（定義本文を表示）。VS Code標準のホバー
+   ウィジェットと似た見た目にする（`.mermaid-context-menu`等の「メニュー」系とは
+   異なりコンテンツ幅に合わせるだけ＝`min-width`は持たせない）。 */
+.footnote-tooltip {
+    position: fixed;
+    z-index: 10000;
+    max-width: 320px;
+    padding: 6px 10px;
+    background-color: var(--vscode-editorHoverWidget-background, var(--vscode-menu-background, #252526));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-menu-border, #454545));
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));
+    pointer-events: none;
+    white-space: normal;
+    word-break: break-word;
 }
 
 #editor table {
