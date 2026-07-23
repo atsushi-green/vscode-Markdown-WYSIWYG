@@ -839,6 +839,32 @@ suite('TableModule', () => {
         });
     });
 
+    suite('computeDialogPosition', () => {
+        test('anchorがあればcomputeMenuPositionと同じ規則でその近くへ配置する', () => {
+            const pos = env.table.computeDialogPosition({ x: 100, y: 120 }, 180, 40, 1024, 768);
+            assert.strictEqual(pos.left, 100);
+            assert.strictEqual(pos.top, 120);
+        });
+
+        test('anchorがあってもビューポート右端・下端からはみ出すなら内側へ寄せる', () => {
+            const pos = env.table.computeDialogPosition({ x: 1000, y: 760 }, 180, 40, 1024, 768);
+            assert.strictEqual(pos.left, 1024 - 180 - 10);
+            assert.strictEqual(pos.top, 768 - 40 - 10);
+        });
+
+        test('anchorが無ければビューポート中央へ配置する', () => {
+            const pos = env.table.computeDialogPosition(undefined, 200, 100, 1024, 768);
+            assert.strictEqual(pos.left, (1024 - 200) / 2);
+            assert.strictEqual(pos.top, (768 - 100) / 2);
+        });
+
+        test('anchorが無くダイアログがビューポートより大きくても負にはしない', () => {
+            const pos = env.table.computeDialogPosition(null, 2000, 2000, 1024, 768);
+            assert.strictEqual(pos.left, 0);
+            assert.strictEqual(pos.top, 0);
+        });
+    });
+
     suite('clampTableDimensions', () => {
         test('正常な文字列/数値は整数化してそのまま返す', () => {
             assert.deepStrictEqual(
@@ -983,6 +1009,24 @@ suite('TableModule', () => {
             const dialog = env.document.getElementById('tableInsertDialog')!;
             assert.notStrictEqual(dialog.style.display, 'none');
             assert.strictEqual(env.document.getElementById('tableContextMenu')!.style.display, 'none');
+        });
+
+        test('メニュー項目クリックで開いたダイアログは右クリック位置の近くへ表示される（画面右上固定だった問題の回帰防止）', () => {
+            env.table.setupContextMenu(env.editor);
+            env.editor.innerHTML = '<p><br></p>';
+            dispatchContextMenu(env.editor.querySelector('p')!, 300, 200);
+
+            const item = env.document.querySelector(
+                '.table-menu-item[data-action="insertTable"]'
+            ) as HTMLElement;
+            item.click();
+
+            const dialog = env.document.getElementById('tableInsertDialog')!;
+            // jsdomはレイアウトを行わないためダイアログ自身のgetBoundingClientRectは
+            // 常に0幅0高になり、computeMenuPositionのはみ出し補正は働かない
+            // （＝クリック座標がそのまま採用される）。
+            assert.strictEqual(dialog.style.left, '300px');
+            assert.strictEqual(dialog.style.top, '200px');
         });
 
         test('ダイアログでOKを押すと指定サイズの表を挿入する', () => {

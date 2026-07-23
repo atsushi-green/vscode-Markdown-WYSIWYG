@@ -29,7 +29,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 表の挿入ダイアログの表示位置を右クリック位置の近くにする | S | 現状 `table.js` の `ensureInsertDialog` は `.link-dialog`（`position:absolute; top:48px; right:20px`）を `document.body` 直下へ挿すため、右クリック位置に関わらず画面右上に出る（`#linkDialog` はエディタコンテナ内にあり基準が異なる）。`/local-review` B-1。右クリック座標付近やエディタ中央に出す方が自然。`computeMenuPosition` を流用してダイアログも同様に配置するか、既存 `#linkDialog` と同じ配置基準に揃える。実機で見た目確認前提 |
 | todo | 画像貼り付けの `buildImageMarkdown` でMarkdownアクティブ文字もエンコードする | S | `commands.js` の `buildImageMarkdown` は現状パスの空白/丸括弧のみ `%20`/`%28`/`%29` へエンコードする。パスに `_`（2個以上）や `*`・バッククォート等が含まれると再読込時に `convertInline` の強調/コード正規表現にマッチして往復が壊れる潜在リスク。今は生成ファイル名がハイフン＋数字＋同一フォルダ限定で**実害なし**だが、サブディレクトリ保存やalt付与へ拡張する際に対処が要る（URLエンコード or `<...>` 表記）。`/local-review` B-1 由来 |
 | todo | 画像・リンクのタイトル記法 `![alt](url "title")` / `[text](url "title")` 対応 | S | 現状 `convertInline`/`convertInlineText` の画像・リンク正規表現は `([^)]+)` で `url "title"` 全体をURLに取り込み、`"` が `&quot;` 化されて壊れる（往復も崩れる）。タイトル部分を分離して `title` 属性へ、直列化で `(url "title")` へ戻す。画像・リンク共通の既存制約（今回の画像対応起因ではない）。`/local-review` B-1 由来 |
 | todo | 表の列追加・削除時に他列のセパレーター書式（スペース有無・アライメント）を維持する | S | 表区切り行の元表記保持（`data-sep`、[roadmap-done.md](./roadmap-done.md)参照）は現状、列数がヘッダーと食い違うと全列がデフォルト`---`書式にフォールバックする実装（`serializeTable`）。列追加・削除（`table.js`の`addColumn`/`deleteColumn`）で`data-sep`も同時に更新し、変更していない他列の書式だけは保つようにすると良い。`/local-review`指摘（severity low, PLAUSIBLE）由来 |
@@ -51,6 +50,7 @@
 | todo | front matterヘッダのラベルが英語表記（"Front Matter"）で他のUI文言と不統一 | S | 他のUI文言（「コードをコピー」「見出しが見つかりません」等）は日本語だが、front matterヘッダだけ`Front Matter`と英語表記になっている。日本語ラベル（例:「フロントマター」）への統一を検討。front matter機能追加時の`/local-review`指摘（severity low）由来 |
 | todo | 文書が水平線（`---`）から始まり後方にも`---`があると、内容を検証せずfront matterと誤認される | S | `parseFrontMatter`は「1行目が`---`」「後続のどこかに`---`」という位置関係のみで判定し、中身がYAMLらしいか等は検証しない。文書が装飾目的の水平線から始まり、後方に別の水平線がある通常のMarkdown文書（稀なケース）だと、間の内容が丸ごと折りたたみ済みfront matterとして表示されてしまう（保存されるMarkdown自体は保たれるが表示が崩れる）。実際のJekyll/Hugo等も同様に内容検証をしない設計のため妥当な面もあるが、実害があれば内容行がYAMLの`key: value`らしいかを軽く検証するなど再検討する。front matter機能追加時の`/local-review`指摘（severity low〜medium, 確信度中）由来 |
 | todo | Rawモードの行折り返しトグルボタンがWYSIWYGモード中も常時表示・クリック可能で、効果が見えず誤解を招きうる | S | `#toggleRawWrap`は`#toggleView`（Raw/WYSIWYG切替）と異なり、モードに応じた表示/無効化制御が無い。WYSIWYGモード中にクリックしてもRawモードに入るまでボタンの`active`表示以外に見た目の変化が無いため、初見のユーザーが「効いていない」と誤解しうる（title属性で補足説明済みのため実害は小さい）。Rawモード中のみ表示・有効化する、または常時表示のままでも問題ないと判断するかを検討。行折り返しトグル機能追加時の`/local-review`指摘（severity low, 確信度中）由来 |
+| todo | `table.js`の`computeMenuPosition`/`computeDialogPosition`が右端・下端のはみ出し補正のみで、左端・上端（負のanchor座標）を補正しない | S | `computeMenuPosition`は`left + menuWidth > viewportWidth`等の右下方向のはみ出ししか補正せず、`anchor.x`/`anchor.y`が負の場合（例: エディタが水平スクロールしていてキャレット由来のanchorが画面左に出る等）にダイアログ/メニューが画面外（左上）へはみ出す可能性がある。マウス右クリック由来の座標は通常負にならないため従来は顕在化しなかったが、表挿入ダイアログの位置修正でキャレット矩形（`range.getBoundingClientRect()`）由来のanchorを使う経路が増えたことで理論上の発生余地が生まれた。`left`/`top`にも`Math.max(0, ...)`相当の下限クランプを追加すると良い。表挿入ダイアログ位置修正時の`/local-review`指摘（severity low, PLAUSIBLE）由来 |
 
 ## 完了 (done)
 

@@ -847,6 +847,9 @@ window.TableModule = (function() {
     // 直近の showInsertDialog 呼び出し元へ、確定（実際に表を挿入できた）後にのみ通知する
     // コールバック。キャンセル時は呼ばない＝呼び出し元は「挿入されなかった」と判断できる。
     let onInsertConfirmed = null;
+    // 直近の右クリック位置。挿入メニュー表示時に記録し、そのメニューから
+    // 「表を挿入…」を選んでダイアログを開く際に、同じ位置の近くへ表示するために使う。
+    let lastContextMenuPoint = null;
 
     // 挿入メニューを出さない「特別な」ブロック（数式・Mermaid・既存テーブル）。
     // これらの上での右クリックはそれぞれの担当（数式メニュー／Mermaidメニュー／
@@ -938,6 +941,25 @@ window.TableModule = (function() {
     }
 
     /**
+     * 表の挿入ダイアログの表示位置を決める純粋関数。
+     * `anchor`（右クリック位置やキャレット位置などの基準点 `{x, y}`）があれば
+     * `computeMenuPosition` と同じ規則（ビューポート右端・下端からはみ出す場合は
+     * 内側へ寄せる）でその近くへ、無ければビューポート中央へ配置する
+     * （`/local-review`指摘: 右クリック位置に関わらず画面右上固定だった問題への対応。
+     * キャレット位置しか分からない呼び出し元＝スラッシュコマンドメニュー等ではエディタ
+     * 中央に出す方が自然、という ROADMAP の記載に合わせて中央フォールバックを用意）。
+     */
+    function computeDialogPosition(anchor, dialogWidth, dialogHeight, viewportWidth, viewportHeight) {
+        if (anchor) {
+            return computeMenuPosition(anchor.x, anchor.y, dialogWidth, dialogHeight, viewportWidth, viewportHeight);
+        }
+        return {
+            left: Math.max(0, (viewportWidth - dialogWidth) / 2),
+            top: Math.max(0, (viewportHeight - dialogHeight) / 2)
+        };
+    }
+
+    /**
      * ダイアログの行数・列数入力（文字列でも数値でも可）を、1以上・上限以下の
      * 整数へ正規化する純粋関数。空・非数値・0以下は既定値へ丸める。
      * @returns {{rows:number, cols:number}}
@@ -978,7 +1000,7 @@ window.TableModule = (function() {
             e.preventDefault();
             e.stopPropagation();
             hideInsertMenu();
-            showInsertDialog();
+            showInsertDialog(undefined, lastContextMenuPoint);
         });
         menu.appendChild(item);
 
@@ -1126,11 +1148,17 @@ window.TableModule = (function() {
      * @param {Function} [onInserted] 実際に表を挿入できた（OK確定・キャンセルでない）場合にのみ
      * 呼ばれるコールバック。右クリックメニュー以外の呼び出し元（スラッシュコマンドメニュー等）が、
      * 挿入位置に置いたプレースホルダの後始末をキャンセル時と区別して行いたい場合に使う。
+     * @param {{x:number, y:number}} [anchor] ダイアログを近くへ表示する基準点（右クリック位置・
+     * キャレット位置など）。省略時はビューポート中央に表示する（`computeDialogPosition`参照）。
      */
-    function showInsertDialog(onInserted) {
+    function showInsertDialog(onInserted, anchor) {
         onInsertConfirmed = typeof onInserted === 'function' ? onInserted : null;
         const dialog = ensureInsertDialog();
         dialog.style.display = '';
+        const rect = dialog.getBoundingClientRect();
+        const pos = computeDialogPosition(anchor, rect.width, rect.height, window.innerWidth, window.innerHeight);
+        dialog.style.left = pos.left + 'px';
+        dialog.style.top = pos.top + 'px';
         if (dialog._rowsInput) {
             dialog._rowsInput.focus();
             if (typeof dialog._rowsInput.select === 'function') {
@@ -1204,6 +1232,7 @@ window.TableModule = (function() {
                     pendingInsertRange = r.cloneRange();
                 }
             }
+            lastContextMenuPoint = { x: e.clientX, y: e.clientY };
             showInsertMenu(e.clientX, e.clientY);
         });
 
@@ -1263,6 +1292,7 @@ window.TableModule = (function() {
         isBlockEmpty: isBlockEmpty,
         shouldShowInsertMenu: shouldShowInsertMenu,
         computeMenuPosition: computeMenuPosition,
+        computeDialogPosition: computeDialogPosition,
         clampTableDimensions: clampTableDimensions,
         cellPosition: cellPosition,
         computeCellRange: computeCellRange,

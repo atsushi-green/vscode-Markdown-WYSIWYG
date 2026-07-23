@@ -902,6 +902,16 @@ body.vscode-dark #editor strong {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
+/* 表の挿入ダイアログは `.link-dialog` の配色・見た目を共有しつつ、位置だけは
+   固定（右上）にせず右クリック位置・キャレット位置の近くへ出す（table.jsの
+   showInsertDialog/computeDialogPositionがleft/topを都度計算して設定する）。
+   `.table-context-menu` 等の右クリックメニューと同じ position:fixed に揃える。 */
+.table-insert-dialog {
+    position: fixed;
+    top: 0;
+    right: auto;
+}
+
 .link-dialog-title {
     font-size: 13px;
     font-weight: 600;
