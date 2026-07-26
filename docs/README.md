@@ -22,4 +22,4 @@ Markdown WYSIWYG Editor 拡張機能の実装内容を機能単位・技術単�
 
 ## 自動開発ループ
 
-このリポジトリは Claude Code の `/evolve` スキルを `/loop 2h /evolve` で回し、機能追加・バグ修正を半自動で少しずつ進めています。仕組みと運用方法（実行方法・成果物の取り込み・巻き戻し）は [dev-loop.md](./dev-loop.md) にまとめています。
+このリポジトリは Claude Code の `/evolve` スキルを `/loop 6h /evolve` で回し、機能追加・バグ修正を半自動で少しずつ進めています。仕組みと運用方法（実行方法・成果物の取り込み・巻き戻し）は [dev-loop.md](./dev-loop.md) にまとめています。
