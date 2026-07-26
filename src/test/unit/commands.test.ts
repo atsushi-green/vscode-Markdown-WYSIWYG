@@ -2444,8 +2444,112 @@ suite('CommandsModule', () => {
                 );
             });
 
+            test('URLの区切り文字（#・?）をエンコードする', () => {
+                // エンコードしないと resolveImageSrc の結合後にフラグメント/クエリと
+                // 解釈され、その位置以降がパスから切り落とされて画像が表示されない
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a#b.png'), '![](a%23b.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a?b.png'), '![](a%3Fb.png)'
+                );
+            });
+
+            test('インライン退避に巻き込まれる文字（`・$）をエンコードする', () => {
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a`b`c.png'), '![](a%60b%60c.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a$b$c.png'), '![](a%24b%24c.png)'
+                );
+            });
+
+            test('Markdown/HTMLであいまいな文字（<>"\\[]）をエンコードする', () => {
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a<b>c".png'),
+                    '![](a%3Cb%3Ec%22.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a\\b[c].png'),
+                    '![](a%5Cb%5Bc%5D.png)'
+                );
+            });
+
+            test('% は %25 へエンコードし、二重エンコードしない', () => {
+                // 単一パス置換なので、生成した %20 の % が再度拾われない
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('100% a.png'), '![](100%25%20a.png)'
+                );
+            });
+
+            test('強調記法文字（_ * ~ +）と非ASCIIはエンコードしない', () => {
+                // 画像はプレースホルダへ退避されてから強調変換が走るため化けない。
+                // エンコードするとパスが読みにくくなるだけなので対象外にしている
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('image_1*2~3+4.png'),
+                    '![](image_1*2~3+4.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('画像-1.png'), '![](画像-1.png)'
+                );
+            });
+
+            test('対応表に無い空白（タブ・全角スペース）は encodeURIComponent へ委ねる', () => {
+                // 正規表現の \s は半角スペース以外の空白にもマッチする。これらを
+                // 一律 %20 へ潰すと別の文字になり実ファイルへ解決できなくなるため、
+                // 元の文字を保つ encodeURIComponent でエンコードする
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a\tb.png'), '![](a%09b.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a　b.png'),
+                    '![](a%E3%80%80b.png)'
+                );
+            });
+
             test('空パスは ![]() ', () => {
                 assert.strictEqual(env.commands.buildImageMarkdown(''), '![]()');
+            });
+
+            test('エンコード済みパスは読込変換（convertInline）の往復で保たれる', () => {
+                // ` と $ はインラインコード・数式として画像より先に退避され、画像より
+                // 後で復元されるため、生のままだと src の値が汚染される（`）か、
+                // 属性値が途中で閉じてHTML構造ごと壊れる（$）
+                const md = env.commands.buildImageMarkdown('a`b`c $d$ (e).png');
+                env.editor.innerHTML = env.markdown.markdownToHtml(md);
+
+                const img = env.editor.querySelector('img');
+                assert.ok(img, '<img> が生成される');
+                assert.strictEqual(img!.getAttribute('src'),
+                    'a%60b%60c%20%24d%24%20%28e%29.png');
+                // 退避したコード・数式が属性値の中で展開されていない
+                // （<img> は void 要素なので innerHTML では検出できない）
+                assert.ok(!env.editor.querySelector('code'), env.editor.innerHTML);
+                assert.ok(!env.editor.querySelector('.math-inline'), env.editor.innerHTML);
+                assert.strictEqual(env.editor.textContent!.trim(), '',
+                    '壊れた属性値の残骸が本文へ落ちていない');
+
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md);
+            });
+
+            test('エンコード済みパスはライブ変換（convertInlineText）でも壊れない', () => {
+                // 貼り付け直後に走る経路。読込変換と同じ退避順序の問題を持つため、
+                // 主目的である「貼り付けた瞬間から壊れない」ことをこちらでも確認する
+                const md = env.commands.buildImageMarkdown('a`b`c $d$ (e).png');
+                env.editor.innerHTML = '<p>' + md + ' 後続</p>';
+                env.commands.applyInlineFormatting();
+
+                const img = env.editor.querySelector('img');
+                assert.ok(img, env.editor.innerHTML);
+                assert.strictEqual(img!.getAttribute('src'),
+                    'a%60b%60c%20%24d%24%20%28e%29.png');
+                assert.ok(!env.editor.querySelector('code'), env.editor.innerHTML);
+                assert.ok(!env.editor.querySelector('.math-inline'), env.editor.innerHTML);
+                assert.strictEqual(env.editor.textContent!.trim(), '後続',
+                    '壊れた属性値の残骸が本文へ落ちていない');
             });
         });
 

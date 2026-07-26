@@ -29,7 +29,7 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 画像貼り付けの `buildImageMarkdown` でMarkdownアクティブ文字もエンコードする | S | `commands.js` の `buildImageMarkdown` は現状パスの空白/丸括弧のみ `%20`/`%28`/`%29` へエンコードする。パスに `_`（2個以上）や `*`・バッククォート等が含まれると再読込時に `convertInline` の強調/コード正規表現にマッチして往復が壊れる潜在リスク。今は生成ファイル名がハイフン＋数字＋同一フォルダ限定で**実害なし**だが、サブディレクトリ保存やalt付与へ拡張する際に対処が要る（URLエンコード or `<...>` 表記）。`/local-review` B-1 由来 |
+| todo | `toMarkdownRelativePath` がファイル名中の `\` をパス区切りとして壊す | S | `src/imagePaste.ts` の `toMarkdownRelativePath` は `rel.split(/[\\/]/).join('/')` でWindowsの `\` を `/` へ正規化するが、macOS/Linuxでは `\` は**ファイル名に使える普通の文字**のため、`a\b.png` というファイル名が `a/b.png` という別パスに化ける。プラットフォーム判定（`path.sep`）で分岐するか、`path.posix` 経由で組み立てると良い。現状は保存ファイル名が `image-<日時>.<拡張子>` 固定で `\` を含まないため実害はなく、`buildImageMarkdown` の `\`→`%5C` エンコードもこの経路からは到達しない。`/local-review` B-1 由来 |
 | todo | 画像・リンクのタイトル記法 `![alt](url "title")` / `[text](url "title")` 対応 | S | 現状 `convertInline`/`convertInlineText` の画像・リンク正規表現は `([^)]+)` で `url "title"` 全体をURLに取り込み、`"` が `&quot;` 化されて壊れる（往復も崩れる）。タイトル部分を分離して `title` 属性へ、直列化で `(url "title")` へ戻す。画像・リンク共通の既存制約（今回の画像対応起因ではない）。`/local-review` B-1 由来 |
 | todo | 表の列追加・削除時に他列のセパレーター書式（スペース有無・アライメント）を維持する | S | 表区切り行の元表記保持（`data-sep`、[roadmap-done.md](./roadmap-done.md)参照）は現状、列数がヘッダーと食い違うと全列がデフォルト`---`書式にフォールバックする実装（`serializeTable`）。列追加・削除（`table.js`の`addColumn`/`deleteColumn`）で`data-sep`も同時に更新し、変更していない他列の書式だけは保つようにすると良い。`/local-review`指摘（severity low, PLAUSIBLE）由来 |
 | todo | PDFエクスポート機能 | L | まずS/Mに分割してから着手。方式候補: (1) VS Code標準の印刷（Webview→ブラウザ印刷ダイアログ）にCSS `@media print` を用意して委ねる案（軽量・依存追加なし）、(2) `puppeteer-core` 等でHTML→PDFをヘッドレス変換する案（見た目の再現度は高いが依存が重く拡張機能サイズが増える）。Mermaid図のPNG化（html2canvas）で確立した「クリーンHTML抽出→変換」の流れを流用できる。まずは(1)の印刷スタイル対応から着手し、要望が強ければ(2)を検討するのが妥当 |
