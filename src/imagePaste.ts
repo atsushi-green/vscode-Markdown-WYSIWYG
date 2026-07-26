@@ -77,14 +77,34 @@ export function disambiguateFilename(name: string, existing: string[]): string {
 }
 
 /**
+ * `toMarkdownRelativePath` が使う `path` モジュールの最小インタフェース。
+ * 実行時は Node の `path`（プラットフォーム依存）だが、テストからは
+ * `path.posix` / `path.win32` を渡して**両プラットフォームの挙動を
+ * 実行環境に依存せず**検証できる。
+ */
+export type PathModule = Pick<typeof path, 'relative' | 'sep'>;
+
+/**
  * ドキュメントのあるディレクトリから画像ファイルへの相対パスを、
  * Markdownの `![](…)` に埋め込める **POSIX区切り**（`/`）で返す純粋関数。
- * 同じフォルダならファイル名だけになる。Windowsの `\` も `/` に正規化する。
+ * 同じフォルダならファイル名だけになる。Windowsの `\` は `/` に正規化する。
+ *
+ * 区切り文字の判定には**そのプラットフォームの `path.sep` だけ**を使う。
+ * `\` と `/` の両方を一律に区切りとみなす（`split(/[\\/]/)`）と、macOS/Linuxで
+ * `\` が**ファイル名に使える普通の文字**であるため `a\b.png` というファイル名が
+ * `a/b.png` という別パスへ化けてしまう。`path.relative` の戻り値は必ず
+ * そのプラットフォームの `sep` で区切られる（Windowsでは入力に `/` が
+ * 混ざっていても出力は `\` に正規化される）ので、`sep` だけを見れば足りる。
  *
  * @param docDir  ドキュメントのあるディレクトリの絶対パス
  * @param absFilePath 保存した画像ファイルの絶対パス
+ * @param pathImpl 使用する `path` 実装。既定は実行プラットフォームのもの
  */
-export function toMarkdownRelativePath(docDir: string, absFilePath: string): string {
-    const rel = path.relative(docDir, absFilePath);
-    return rel.split(/[\\/]/).join('/');
+export function toMarkdownRelativePath(
+    docDir: string,
+    absFilePath: string,
+    pathImpl: PathModule = path
+): string {
+    const rel = pathImpl.relative(docDir, absFilePath);
+    return pathImpl.sep === '/' ? rel : rel.split(pathImpl.sep).join('/');
 }
