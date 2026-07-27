@@ -749,6 +749,70 @@ suite('MarkdownModule', () => {
                 assert.ok(!html.includes('footnote-ref'), html);
             });
 
+            test('ラベル中の _ が強調変換に食われない（参照側）', () => {
+                // ラベルは [A-Za-z0-9_-] を許すので `_` は正当な文字。
+                // 参照の <sup> を実HTMLのまま埋めると属性・href・id が
+                // `a<em>b</em>c` に化けて脚注リンクのジャンプが壊れる
+                const html = env.markdown.markdownToHtml(
+                    '本文[^a_b_c]です。\n\n[^a_b_c]: 脚注の本文。'
+                );
+                assert.ok(!html.includes('<em>'), html);
+                env.editor.innerHTML = html;
+                const sup = env.editor.querySelector('sup.footnote-ref');
+                assert.ok(sup, html);
+                assert.strictEqual(sup!.getAttribute('data-footnote-label'), 'a_b_c');
+                const ref = sup!.querySelector('a');
+                assert.strictEqual(ref!.getAttribute('href'), '#fn-a_b_c');
+                assert.strictEqual(ref!.getAttribute('id'), 'fnref-a_b_c');
+                // 参照先の脚注一覧側の id と一致する（ジャンプが成立する）
+                const li = env.editor.querySelector('section.footnotes li');
+                assert.strictEqual(li!.getAttribute('id'), 'fn-a_b_c', html);
+            });
+
+            test('_ を含むラベルの脚注が往復する', () => {
+                for (const md of [
+                    // 斜体経路（(^|[^_])_([^_]+)_(?!_)）で壊れていたケース
+                    '本文[^a_b_c]です。\n\n[^a_b_c]: 脚注の本文。',
+                    // 太字経路（__(.+?)__ の非貪欲マッチが <sup> を跨ぐ）。修正前は
+                    // `本文[^a<strong>b]です。` となり </strong> すら残らずラベルの
+                    // 一部が消える、_ より重い壊れ方をしていた
+                    '本文[^a__b]です。\n\n[^a__b]: 脚注の本文。',
+                    // 強調が参照を跨ぐケース
+                    '*強調[^a_b_c]中*\n\n[^a_b_c]: 脚注。'
+                ]) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            test('同一段落に複数の参照があっても番号採番が混ざらない', () => {
+                // 退避のインデックス機構そのものの検証（隣接プレースホルダを含む）
+                const html = env.markdown.markdownToHtml(
+                    '本文[^a_1][^b_2]と[^a_1]です。\n\n[^a_1]: A\n[^b_2]: B'
+                );
+                env.editor.innerHTML = html;
+                const refs = env.editor.querySelectorAll('sup.footnote-ref');
+                assert.strictEqual(refs.length, 3, html);
+                assert.strictEqual(refs[0].getAttribute('data-footnote-label'), 'a_1');
+                assert.strictEqual(refs[1].getAttribute('data-footnote-label'), 'b_2');
+                assert.strictEqual(refs[2].getAttribute('data-footnote-label'), 'a_1');
+                assert.ok(!html.includes('<em>'), html);
+                assert.ok(!/\u0004/.test(html), 'プレースホルダが残っている');
+            });
+
+            test('* はラベル文字ではないので脚注にならない（仕様確認）', () => {
+                // ラベルは [A-Za-z0-9_-] に限定される。`[^a*b*c]` は脚注として
+                // 成立せず、ただの段落テキストとして斜体変換されるだけ
+                const html = env.markdown.markdownToHtml(
+                    '本文[^a*b*c]です。\n\n[^a*b*c]: 脚注の本文。'
+                );
+                assert.ok(!html.includes('footnote-ref'), html);
+                assert.ok(html.includes('<em>b</em>'), html);
+            });
+
             test('脚注定義が無ければ脚注一覧セクションも生成しない', () => {
                 const html = env.markdown.markdownToHtml('ただの本文です。');
                 assert.ok(!html.includes('footnotes'), html);

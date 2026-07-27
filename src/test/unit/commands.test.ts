@@ -2093,6 +2093,27 @@ suite('CommandsModule', () => {
             assert.strictEqual(ref!.querySelector('a')!.getAttribute('href'), '#fn-1');
         });
 
+        test('ラベル中の _ を含む参照が読込パスと同一の <sup> になる（対称性）', () => {
+            // ライブ変換側は以前からプレースホルダへ退避しており壊れていなかった。
+            // 読込パス（markdown.js）を揃えたので、両者の出力が一致することを
+            // outerHTML の実比較で固定する
+            const md = '本文[^a_b_c]です。\n\n[^a_b_c]: 脚注。';
+            env.editor.innerHTML = env.markdown.markdownToHtml(md);
+            const expected = env.editor.querySelector('sup.footnote-ref')!.outerHTML;
+
+            env.editor.innerHTML =
+                '<p>本文[^a_b_c]です。</p>' +
+                '<section class="footnotes" data-footnotes="true"><ol>' +
+                '<li id="fn-a_b_c" data-footnote-label="a_b_c">脚注。' +
+                '<a href="#fnref-a_b_c" class="footnote-backref">back</a></li>' +
+                '</ol></section>';
+            env.commands.applyInlineFormatting();
+            const ref = env.editor.querySelector('sup.footnote-ref');
+            assert.ok(ref, env.editor.innerHTML);
+            assert.strictEqual(ref!.outerHTML, expected, '読込パスとライブ変換で出力が異なる');
+            assert.ok(!env.editor.querySelector('em'), env.editor.innerHTML);
+        });
+
         test('対応する脚注一覧セクションがまだ無い参照はライブ変換されない（リテラルのまま）', () => {
             env.editor.innerHTML = '<p>本文[^1]です。</p>';
             const { didFormat } = env.commands.applyInlineFormatting();

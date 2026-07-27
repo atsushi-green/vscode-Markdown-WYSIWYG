@@ -229,13 +229,21 @@ window.MarkdownModule = (function() {
         // 直後に`:`が続くもの（`[^label]:`＝定義行の体裁。重複ラベルで無効化された
         // 定義が通常の段落へ回されたケースなど）は参照として変換しない
         // （extractFootnoteDefinitionsの参照カウント側と同じ`(?!:)`ガード）。
+        // 生成した `<sup>` はプレースホルダへ退避する（commands.js の convertInlineText と
+        // 同じ方針・同じ番号 4）。実HTMLのまま埋めると、ラベルが許す `_` を2つ以上
+        // 含むとき（`[^a_b_c]`）に後続の強調変換が属性値まで巻き込み、
+        // `data-footnote-label="a<em>b</em>c"`・`href="#fn-a<em>b</em>c"`・
+        // `id="fnref-a<em>b</em>c"` に化けて脚注リンクのジャンプが壊れる
+        // （脚注一覧側の `<li>` は別経路で生成されるため無事で、参照側だけがずれる）。
+        const footnoteSpans = [];
         if (footnoteLabels) {
             html = html.replace(/\[\^([A-Za-z0-9_-]+)\](?!:)/g, function (match, label) {
                 if (!footnoteLabels.has(label)) {
                     return match;
                 }
-                return '<sup class="footnote-ref" data-footnote-label="' + label + '">' +
-                    '<a href="#fn-' + label + '" id="fnref-' + label + '">' + label + '</a></sup>';
+                footnoteSpans.push('<sup class="footnote-ref" data-footnote-label="' + label + '">' +
+                    '<a href="#fn-' + label + '" id="fnref-' + label + '">' + label + '</a></sup>');
+                return '\u0004' + (footnoteSpans.length - 1) + '\u0004';
             });
         }
 
@@ -275,6 +283,14 @@ window.MarkdownModule = (function() {
         // 退避した \$ をリテラルのドル記号として復元（この時点なら数式判定は済んでいる）
         html = html.replace(/\u0001(\d+)\u0001/g, function (_m, i) {
             return escapedDollars[Number(i)];
+        });
+
+        // 退避した脚注参照を <sup> として復元。デリミタ付きなので順序には依存しないが、
+        // commands.js の convertInlineText と同じ「全復元の最後（コード復元の直前）」に
+        // 揃えている（ほぼ同一の2関数を並べて読むため、位置がずれていると片側だけ
+        // 直す事故を招く）。
+        html = html.replace(/\u0004(\d+)\u0004/g, function (_m, i) {
+            return footnoteSpans[Number(i)];
         });
 
         // 退避したインラインコードを <code> として復元（中身は整形しない）
