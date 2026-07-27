@@ -182,6 +182,48 @@ suite('MarkdownModule', () => {
                 }
             });
 
+            test('URL・タイトル中の _ / * が強調変換に食われない', () => {
+                // 画像と同じくリンクもプレースホルダへ退避してから強調変換を通す
+                const html = env.markdown.markdownToHtml('[t](https://e.com/a_b_c "x_y_z")');
+                assert.ok(!html.includes('<em>'), html);
+                env.editor.innerHTML = html;
+                const a = env.editor.querySelector('a');
+                assert.ok(a, html);
+                assert.strictEqual(a!.getAttribute('href'), 'https://e.com/a_b_c');
+                assert.strictEqual(a!.getAttribute('title'), 'x_y_z');
+            });
+
+            test('URL中の _ / * を含むリンクが往復する', () => {
+                for (const md of [
+                    '[t](https://e.com/a_b_c)',
+                    '[t](https://e.com/a*b*c)',
+                    '[t](https://e.com/x "a_b_c")',
+                    // 退避によって同時に守られる他の強調記法も固定しておく
+                    '[t](https://e.com/a~~b~~c)',
+                    '[t](https://e.com/a++b++c)',
+                    '[t](https://e.com/a__b__c)',
+                    '[t](https://e.com/x "a***b***c")'
+                ]) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            test('リンクテキスト内の強調は従来どおり変換される（回帰確認）', () => {
+                // 退避するのは開始タグ（属性）だけで、テキストは変換対象のまま
+                const html = env.markdown.markdownToHtml('[**太字**と*斜体*](https://e.com)');
+                assert.ok(html.includes('<strong>太字</strong>'), html);
+                assert.ok(html.includes('<em>斜体</em>'), html);
+                env.editor.innerHTML = html;
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '[**太字**と*斜体*](https://e.com)');
+            });
+
             test('data URL（内部に空白と \' を含む）＋タイトルでも往復する', () => {
                 // sample.md のタイトル付き画像と同型。URL中の `'` を閉じ引用符と
                 // 誤認すると URL が途中で切れる（最長のURL＋末尾の引用符対が正しい）

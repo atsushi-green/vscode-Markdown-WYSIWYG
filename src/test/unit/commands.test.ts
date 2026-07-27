@@ -105,6 +105,28 @@ suite('CommandsModule', () => {
             }
         });
 
+        test('ライブ変換でもURL・タイトル中の _ / * が強調に食われない', () => {
+            env.editor.innerHTML = '<p>[t](https://e.com/a_b_c "x_y_z") 後続</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            assert.strictEqual(a!.getAttribute('href'), 'https://e.com/a_b_c');
+            assert.strictEqual(a!.getAttribute('title'), 'x_y_z');
+            assert.ok(!env.editor.querySelector('em'), env.editor.innerHTML);
+        });
+
+        test('ライブ変換でもリンクテキスト内の強調は変換される（回帰確認）', () => {
+            env.editor.innerHTML = '<p>[**太字**](https://e.com) 後続</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            assert.ok(a!.querySelector('strong'), env.editor.innerHTML);
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(out, '[**太字**](https://e.com) 後続');
+        });
+
         test('タイトル記法の属性値は " をエスケープして埋め込む（ライブ変換）', () => {
             env.editor.innerHTML = '<p>[text](https://e.com \'a"b\')</p>';
             env.commands.applyInlineFormatting();

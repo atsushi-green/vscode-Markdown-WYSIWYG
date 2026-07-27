@@ -2554,11 +2554,18 @@ window.CommandsModule = (function() {
             return '' + (imgSpans.length - 1) + '';
         });
 
-        // リンク（`(url "title")` のタイトルは title 属性へ分離する）
-        html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, function (_m, text, dest) {
+        // リンク（`(url "title")` のタイトルは title 属性へ分離する）。
+        // markdown.js の convertInline と同じく**開始タグをプレースホルダへ退避する**
+        // （退避しないとURL・タイトル中の `_`/`*` が後続の強調変換に拾われ、
+        // `href="a<em>b</em>c"` のように属性値が壊れて往復が崩れる）。
+        // 退避するのは開始タグだけで、テキストと `</a>` は残す＝リンクテキスト内の
+        // 強調（`[**太字**](url)`）は従来どおり変換される。
+        const linkSpans = [];
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, text, dest) {
             const d = markdown.parseLinkDestination(dest);
-            return '<a href="' + attrValue(d.url) + '"' +
-                markdown.buildTitleAttr(d.title, attrValue) + '>' + text + '</a>';
+            linkSpans.push('<a href="' + attrValue(d.url) + '"' +
+                markdown.buildTitleAttr(d.title, attrValue) + '>');
+            return '\u0005' + (linkSpans.length - 1) + '\u0005' + text + '</a>';
         });
 
         // 脚注参照（[^label]）。対応する脚注定義がすでにエディタ内に存在する場合
@@ -2594,6 +2601,11 @@ window.CommandsModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避したリンクの開始タグを復元（属性中の記法文字を強調変換から守った）
+        html = html.replace(/\u0005(\d+)\u0005/g, function (_m, i) {
+            return linkSpans[Number(i)];
+        });
 
         // 退避した画像を <img> として復元（属性中の記法文字を強調変換から守った）
         html = html.replace(/(\d+)/g, function (_m, i) {
