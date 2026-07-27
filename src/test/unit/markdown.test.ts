@@ -112,6 +112,166 @@ suite('MarkdownModule', () => {
             assert.ok(html.includes('alt="a&quot;b"'), html);
         });
 
+        suite('タイトル記法 ![alt](url "title") / [text](url "title")', () => {
+            suite('parseLinkDestination', () => {
+                // 返り値は jsdom 側のレルムで生成されるため deepStrictEqual は
+                // プロトタイプ不一致で落ちる。プロパティごとに比較する
+                const assertDest = (
+                    dest: string, url: string, title: string | null
+                ) => {
+                    const d = env.markdown.parseLinkDestination(dest);
+                    assert.strictEqual(d.url, url, `url of ${JSON.stringify(dest)}`);
+                    assert.strictEqual(d.title, title, `title of ${JSON.stringify(dest)}`);
+                };
+
+                test('空白＋"…" をタイトルとして分離する', () => {
+                    assertDest('u.png "説明"', 'u.png', '説明');
+                });
+
+                test("'…' も受け付ける", () => {
+                    assertDest("u.png '説明'", 'u.png', '説明');
+                });
+
+                test('タイトルが無ければ title は null', () => {
+                    assertDest('u.png', 'u.png', null);
+                });
+
+                test('空白が無ければURLの一部として扱う（引用符入りのパスを守る）', () => {
+                    assertDest('a"b".png', 'a"b".png', null);
+                });
+
+                test('閉じ引用符が末尾に無い不正な形はタイトル無しとして扱う', () => {
+                    assertDest('u.png "a" b', 'u.png "a" b', null);
+                });
+
+                test('空のタイトル・前後の余分な空白を許容する', () => {
+                    assertDest('u.png   ""  ', 'u.png', '');
+                });
+            });
+
+            test('画像・リンクのタイトルを title 属性へ分離する', () => {
+                assert.strictEqual(
+                    env.markdown.markdownToHtml('![説明](a.png "タイトル")'),
+                    '<p><img src="a.png" alt="説明" title="タイトル"></p>'
+                );
+                assert.ok(
+                    env.markdown.markdownToHtml('[text](https://e.com "タイトル")')
+                        .includes('<a href="https://e.com" title="タイトル">text</a>'),
+                    env.markdown.markdownToHtml('[text](https://e.com "タイトル")')
+                );
+            });
+
+            test('タイトル中の " は属性値としてエスケープされる', () => {
+                const html = env.markdown.markdownToHtml("![a](u.png 'a\"b')");
+                assert.ok(html.includes('title="a&quot;b"'), html);
+                assert.ok(html.includes('src="u.png"'), html);
+            });
+
+            test('タイトル記法は往復で保たれる（画像・リンク）', () => {
+                const cases = [
+                    '![説明](a.png "タイトル")',
+                    '[text](https://e.com "タイトル")',
+                    "[text](https://e.com 'タ\"イトル')"
+                ];
+                for (const md of cases) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            test('data URL（内部に空白と \' を含む）＋タイトルでも往復する', () => {
+                // sample.md のタイトル付き画像と同型。URL中の `'` を閉じ引用符と
+                // 誤認すると URL が途中で切れる（最長のURL＋末尾の引用符対が正しい）
+                const md = '![緑の四角](data:image/svg+xml;utf8,' +
+                    "<svg xmlns='http://www.w3.org/2000/svg' width='48'>" +
+                    "<rect x='8' fill='%234caf50'/></svg> \"タイトル付きの画像です\")";
+                env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                const img = env.editor.querySelector('img');
+                assert.ok(img, env.editor.innerHTML);
+                assert.strictEqual(img!.getAttribute('title'), 'タイトル付きの画像です');
+                assert.ok(
+                    img!.getAttribute('src')!.endsWith('</svg>'),
+                    `src: ${img!.getAttribute('src')}`
+                );
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md);
+            });
+
+            test('空タイトル（""）は往復で削除される（既知の正規化）', () => {
+                // 空のタイトルは意味を持たないため title 属性が空になり、直列化で
+                // 落ちる。保存のたびに `![](a.png)` へ正規化される仕様として受け入れる
+                env.editor.innerHTML = env.markdown.markdownToHtml('![](a.png "")');
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '![](a.png)');
+            });
+
+            test('タイトル記法が無い場合は従来どおり出力する（回帰確認）', () => {
+                for (const md of ['![説明](a.png)', '[text](https://e.com)']) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            suite('serializeTitle', () => {
+                const el = (html: string) => {
+                    const d = env.document.createElement('div');
+                    d.innerHTML = html;
+                    return d.firstElementChild;
+                };
+
+                test('title 属性を " で囲んで戻す', () => {
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u" title="t">x</a>')),
+                        ' "t"'
+                    );
+                });
+
+                test('title が無い・空なら空文字', () => {
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u">x</a>')), ''
+                    );
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u" title="">x</a>')), ''
+                    );
+                });
+
+                test('" を含むタイトルは \' で囲む', () => {
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u" title="a&quot;b">x</a>')),
+                        " 'a\"b'"
+                    );
+                });
+
+                test('改行を含むタイトルは捨てる（文書の破壊を防ぐため）', () => {
+                    // リンク記法は1行内で完結する前提。改行をそのまま出すと
+                    // 段落が分断され、記法の外まで文字列が漏れる
+                    const a = el('<a href="u" title="x">t</a>') as HTMLElement;
+                    a.setAttribute('title', 'a\nb');
+                    assert.strictEqual(env.markdown.serializeTitle(a), '');
+                    a.setAttribute('title', 'a\rb');
+                    assert.strictEqual(env.markdown.serializeTitle(a), '');
+                });
+
+                test(') を含むタイトルは捨てる（文書の破壊を防ぐため）', () => {
+                    // ) は ([^)]+) の外なので出力すると再パース時にURLが途中で切れ、
+                    // リンク記法の外まで文字列が漏れて文書が壊れる
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u" title="a)b">x</a>')), ''
+                    );
+                });
+            });
+        });
+
         test('画像記法は WYSIWYG 往復で保たれる', () => {
             ['![](image-1.png)', '![説明](assets/x.png)', '前 ![](a.png) 後'].forEach(src => {
                 const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(src));

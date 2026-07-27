@@ -77,6 +77,44 @@ suite('CommandsModule', () => {
             assert.ok(!env.editor.querySelector('img'), env.editor.innerHTML);
         });
 
+        test('タイトル記法のライブ変換で title 属性へ分離する（画像・リンク）', () => {
+            env.editor.innerHTML = '<p>![説明](a.png "タイトル") 後続</p>';
+            env.commands.applyInlineFormatting();
+            const img = env.editor.querySelector('img');
+            assert.ok(img, env.editor.innerHTML);
+            assert.strictEqual(img!.getAttribute('src'), 'a.png');
+            assert.strictEqual(img!.getAttribute('alt'), '説明');
+            assert.strictEqual(img!.getAttribute('title'), 'タイトル');
+
+            env.editor.innerHTML = '<p>[text](https://e.com "タイトル") 後続</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            assert.strictEqual(a!.getAttribute('href'), 'https://e.com');
+            assert.strictEqual(a!.getAttribute('title'), 'タイトル');
+        });
+
+        test('ライブ変換したタイトル記法は往復で保たれる', () => {
+            for (const md of ['![説明](a.png "タイトル")', '[text](https://e.com "タイトル")']) {
+                env.editor.innerHTML = '<p>' + md + '</p>';
+                env.commands.applyInlineFormatting();
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md, `roundtrip: ${md}`);
+            }
+        });
+
+        test('タイトル記法の属性値は " をエスケープして埋め込む（ライブ変換）', () => {
+            env.editor.innerHTML = '<p>[text](https://e.com \'a"b\')</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            // getAttribute は実体参照を戻すので、属性が途中で閉じていなければ a"b になる
+            assert.strictEqual(a!.getAttribute('title'), 'a"b');
+            assert.strictEqual(a!.getAttribute('href'), 'https://e.com');
+        });
+
         test('_ を含む画像パスのライブ変換で src が強調に壊れない', () => {
             env.editor.innerHTML = '<p>![](my_img_1.png) 後続</p>';
             env.commands.applyInlineFormatting();
@@ -668,6 +706,60 @@ suite('CommandsModule', () => {
             assert.strictEqual(a.textContent, 'ここ', env.editor.innerHTML);
             const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
             assert.ok(/\[ここ\]\(https:\/\/example\.com\)をリンクにする/.test(md), JSON.stringify(md));
+        });
+
+        test('既存リンクのタイトルはダイアログ経由でも失われない', () => {
+            // ダイアログはテキストとURLしか編集できない。タイトルを引き継がないと
+            // ユーザーが触っていないタイトルが保存時に消える（データ喪失）
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '[text](https://e.com "タイトル")'
+            );
+            const a0 = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a0.getAttribute('title'), 'タイトル', '前提: title が付いている');
+            selectIn(a0, 0, 1);
+            assert.strictEqual(env.commands.insertLink(), true);
+            // URL欄にタイトルが混入していない
+            assert.strictEqual(dialog().url.value, 'https://e.com');
+            dialog().text.value = 'changed';
+            assert.strictEqual(env.commands.applyLinkDialog(), true);
+
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('title'), 'タイトル', env.editor.innerHTML);
+            const md = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(md, '[changed](https://e.com "タイトル")');
+        });
+
+        test('生Markdown展開中のリンクでもタイトルがURL欄に混入しない', () => {
+            // parseRawLink が `url "title"` をそのまま href として返すと、
+            // URL欄にタイトルが入り、適用すると不正なhrefのリンクができる
+            env.editor.innerHTML =
+                '<p><span class="raw-markdown">[text](https://e.com "タイトル")</span></p>';
+            const span = env.editor.querySelector('span') as HTMLElement;
+            selectIn(span, 0, 1);
+            assert.strictEqual(env.commands.insertLink(), true);
+            assert.strictEqual(dialog().url.value, 'https://e.com');
+            assert.strictEqual(dialog().text.value, 'text');
+
+            assert.strictEqual(env.commands.applyLinkDialog(), true);
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('href'), 'https://e.com', env.editor.innerHTML);
+            assert.strictEqual(a.getAttribute('title'), 'タイトル', env.editor.innerHTML);
+        });
+
+        test('タイトルの無いリンクを編集しても title 属性は付かない（回帰確認）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('[text](https://e.com)');
+            selectIn(env.editor.querySelector('a') as HTMLElement, 0, 1);
+            env.commands.insertLink();
+            dialog().text.value = 'changed';
+            env.commands.applyLinkDialog();
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.hasAttribute('title'), false, env.editor.innerHTML);
+            const md = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(md, '[changed](https://e.com)');
         });
 
         test('適用後はダイアログが閉じる', () => {

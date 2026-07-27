@@ -19,6 +19,7 @@
 
 | 状態 | 不具合 | サイズ | メモ |
 |------|--------|--------|------|
+| todo | リンクのURL・タイトルに含まれる `_`/`*` が強調変換に食われて往復が崩れる | S | `markdown.js`の`convertInline`・`commands.js`の`convertInlineText`は、画像は生成した`<img>`をプレースホルダへ退避してから強調変換（`**`/`_`等）を通すのに対し、**リンクは実HTMLを文字列に埋めたまま**後続の強調置換を通す。このため`[t](u_a_b)`や`[t](u "a_b_c")`は`href`/`title`の中の`_`が`<em>`に化けて往復が崩れる（`_`を2つ以上含むURL・タイトルが対象）。画像と同じ`imgSpans`方式の退避をリンクにも入れるのが自然な直し。タイトル記法対応で`title`属性にも影響が及ぶことが分かったが、URL側は以前から存在する欠陥。`/local-review` B-1 由来（severity medium） |
 
 ## 優先度: 中
 
@@ -29,8 +30,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | Windowsで別ドライブに画像がある場合、`toMarkdownRelativePath` が相対パスでなく絶対パスを返す | S | `src/imagePaste.ts` の `toMarkdownRelativePath` は `path.relative` に委ねているため、Windowsで `docDir` と画像が別ドライブにあると相対化できず `D:\foo\bar.png` のような絶対パスが返り、それが `D:/foo/bar.png` として `![]()` に埋まる。現在の呼び出し元（`markdownEditor.ts` の `saveClipboardImage`）は保存先をドキュメントと同一フォルダに固定しているため到達不能で、サブフォルダ／任意保存先へ拡張する際に対処が要る（ドライブが異なる場合は絶対パスのままにするか、`file:` URI にするか等の方針決めが必要）。`/local-review` B-2 由来 |
-| todo | 画像・リンクのタイトル記法 `![alt](url "title")` / `[text](url "title")` 対応 | S | 現状 `convertInline`/`convertInlineText` の画像・リンク正規表現は `([^)]+)` で `url "title"` 全体をURLに取り込み、`"` が `&quot;` 化されて壊れる（往復も崩れる）。タイトル部分を分離して `title` 属性へ、直列化で `(url "title")` へ戻す。画像・リンク共通の既存制約（今回の画像対応起因ではない）。`/local-review` B-1 由来 |
 | todo | 表の列追加・削除時に他列のセパレーター書式（スペース有無・アライメント）を維持する | S | 表区切り行の元表記保持（`data-sep`、[roadmap-done.md](./roadmap-done.md)参照）は現状、列数がヘッダーと食い違うと全列がデフォルト`---`書式にフォールバックする実装（`serializeTable`）。列追加・削除（`table.js`の`addColumn`/`deleteColumn`）で`data-sep`も同時に更新し、変更していない他列の書式だけは保つようにすると良い。`/local-review`指摘（severity low, PLAUSIBLE）由来 |
 | todo | PDFエクスポート機能 | L | まずS/Mに分割してから着手。方式候補: (1) VS Code標準の印刷（Webview→ブラウザ印刷ダイアログ）にCSS `@media print` を用意して委ねる案（軽量・依存追加なし）、(2) `puppeteer-core` 等でHTML→PDFをヘッドレス変換する案（見た目の再現度は高いが依存が重く拡張機能サイズが増える）。Mermaid図のPNG化（html2canvas）で確立した「クリーンHTML抽出→変換」の流れを流用できる。まずは(1)の印刷スタイル対応から着手し、要望が強ければ(2)を検討するのが妥当 |
 | todo | 見出しパンくずバーの更新をデバウンス化する | S | 現状 `editor.js` の `updateHeadingBreadcrumb` は入力イベント（`setupEditorInputEvent`）から同期・無条件に呼ばれ、見出し数分の `getBoundingClientRect` を毎キー入力ごとに計算する。同じ関数内の行番号ガター更新（`scheduleWysiwygGutterUpdate`）は変換コストが高いためデバウンス済みだが、パンくず側は未対応。見出しの多い文書でタイピング中の遅延要因になりうるため、同様に `setTimeout`（150ms程度）でデバウンスすると良い。`/local-review`指摘（severity low）由来 |
@@ -51,6 +50,8 @@
 | todo | 文書が水平線（`---`）から始まり後方にも`---`があると、内容を検証せずfront matterと誤認される | S | `parseFrontMatter`は「1行目が`---`」「後続のどこかに`---`」という位置関係のみで判定し、中身がYAMLらしいか等は検証しない。文書が装飾目的の水平線から始まり、後方に別の水平線がある通常のMarkdown文書（稀なケース）だと、間の内容が丸ごと折りたたみ済みfront matterとして表示されてしまう（保存されるMarkdown自体は保たれるが表示が崩れる）。実際のJekyll/Hugo等も同様に内容検証をしない設計のため妥当な面もあるが、実害があれば内容行がYAMLの`key: value`らしいかを軽く検証するなど再検討する。front matter機能追加時の`/local-review`指摘（severity low〜medium, 確信度中）由来 |
 | todo | Rawモードの行折り返しトグルボタンがWYSIWYGモード中も常時表示・クリック可能で、効果が見えず誤解を招きうる | S | `#toggleRawWrap`は`#toggleView`（Raw/WYSIWYG切替）と異なり、モードに応じた表示/無効化制御が無い。WYSIWYGモード中にクリックしてもRawモードに入るまでボタンの`active`表示以外に見た目の変化が無いため、初見のユーザーが「効いていない」と誤解しうる（title属性で補足説明済みのため実害は小さい）。Rawモード中のみ表示・有効化する、または常時表示のままでも問題ないと判断するかを検討。行折り返しトグル機能追加時の`/local-review`指摘（severity low, 確信度中）由来 |
 | todo | `table.js`の`computeMenuPosition`/`computeDialogPosition`が右端・下端のはみ出し補正のみで、左端・上端（負のanchor座標）を補正しない | S | `computeMenuPosition`は`left + menuWidth > viewportWidth`等の右下方向のはみ出ししか補正せず、`anchor.x`/`anchor.y`が負の場合（例: エディタが水平スクロールしていてキャレット由来のanchorが画面左に出る等）にダイアログ/メニューが画面外（左上）へはみ出す可能性がある。マウス右クリック由来の座標は通常負にならないため従来は顕在化しなかったが、表挿入ダイアログの位置修正でキャレット矩形（`range.getBoundingClientRect()`）由来のanchorを使う経路が増えたことで理論上の発生余地が生まれた。`left`/`top`にも`Math.max(0, ...)`相当の下限クランプを追加すると良い。表挿入ダイアログ位置修正時の`/local-review`指摘（severity low, PLAUSIBLE）由来 |
+| todo | Windowsで別ドライブに画像がある場合、`toMarkdownRelativePath` が相対パスでなく絶対パスを返す | S | `src/imagePaste.ts` の `toMarkdownRelativePath` は `path.relative` に委ねているため、Windowsで `docDir` と画像が別ドライブにあると相対化できず `D:\foo\bar.png` のような絶対パスが返り、それが `D:/foo/bar.png` として `![]()` に埋まる。現在の呼び出し元（`markdownEditor.ts` の `saveClipboardImage`）は保存先をドキュメントと同一フォルダに固定しているため到達不能で、サブフォルダ／任意保存先へ拡張する際に対処が要る（ドライブが異なる場合は絶対パスのままにするか、`file:` URI にするか等の方針決めが必要）。`/local-review` B-2 由来 |
+| todo | 属性値エスケープ（`escapeHtml`＋`"`潰し）の重複を1箇所へ寄せる | S | `commands.js`の`attrValue`（タイトル記法対応で新設）と、同ファイルのインライン数式・画像が個別に行っている`markdown.escapeHtml(x).replace(/"/g, '&quot;')`は同一処理で、実体は`markdown.escapeAttr ∘ escapeHtml`。数式側も含めて`attrValue`（または`markdown`側の公開関数）へ寄せられる。`/local-review` B-2 由来（simplification, severity low） |
 
 ## 完了 (done)
 

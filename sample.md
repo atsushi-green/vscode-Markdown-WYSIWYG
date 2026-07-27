@@ -189,6 +189,10 @@ $$
 
 [VS Code 公式サイト](https://code.visualstudio.com/) のリンクにカーソルを合わせて試してみてください。
 
+`[表示テキスト](URL "タイトル")` と書くと、マウスカーソルを合わせたときにツールチップが出ます（URLとタイトルの間には空白が必要です）。
+
+[タイトル付きのリンク](https://code.visualstudio.com/ "VS Code の公式サイトです") にマウスカーソルを乗せてみてください。
+
 
 ### 脚注
 
@@ -217,6 +221,10 @@ Markdown WYSIWYG
 ![青い丸](data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48'><circle cx='24' cy='24' r='20' fill='%234a90d9'/></svg>)
 
 この Markdown ファイルと同じフォルダ（や相対パス）に置いた画像ファイル（例: `![](image-20260720.png)`）も、エディタ内で実際の画像として表示されます（このファイルを保存済みのとき）。スクリーンショットを `Ctrl/Cmd+V` で貼り付けると自動でこの形の記法が挿入されます。
+
+`![代替テキスト](画像のURL "タイトル")` と書くと、画像にマウスカーソルを合わせたときにツールチップが出ます（URLとタイトルの間には空白が必要です）。
+
+![緑の四角](data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48'><rect x='8' y='8' width='32' height='32' fill='%234caf50'/></svg> "タイトル付きの画像です")
 
 
 ### テーブル

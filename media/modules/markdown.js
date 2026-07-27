@@ -64,6 +64,49 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * 画像・リンクの丸括弧の中身（`(url "title")` の `url "title"` 部分）を
+     * URLとタイトルへ分ける純粋関数。Markdown標準のタイトル記法に対応する。
+     *
+     * タイトルは `"…"` と `'…'` の両方を受け付け、**URLとの間に空白が必要**
+     * （`a"b"` のような空白無しはURLの一部とみなす＝ファイル名に引用符を含む
+     * パスを誤ってタイトル扱いしない）。閉じ引用符は文字列の末尾になければ
+     * ならず、`a "b" c` のような不正な形はタイトル無しとして扱う。
+     *
+     * **URLの前後の空白は落とす**（`[t]( u )` → `href="u"`）。CommonMark と同じ
+     * 正規化で、Markdownとしての意味は変わらないが、保存時にバイト列は変わる。
+     *
+     * **引用符が2組ある場合**（`(u "a" "b")`）はURL側を最短・タイトル側を最長に
+     * 取るため `url="u"` / `title='a" "b'` になる。CommonMark は不正として扱うが、
+     * 往復は保たれるためこの解釈を許容する。
+     *
+     * **既知の制約**: 呼び出し元の正規表現が `([^)]+)` で丸括弧の中身を取るため、
+     * URL・タイトルのどちらにも `)` を含められない（タイトル記法の追加で
+     * 生じた制約ではなく、リンク・画像記法に元からある制約）。CommonMarkの
+     * `(…)` 形式のタイトルも、この `)` 制約と両立しないため非対応。
+     *
+     * @param {string} dest 丸括弧の中身
+     * @returns {{url: string, title: string|null}} タイトルが無ければ title は null
+     */
+    function parseLinkDestination(dest) {
+        const s = String(dest == null ? '' : dest);
+        // 先頭から最短でURLを取り、空白＋引用符で囲まれた末尾をタイトルとみなす
+        const m = /^([\s\S]*?)\s+(["'])([\s\S]*)\2\s*$/.exec(s);
+        if (!m) {
+            return { url: s.trim(), title: null };
+        }
+        return { url: m[1].trim(), title: m[3] };
+    }
+
+    /**
+     * `title` 属性のHTML断片（` title="…"`）を組み立てる。タイトルが無ければ空文字。
+     * @param {string|null} title
+     * @param {function(string): string} escape 属性値へ埋め込む際のエスケープ関数
+     */
+    function buildTitleAttr(title, escape) {
+        return title === null ? '' : ' title="' + escape(title) + '"';
+    }
+
+    /**
      * インラインMarkdown記法をHTMLへ変換（エスケープ済みテキストに適用）
      * commands.jsのライブ変換（convertInlineText）と同じ記法をサポートする
      */
@@ -113,13 +156,19 @@ window.MarkdownModule = (function() {
         // `_`/`*`/`~`/`+` が後続の強調変換で `src="a<em>b</em>c"` のように壊れ、往復が
         // 崩れる（インラインコード・数式と同じ保護方針）。
         const imgSpans = [];
-        html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_m, alt, url) {
-            imgSpans.push('<img src="' + escapeAttr(url) + '" alt="' + escapeAttr(alt) + '">');
+        html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_m, alt, dest) {
+            const d = parseLinkDestination(dest);
+            imgSpans.push('<img src="' + escapeAttr(d.url) + '" alt="' + escapeAttr(alt) +
+                '"' + buildTitleAttr(d.title, escapeAttr) + '>');
             return '' + (imgSpans.length - 1) + '';
         });
 
-        // リンク
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+        // リンク（`(url "title")` のタイトルは title 属性へ分離する）
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, text, dest) {
+            const d = parseLinkDestination(dest);
+            return '<a href="' + escapeAttr(d.url) + '"' +
+                buildTitleAttr(d.title, escapeAttr) + '>' + text + '</a>';
+        });
 
         // 脚注参照（[^label]）。対応する脚注定義（footnoteLabelsに含まれるラベル）が
         // 実在する場合のみ変換し、無ければリテラルテキストのまま残す
@@ -985,6 +1034,36 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * `<a>`/`<img>` の `title` 属性を Markdown のタイトル記法（` "title"`）へ戻す。
+     * 属性が無ければ空文字を返す（`parseLinkDestination` の逆変換）。
+     *
+     * 引用符はタイトルの中身に応じて選ぶ: `"` を含むなら `'…'`、そうでなければ
+     * `"…"`。`"` と `'` の両方を含むタイトルは記法で表現できないため、
+     * `"` をエスケープせずそのまま `'…'` で囲む（再パースでは末尾の `'` が
+     * 閉じとして働くので往復は保たれる）。
+     *
+     * **`)` と改行を含むタイトルはタイトルごと捨てる**。`)` は呼び出し元の
+     * 正規表現が `([^)]+)` で丸括弧の中身を取る以上表現できず、改行はリンク記法が
+     * 1行内で完結する前提を壊す。どちらもそのまま出力すると再パース時に記法が
+     * 途中で切れ、**リンク記法の外まで文字列が漏れて文書が壊れる**。タイトルだけを
+     * 失う方が被害が小さいためこちらを選ぶ（`parseLinkDestination` 経由では
+     * どちらも生じ得ず、HTMLを直接貼り付けた場合のみ到達する）。
+     * @param {Element} node
+     * @returns {string} ` "title"` 形式、またはタイトルが無ければ空文字
+     */
+    function serializeTitle(node) {
+        const title = node.getAttribute && node.getAttribute('title');
+        if (title === null || title === undefined || title === '') {
+            return '';
+        }
+        if (/[)\r\n]/.test(title)) {
+            return '';
+        }
+        const quote = title.indexOf('"') !== -1 ? "'" : '"';
+        return ' ' + quote + title + quote;
+    }
+
+    /**
      * 単一ノードをインラインMarkdownへ直列化
      */
     function serializeInline(node) {
@@ -1030,7 +1109,7 @@ window.MarkdownModule = (function() {
             }
             case 'A': {
                 const href = node.getAttribute('href') || '';
-                return `[${serializeInlineChildren(node)}](${href})`;
+                return `[${serializeInlineChildren(node)}](${href}${serializeTitle(node)})`;
             }
             case 'SUP': {
                 // 脚注参照（<sup class="footnote-ref"><a>label</a></sup>）は
@@ -1048,7 +1127,7 @@ window.MarkdownModule = (function() {
                 const src = node.getAttribute('data-original-src') ||
                     node.getAttribute('src') || '';
                 const alt = node.getAttribute('alt') || '';
-                return src ? `![${alt}](${src})` : '';
+                return src ? `![${alt}](${src}${serializeTitle(node)})` : '';
             }
             case 'SPAN':
                 // 生Markdown表示中のspan（リンク・強調・インライン数式の展開中）は
@@ -1701,6 +1780,9 @@ window.MarkdownModule = (function() {
         // 展開／復帰の結果が通常のレンダリング結果と食い違わないことを保証する。
         serializeInline: serializeInline,
         convertInline: convertInline,
+        parseLinkDestination: parseLinkDestination,
+        buildTitleAttr: buildTitleAttr,
+        serializeTitle: serializeTitle,
         // ブロック数式の生Markdown表示（commands.js）が、復帰時に math-block
         // コンテナを再生成するために使う（読込時の変換と同じ関数を共有する）。
         buildMathBlockHtml: buildMathBlockHtml,

@@ -932,17 +932,24 @@ window.CommandsModule = (function() {
         let text = '';
         let href = '';
         let target = null;
+        // 編集対象が元々持っていたタイトルを控えておき、適用時に引き継ぐ。
+        // ダイアログはテキストとURLしか編集できないため、引き継がないと
+        // ユーザーが触っていないタイトルが保存時に消える（データ喪失）。
+        let title = null;
         if (anchor) {
             target = anchor;
             text = anchor.textContent;
             href = anchor.getAttribute('href') || '';
+            title = anchor.hasAttribute('title') ? anchor.getAttribute('title') : null;
         } else if (rawLink) {
             target = raw;
             text = rawLink.text;
             href = rawLink.href;
+            title = rawLink.title;
         } else {
             text = range.toString();
         }
+        state.linkDialogLinkTitle = title;
 
         state.linkDialogRange = range.cloneRange();
         state.linkDialogTarget = target;
@@ -997,6 +1004,10 @@ window.CommandsModule = (function() {
 
         const a = document.createElement('a');
         a.setAttribute('href', href);
+        // 編集前のリンクが持っていたタイトルを引き継ぐ（insertLink が控えた値）
+        if (state.linkDialogLinkTitle !== null && state.linkDialogLinkTitle !== undefined) {
+            a.setAttribute('title', state.linkDialogLinkTitle);
+        }
         a.textContent = text;
 
         const target = state.linkDialogTarget;
@@ -1417,7 +1428,15 @@ window.CommandsModule = (function() {
      */
     function parseRawLink(text) {
         const m = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(text);
-        return m ? { text: m[1], href: m[2] } : null;
+        if (!m) {
+            return null;
+        }
+        // 丸括弧の中身は `url "title"` の可能性があるため、読込パスと同じ規則で
+        // URLとタイトルへ分ける。分けずに href として扱うと、リンクを開く経路
+        // （handleLinkClick）へタイトル込みの不正なURLが渡り、リンク編集ダイアログ
+        // （insertLink）のURL欄にもタイトルが混入する。
+        const d = markdown.parseLinkDestination(m[2]);
+        return { text: m[1], href: d.url, title: d.title };
     }
 
     /**
@@ -2470,6 +2489,18 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 未エスケープの入力テキストを属性値へ埋め込める形へ変換する。
+     * `&`/`<`/`>` を実体参照にし、属性を閉じてしまう `"` も潰す
+     * （読込パスの `escapeHtml`＋`escapeAttr` と同じ結果になる）。
+     * @param {string} text
+     * @returns {string}
+     */
+    function attrValue(text) {
+        return markdown.escapeHtml(String(text == null ? '' : text))
+            .replace(/"/g, '&quot;');
+    }
+
+    /**
      * インラインテキストを変換
      */
     function convertInlineText(text, footnoteLabels) {
@@ -2514,15 +2545,21 @@ window.CommandsModule = (function() {
         // 画像（![alt](url)）。リンクより先に処理して `![` を `!`＋リンクに割らない。
         // 入力テキストは未エスケープのため属性値は escapeHtml＋" を潰す（数式と同方針）。
         const imgSpans = [];
-        html = html.replace(/!\[([^\]]*)]\(([^)]+)\)/g, function (_m, alt, url) {
-            const s = markdown.escapeHtml(url).replace(/"/g, '&quot;');
-            const a = markdown.escapeHtml(alt).replace(/"/g, '&quot;');
-            imgSpans.push('<img src="' + s + '" alt="' + a + '">');
+        html = html.replace(/!\[([^\]]*)]\(([^)]+)\)/g, function (_m, alt, dest) {
+            const d = markdown.parseLinkDestination(dest);
+            const s = attrValue(d.url);
+            const a = attrValue(alt);
+            imgSpans.push('<img src="' + s + '" alt="' + a + '"' +
+                markdown.buildTitleAttr(d.title, attrValue) + '>');
             return '' + (imgSpans.length - 1) + '';
         });
 
-        // リンク
-        html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+        // リンク（`(url "title")` のタイトルは title 属性へ分離する）
+        html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, function (_m, text, dest) {
+            const d = markdown.parseLinkDestination(dest);
+            return '<a href="' + attrValue(d.url) + '"' +
+                markdown.buildTitleAttr(d.title, attrValue) + '>' + text + '</a>';
+        });
 
         // 脚注参照（[^label]）。対応する脚注定義がすでにエディタ内に存在する場合
         // （footnoteLabelsに含まれるラベル）のみ変換し、無ければリテラルテキストの
