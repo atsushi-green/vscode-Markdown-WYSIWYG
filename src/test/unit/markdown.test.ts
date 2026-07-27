@@ -212,6 +212,119 @@ suite('MarkdownModule', () => {
                 }
             });
 
+            suite('URL・タイトル・alt 中のコード/数式記法が退避に巻き込まれない', () => {
+                test('バッククォートが <code> に展開されない（リンク・画像・タイトル・alt）', () => {
+                    const cases: Array<[string, string, string]> = [
+                        ['[t](http://e/a`b`c)', 'a', 'href'],
+                        ['![alt](http://e/a`b`c)', 'img', 'src'],
+                        ['[t](http://e/x "a`b`c")', 'a', 'title'],
+                        ['![a`b`c](http://e/x)', 'img', 'alt']
+                    ];
+                    for (const [md, tag, attr] of cases) {
+                        const html = env.markdown.markdownToHtml(md);
+                        assert.ok(!html.includes('<code>'), `${md} → ${html}`);
+                        env.editor.innerHTML = html;
+                        const el = env.editor.querySelector(tag);
+                        assert.ok(el, `${md} → ${html}`);
+                        assert.ok(
+                            el!.getAttribute(attr)!.includes('a`b`c'),
+                            `${md} → ${attr}=${el!.getAttribute(attr)}`
+                        );
+                    }
+                });
+
+                test('インライン数式が属性値の中で展開されずタグ構造も壊れない', () => {
+                    // 復元される <span class="math-inline" …> の " で属性値が途中終了し、
+                    // タグ構造ごと壊れていた（往復結果が ["&gt;t](http://e/<span class=) になる）
+                    const html = env.markdown.markdownToHtml('[t](http://e/$a_1$)');
+                    assert.ok(!html.includes('math-inline'), html);
+                    env.editor.innerHTML = html;
+                    const a = env.editor.querySelector('a');
+                    assert.ok(a, html);
+                    assert.strictEqual(a!.getAttribute('href'), 'http://e/$a_1$');
+                    assert.strictEqual(a!.textContent, 't', html);
+                });
+
+                test('エスケープされたドル記号（\\$）がURLに混入しない', () => {
+                    env.editor.innerHTML = env.markdown.markdownToHtml('[t](http://e/\\$100)');
+                    const a = env.editor.querySelector('a');
+                    assert.ok(a, env.editor.innerHTML);
+                    assert.strictEqual(a!.getAttribute('href'), 'http://e/\\$100');
+                });
+
+                test('コード・数式を含むURL/タイトル/altが往復する', () => {
+                    for (const md of [
+                        '[t](http://e/a`b`c)',
+                        '![alt](http://e/a`b`c)',
+                        '[t](http://e/x "a`b`c")',
+                        '![a`b`c](http://e/x)',
+                        '[t](http://e/$a_1$)',
+                        '[t](http://e/x "$a_1$")',
+                        '[t](http://e/\\$100)'
+                    ]) {
+                        env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                        const out = env.markdown
+                            .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                            .replace(/\s+$/, '');
+                        assert.strictEqual(out, md, `roundtrip: ${md}`);
+                    }
+                });
+
+                test('数式の中に入れ子になったコード・\\$ も元テキストへ戻る', () => {
+                    // 数式の退避はコード・\$ の**後**に行われるため、控えている元テキスト
+                    // には両者のプレースホルダが残っている。戻す順序を
+                    // 数式→コード→\$ にしないと入れ子分が誰にも復元されない
+                    for (const md of [
+                        '[t](http://e/$a`b`c$)',
+                        '[t](http://e/$a\\$b$)',
+                        '![$a`b`c$](http://e/x)',
+                        '[t](http://e/x "$a`b`c$")'
+                    ]) {
+                        const html = env.markdown.markdownToHtml(md);
+                        assert.ok(!html.includes('<code>'), `${md} → ${html}`);
+                        env.editor.innerHTML = html;
+                        const out = env.markdown
+                            .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                            .replace(/\s+$/, '');
+                        assert.strictEqual(out, md, `roundtrip: ${md}`);
+                    }
+                });
+
+                test('入れ子のコード内に " があってもタグ構造が壊れない', () => {
+                    // 属性値が <code>" で途中終了し、リンク記法の外まで文字列が漏れて
+                    // 往復結果が [b\$">t](http://e/$a<code>) tail になっていた
+                    const md = '[t](http://e/$a`"`b$) tail';
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const a = env.editor.querySelector('a');
+                    assert.ok(a, env.editor.innerHTML);
+                    assert.strictEqual(a!.textContent, 't', env.editor.innerHTML);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md);
+                });
+
+                test('リンクテキスト内のコード・数式は従来どおり変換される（回帰確認）', () => {
+                    // 退避を戻すのは属性になる部分（URL・タイトル・alt）だけで、
+                    // リンクテキストはHTMLの流れに残るため従来どおり変換される
+                    const html = env.markdown.markdownToHtml('[`code`と$x$](http://e/u)');
+                    assert.ok(html.includes('<code>code</code>'), html);
+                    assert.ok(html.includes('math-inline'), html);
+                    env.editor.innerHTML = html;
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, '[`code`と$x$](http://e/u)');
+                });
+
+                test('コード内に書いたリンク記法は従来どおり変換されない（回帰確認）', () => {
+                    // コード退避をリンク/画像より先に行う順序自体は変えていない
+                    const html = env.markdown.markdownToHtml('`[t](http://e/u)`');
+                    assert.ok(html.includes('<code>'), html);
+                    assert.ok(!html.includes('<a '), html);
+                });
+            });
+
             test('リンクテキスト内の強調は従来どおり変換される（回帰確認）', () => {
                 // 退避するのは開始タグ（属性）だけで、テキストは変換対象のまま
                 const html = env.markdown.markdownToHtml('[**太字**と*斜体*](https://e.com)');

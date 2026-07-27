@@ -143,11 +143,53 @@ window.MarkdownModule = (function() {
         // `$a_1$` の `_` が強調に化けてしまう（インラインコード退避と同じ方針）。
         // 実際のレンダリングは math.js（KaTeX）が data-math を読んで後から行う。
         const mathSpans = [];
-        html = html.replace(/\$([^$\n]+)\$/g, function (_m, expr) {
+        // 属性値（URL・タイトル・alt）へ戻すための元のMarkdownテキストも控える
+        const mathSources = [];
+        html = html.replace(/\$([^$\n]+)\$/g, function (m, expr) {
             mathSpans.push('<span class="math-inline" data-math="' + escapeAttr(expr) +
                 '" contenteditable="false"></span>');
+            mathSources.push(m);
             return '\u0002' + (mathSpans.length - 1) + '\u0002';
         });
+
+        /**
+         * 画像・リンクの**属性になる部分**（URL・タイトル・alt）に紛れ込んだ
+         * コード・数式・`\$` のプレースホルダを、元のMarkdownテキストへ戻す。
+         *
+         * これらの退避は画像・リンクより**前**に行われ、復元は**後**に行われるため、
+         * 戻さないとプレースホルダが属性値の中に取り込まれたまま復元され、
+         * `href="http://e/a<code>b</code>c"` のように値が壊れる。数式に至っては
+         * 復元される `<span class="math-inline" …>` が `"` を含むため属性値がそこで
+         * 途中終了し、**タグ構造ごと壊れる**（往復結果が `["&gt;t](http://e/<span class=)`
+         * のようになる）。
+         *
+         * 戻す先はHTMLではなく**元の記法テキスト**にする。URLやタイトルの中の
+         * `` `…` `` や `$…$` は「コード」「数式」ではなく単なる文字列なので、
+         * 文字どおり保つのが往復にとっても正しい。
+         *
+         * リンクテキスト（`[…]` の中身）はHTMLの流れに残って通常どおり復元されるため、
+         * ここでは戻さない（`` [`code`](u) `` のリンクテキスト内コードは従来どおり）。
+         */
+        function unstashToText(s) {
+            // **戻す順序は退避の逆**（数式 → コード → `\$`）にする。数式の退避は
+            // コード・`\$` の退避より後に行われるため、控えている元テキストの中には
+            // それらのプレースホルダが残っている。コード→数式の順で戻すと、最後に
+            // 差し戻した数式ソース中のプレースホルダを誰も復元しないまま
+            // 属性値へ入ってしまい、元の不具合（`href` への `<code>` 混入や、
+            // コード内の `"` による属性値の早期終了＝タグ構造の破壊）が再発する。
+            // 入れ子は1段しか起こらない（コードの中身と `\$` にはプレースホルダが
+            // 入り得ない）ので、この順序なら単一パスで解決する。
+            return String(s)
+                .replace(/\u0002(\d+)\u0002/g, function (_m, i) {
+                    return mathSources[Number(i)];
+                })
+                .replace(/\u0000(\d+)\u0000/g, function (_m, i) {
+                    return '`' + codeSpans[Number(i)] + '`';
+                })
+                .replace(/\u0001(\d+)\u0001/g, function () {
+                    return '\\$';
+                });
+        }
 
         // 画像（![alt](url)）。リンクより**先に**処理する（`![` を `!`＋リンクに
         // 割らないため）。alt は空も許容（貼り付け画像は alt 無し）。属性を閉じる
@@ -157,8 +199,9 @@ window.MarkdownModule = (function() {
         // 崩れる（インラインコード・数式と同じ保護方針）。
         const imgSpans = [];
         html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_m, alt, dest) {
-            const d = parseLinkDestination(dest);
-            imgSpans.push('<img src="' + escapeAttr(d.url) + '" alt="' + escapeAttr(alt) +
+            const d = parseLinkDestination(unstashToText(dest));
+            imgSpans.push('<img src="' + escapeAttr(d.url) +
+                '" alt="' + escapeAttr(unstashToText(alt)) +
                 '"' + buildTitleAttr(d.title, escapeAttr) + '>');
             return '' + (imgSpans.length - 1) + '';
         });
@@ -173,7 +216,7 @@ window.MarkdownModule = (function() {
         // 強調変換に巻き込まれない。
         const linkSpans = [];
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, text, dest) {
-            const d = parseLinkDestination(dest);
+            const d = parseLinkDestination(unstashToText(dest));
             linkSpans.push('<a href="' + escapeAttr(d.url) + '"' +
                 buildTitleAttr(d.title, escapeAttr) + '>');
             return '\u0005' + (linkSpans.length - 1) + '\u0005' + text + '</a>';

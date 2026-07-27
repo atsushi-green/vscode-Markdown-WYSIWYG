@@ -19,7 +19,6 @@
 
 | 状態 | 不具合 | サイズ | メモ |
 |------|--------|--------|------|
-| todo | リンク・画像のURL/タイトルに含まれる `` ` `` と `$` が、コード・数式の退避に巻き込まれて壊れる | S | インラインコード・数式・`\$` の退避はリンク/画像より**前**に行われ、復元は**後**に行われるため、プレースホルダが `href`/`src`/`title` の中へ取り込まれて属性内で展開される。実測: `` [t](http://e/a`b`c) `` は `href="http://e/a<code>b</code>c"` になり往復も崩れる。`[t](http://e/$a_1$)` は復元される `<span class="math-inline" …>` の `"` で属性が途中終了し**タグ構造ごと破壊**され、往復結果が `["&gt;t](http://e/<span class=)` になる。`_`/`*` のプレースホルダ退避対応（`U+0005`）では守れない別系統の穴で、画像も同型（画像貼り付けの `buildImageMarkdown` が `` ` ``/`$` をパーセントエンコードするのはこの回避）。退避順序の見直しか、URL/タイトルからコード・数式の退避対象を除外する必要がある。あわせて `serializeInline` の `case 'A'` は `href` に `stripZeroWidth` を掛けていないため、`\$` 由来のゼロ幅スペースが href に混入する（`case 'CODE'` は掛けている）。`/local-review` B-1 由来（severity medium、fuzz検証で新旧とも同じ挙動＝既存欠陥） |
 | todo | 脚注ラベルに含まれる `_`/`*` が強調変換に食われて脚注リンクが壊れる | S | `markdown.js`の`convertInline`は脚注参照の`<sup>`を**実HTMLのまま**埋め込んでから強調変換を通すため、`[^a_b_c]`のようにラベルへ`_`を2つ以上含めると`data-footnote-label="a<em>b</em>c"`・`href="#fn-a<em>b</em>c"`・`id="fnref-a<em>b</em>c"`に化け、脚注リンクのジャンプが壊れる（脚注一覧側の`<li>`は別経路で生成されるため無事で、参照側だけがずれる）。ラベルは`[A-Za-z0-9_-]`を許すので`_`は正当な文字。**`commands.js`の`convertInlineText`は既に脚注をプレースホルダ（`U+0004`）へ退避しており壊れない**ため、読込パスだけの非対称な欠陥。リンク・画像と同じ退避方式を`markdown.js`側の脚注にも入れれば直る。リンクのプレースホルダ退避対応中に発見（実測で再現確認済み） |
 
 ## 優先度: 中
@@ -53,6 +52,9 @@
 | todo | `table.js`の`computeMenuPosition`/`computeDialogPosition`が右端・下端のはみ出し補正のみで、左端・上端（負のanchor座標）を補正しない | S | `computeMenuPosition`は`left + menuWidth > viewportWidth`等の右下方向のはみ出ししか補正せず、`anchor.x`/`anchor.y`が負の場合（例: エディタが水平スクロールしていてキャレット由来のanchorが画面左に出る等）にダイアログ/メニューが画面外（左上）へはみ出す可能性がある。マウス右クリック由来の座標は通常負にならないため従来は顕在化しなかったが、表挿入ダイアログの位置修正でキャレット矩形（`range.getBoundingClientRect()`）由来のanchorを使う経路が増えたことで理論上の発生余地が生まれた。`left`/`top`にも`Math.max(0, ...)`相当の下限クランプを追加すると良い。表挿入ダイアログ位置修正時の`/local-review`指摘（severity low, PLAUSIBLE）由来 |
 | todo | Windowsで別ドライブに画像がある場合、`toMarkdownRelativePath` が相対パスでなく絶対パスを返す | S | `src/imagePaste.ts` の `toMarkdownRelativePath` は `path.relative` に委ねているため、Windowsで `docDir` と画像が別ドライブにあると相対化できず `D:\foo\bar.png` のような絶対パスが返り、それが `D:/foo/bar.png` として `![]()` に埋まる。現在の呼び出し元（`markdownEditor.ts` の `saveClipboardImage`）は保存先をドキュメントと同一フォルダに固定しているため到達不能で、サブフォルダ／任意保存先へ拡張する際に対処が要る（ドライブが異なる場合は絶対パスのままにするか、`file:` URI にするか等の方針決めが必要）。`/local-review` B-2 由来 |
 | todo | 属性値エスケープ（`escapeHtml`＋`"`潰し）の重複を1箇所へ寄せる | S | `commands.js`の`attrValue`（タイトル記法対応で新設）と、同ファイルのインライン数式・画像が個別に行っている`markdown.escapeHtml(x).replace(/"/g, '&quot;')`は同一処理で、実体は`markdown.escapeAttr ∘ escapeHtml`。数式側も含めて`attrValue`（または`markdown`側の公開関数）へ寄せられる。`/local-review` B-2 由来（simplification, severity low） |
+| todo | `unstashToText` が2モジュールに完全重複している | S | `markdown.js`と`commands.js`の`unstashToText`は、エスケープ関数の違い以外ロジックもコメントも同一。実際に本サイクルのレビューで「復元順序が逆」というバグが見つかっており、**片方だけ直す事故が起きやすい**。`parseLinkDestination`/`buildTitleAttr`と同様に、退避配列を受け取って復元関数を返すファクトリを`MarkdownModule`側で公開して共有すると良い。`/local-review` B-1 由来（severity low） |
+| todo | URL中の `\$` を href にバックスラッシュ付きで入れるか、`$` にして直列化時に再エスケープするか | S | 現在は往復優先で`[t](http://e/\$100)`の`href`を`http://e/\$100`（バックスラッシュ入り）にしている。CommonMark解釈ではURLは`http://e/$100`なので、**リンクを実際に開いたときの遷移先がずれる**可能性がある。「表示・遷移は`$`、直列化時に`\$`へ再エスケープ」へ変える選択肢もあるが、その場合は`serializeInline`が`href`中の素の`$`もエスケープすることになり、`http://e/a$b`のような正当なURLの表記が保存で変わる副作用を検討する必要がある。実機でのリンク遷移の挙動を見てから判断するのが妥当。`/local-review` C-1 由来（severity low, 確信度中） |
+| todo | `$…$` が `)` をまたぐとリンク記法自体が変換されなくなる | S | 数式の退避がリンク解析より前にあるため、`[t](http://e/$a)$b`のような入力では`)`が数式プレースホルダに飲まれ、リンク記法が閉じずに変換されない。退避順序に元からある制約で、URL/タイトルの退避戻し（`unstashToText`）でも解消しない。`/local-review` B-2 由来（severity low、既存） |
 
 ## 完了 (done)
 

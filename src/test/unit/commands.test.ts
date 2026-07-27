@@ -115,6 +115,48 @@ suite('CommandsModule', () => {
             assert.ok(!env.editor.querySelector('em'), env.editor.innerHTML);
         });
 
+        test('ライブ変換でもURL・タイトル・alt中のコード/数式が属性に展開されない', () => {
+            env.editor.innerHTML = '<p>[t](http://e/a`b`c "x$y$z") 後続</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            assert.strictEqual(a!.getAttribute('href'), 'http://e/a`b`c');
+            assert.strictEqual(a!.getAttribute('title'), 'x$y$z');
+            assert.ok(!env.editor.querySelector('code'), env.editor.innerHTML);
+            assert.ok(!env.editor.querySelector('.math-inline'), env.editor.innerHTML);
+        });
+
+        test('ライブ変換でもコード/数式を含むURLが往復する', () => {
+            for (const md of [
+                '[t](http://e/a`b`c)',
+                '![a`b`c](http://e/x)',
+                '[t](http://e/$a_1$)'
+            ]) {
+                env.editor.innerHTML = '<p>' + md + '</p>';
+                env.commands.applyInlineFormatting();
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md, `roundtrip: ${md}`);
+            }
+        });
+
+        test('ライブ変換でも数式に入れ子のコード・\\$ が元テキストへ戻る', () => {
+            for (const md of [
+                '[t](http://e/$a`b`c$)',
+                '[t](http://e/$a\\$b$)',
+                '![$a`b`c$](http://e/x)'
+            ]) {
+                env.editor.innerHTML = '<p>' + md + '</p>';
+                env.commands.applyInlineFormatting();
+                assert.ok(!env.editor.querySelector('code'), env.editor.innerHTML);
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md, `roundtrip: ${md}`);
+            }
+        });
+
         test('ライブ変換でもリンクテキスト内の強調は変換される（回帰確認）', () => {
             env.editor.innerHTML = '<p>[**太字**](https://e.com) 後続</p>';
             env.commands.applyInlineFormatting();

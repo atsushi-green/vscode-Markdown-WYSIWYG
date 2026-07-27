@@ -2535,20 +2535,57 @@ window.CommandsModule = (function() {
         // 読んで行う（markdown.js と同じ役割分担）。入力テキストは未エスケープのため、
         // 属性値は escapeHtml と " のエスケープを施す。
         const mathSpans = [];
-        html = html.replace(/\$([^$\n]+)\$/g, function (_m, expr) {
+        // 属性値（URL・タイトル・alt）へ戻すための元のMarkdownテキストも控える
+        const mathSources = [];
+        html = html.replace(/\$([^$\n]+)\$/g, function (m, expr) {
             const attr = markdown.escapeHtml(expr).replace(/"/g, '&quot;');
             mathSpans.push('<span class="math-inline" data-math="' + attr +
                 '" contenteditable="false"></span>');
+            mathSources.push(m);
             return '' + (mathSpans.length - 1) + '';
         });
+
+        /**
+         * 画像・リンクの**属性になる部分**（URL・タイトル・alt）に紛れ込んだ
+         * コード・数式・エスケープ済みドル記号のプレースホルダを、元のMarkdown
+         * テキストへ戻す（markdown.js の convertInline と同じ対処）。
+         *
+         * 戻さないと、これらの復元が画像・リンクより後段で行われる都合上、
+         * プレースホルダが属性値の中で展開されて `href="http://e/a<code>b</code>c"`
+         * のように壊れる。数式は復元される `<span …>` が `"` を含むため属性値が
+         * 途中終了し**タグ構造ごと壊れる**。
+         *
+         * エスケープ由来のドル記号は、入力されたままの `\$` とゼロ幅スペース付きの
+         * `$`（読込時に convertInline が展開した形）の2形態があるが、属性値は
+         * 直列化時に再エスケープされずそのまま書き戻されるため、**どちらも `\$` へ**
+         * 戻すことでファイル上の表記が保たれる。
+         *
+         * リンクテキストはHTMLの流れに残って通常どおり復元されるため戻さない。
+         */
+        function unstashToText(s) {
+            // **戻す順序は退避の逆**（数式 → コード → `\$`）。数式の退避はコード・`\$`
+            // の後に行われるため、控えている元テキストにはそれらのプレースホルダが
+            // 残っており、コードを先に戻すと数式ソース中の分が復元されないまま
+            // 属性値へ入って元の不具合が再発する（markdown.js 側と同じ理由）。
+            return String(s)
+                .replace(/(\d+)/g, function (_m, i) {
+                    return mathSources[Number(i)];
+                })
+                .replace(/\u0000(\d+)\u0000/g, function (_m, i) {
+                    return '`' + codeSpans[Number(i)] + '`';
+                })
+                .replace(/(\d+)/g, function () {
+                    return '\\$';
+                });
+        }
 
         // 画像（![alt](url)）。リンクより先に処理して `![` を `!`＋リンクに割らない。
         // 入力テキストは未エスケープのため属性値は escapeHtml＋" を潰す（数式と同方針）。
         const imgSpans = [];
         html = html.replace(/!\[([^\]]*)]\(([^)]+)\)/g, function (_m, alt, dest) {
-            const d = markdown.parseLinkDestination(dest);
+            const d = markdown.parseLinkDestination(unstashToText(dest));
             const s = attrValue(d.url);
-            const a = attrValue(alt);
+            const a = attrValue(unstashToText(alt));
             imgSpans.push('<img src="' + s + '" alt="' + a + '"' +
                 markdown.buildTitleAttr(d.title, attrValue) + '>');
             return '' + (imgSpans.length - 1) + '';
@@ -2562,7 +2599,7 @@ window.CommandsModule = (function() {
         // 強調（`[**太字**](url)`）は従来どおり変換される。
         const linkSpans = [];
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, text, dest) {
-            const d = markdown.parseLinkDestination(dest);
+            const d = markdown.parseLinkDestination(unstashToText(dest));
             linkSpans.push('<a href="' + attrValue(d.url) + '"' +
                 markdown.buildTitleAttr(d.title, attrValue) + '>');
             return '\u0005' + (linkSpans.length - 1) + '\u0005' + text + '</a>';
