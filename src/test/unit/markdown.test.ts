@@ -927,6 +927,46 @@ suite('MarkdownModule', () => {
                 }
             });
 
+            test('本文行を挟んだ定義同士でも脚注一覧で空行が保たれる（往復）', () => {
+                for (const [md, expected] of [
+                    ['本文[^a][^b]\n\n[^a]: A\n\n[^0-9]: 地の文\n\n[^b]: B',
+                     '本文[^a][^b]\n\n[^0-9]: 地の文\n\n[^a]: A\n\n[^b]: B'],
+                    ['本文[^a][^b]\n\n[^a]: A\n\n普通の段落\n\n[^b]: B',
+                     '本文[^a][^b]\n\n普通の段落\n\n[^a]: A\n\n[^b]: B']
+                ]) {
+                    let cur = md;
+                    const passes: string[] = [];
+                    for (let i = 0; i < 3; i++) {
+                        env.editor.innerHTML = env.markdown.markdownToHtml(cur);
+                        cur = env.markdown
+                            .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                            .replace(/\s+$/, '');
+                        passes.push(cur);
+                    }
+                    assert.strictEqual(passes[0], expected, `1周目: ${md}`);
+                    assert.strictEqual(passes[1], passes[0], `冪等でない: ${md}`);
+                    assert.strictEqual(passes[2], passes[0], `冪等でない: ${md}`);
+                }
+            });
+
+            test('定義の後ろに空行が無い場合は直前の空行を残す（ブロック融合の防止）', () => {
+                // 「定義行は直前の空行を持っていく」を無条件に適用すると、後ろに空行が
+                // 無い定義で本来必要な区切り行まで消え、リスト・引用・表が融合したり
+                // ユーザーが意図的に空けた行が失われる（リスト/引用/表のブロック
+                // パーサは seamIndices を見ないため、空行が唯一の区切りになる）
+                for (const [md, expected] of [
+                    ['- item1[^x]\n\n[^x]: A\n- item2', '- item1[^x]\n\n- item2\n\n[^x]: A'],
+                    ['> a[^x]\n\n[^x]: A\n> b', '> a[^x]\n\n> b\n\n[^x]: A'],
+                    ['本文[^x]\n\n\n[^x]: A\n後書き', '本文[^x]\n\n\n後書き\n\n[^x]: A']
+                ]) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, expected, `roundtrip: ${md}`);
+                }
+            });
+
             test('複数定義でも2周目以降で不変（冪等）', () => {
                 let cur = '本文[^x]と[^y]。\n\n[^x]: A\n\n[^y]: B\n\n後書き。';
                 const passes: string[] = [];
@@ -1168,7 +1208,7 @@ suite('MarkdownModule', () => {
                 assert.deepStrictEqual(Array.from(result.contentLines), ['参照[^a]', '', '']);
             });
 
-            test('空行に挟まれた定義を取り除くとき、空行を1つ減らす', () => {
+            test('前後を空行に挟まれた定義を取り除くとき、空行を1つ減らす', () => {
                 // 定義行とその片側の空行で1つのまとまり＝手編集で行を消したときと同じ結果
                 const result = env.markdown.extractFootnoteDefinitions([
                     '本文[^x]です。', '', '[^x]: A', '', '後書き。'
@@ -1182,7 +1222,7 @@ suite('MarkdownModule', () => {
                 assert.deepStrictEqual(Array.from(result.seamIndices), [2]);
             });
 
-            test('定義の前に空行があれば文書末尾でも空行を1つ減らす', () => {
+            test('定義の前後に空行があれば文書末尾でも1つ減らす', () => {
                 // 末尾でも規則は同じ。この場合の contentLines 末尾の空行は
                 // markdownToHtml 側の `\n+$` 除去で結局落ちるため出力は変わらない
                 assert.deepStrictEqual(
@@ -1190,6 +1230,24 @@ suite('MarkdownModule', () => {
                         '本文[^x]です。', '', '[^x]: A', ''
                     ]).contentLines),
                     ['本文[^x]です。', '']
+                );
+            });
+
+            test('本文行を挟んだ定義同士でも間の空行が保たれる', () => {
+                // 未参照の「定義行らしき行」や通常の段落が定義の間に挟まると、
+                // 直前が定義でなくなるため以前は blanksBefore が 0 になり、
+                // 脚注一覧で `[^a]: A\n[^b]: B` と詰まっていた
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '本文[^a][^b]', '', '[^a]: A', '', '[^0-9]: 地の文', '', '[^b]: B'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: 'a', sep: ' ', text: 'A', blanksBefore: 0 },
+                    { label: 'b', sep: ' ', text: 'B', blanksBefore: 1 }
+                ]);
+                // 未参照の定義風行は本文として残る。本文側の空行は区切りとして
+                // そのまま残し、脚注一覧側の区切りは blanksBefore で別に表現する
+                assert.deepStrictEqual(
+                    Array.from(result.contentLines), ['本文[^a][^b]', '', '[^0-9]: 地の文', '']
                 );
             });
 

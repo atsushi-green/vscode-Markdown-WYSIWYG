@@ -392,11 +392,18 @@ window.MarkdownModule = (function() {
      * `contentLines`から取り除く。** 取り除かないと定義行だけが本文から消えて空行が
      * 本文側に残り、往復すると最初の定義の前へ空行が集まってしまう
      * （`\n\n[^x]: A\n\n[^y]: B` → `\n\n\n[^x]: A\n[^y]: B`）。
+     * 定義の間に本文行が挟まっていても、その定義の直前に空行があれば
+     * `blanksBefore` を立てる（脚注一覧側の区切りとして復元するため）。ただしこの場合
+     * **本文側の空行はそのまま残す**（本文の区切りとして必要。脚注一覧は文書末尾に
+     * 独立して出るため二重計上にはならない）。
+     *
      * 定義の連なりが途切れた場合（次が本文行・文書末尾）は保留した空行を本文へ戻すが、
-     * その定義（の連なり）が**空行に挟まれていた**場合は戻す空行を1つ減らす。
+     * その定義（の連なり）が**前後の両方を空行に挟まれていた**場合は戻す空行を1つ減らす。
      * 減らさないと、定義行だけが消えて前後の空行が両方残り、本文側の空行が1つ増える
      * （`本文` / `` / `[^x]: A` / `` / `後書き` → 空行2つ）。「定義行を消すときは
      * 隣の改行も一緒に消す」という手編集と同じ結果にするための調整。
+     * **後ろに空行が無い定義では減らさない**（減らすと本来必要な区切りが失われ、
+     * リスト・引用・テーブルが融合したり連続空行が1つ失われる）。
      * @returns {{ defs: {label:string, sep:string, text:string, blanksBefore:number}[],
      *            labels: Set<string>, contentLines: string[], seamIndices: Set<number> }}
      */
@@ -467,58 +474,76 @@ window.MarkdownModule = (function() {
         // 定義行だけが本文から取り除かれて空行が本文側に残り、往復すると
         // 最初の定義の前へ空行が集まってしまう
         // （`\n\n[^x]: A\n\n[^y]: B` → `\n\n\n[^x]: A\n[^y]: B`）。
-        let blankBuffer = [];
+        let pendingBlanks = [];
         let afterDef = false;
 
         /**
-         * 保留していた空行を本文行として戻す（定義の連なりが途切れたとき）。
+         * 保留していた空行を本文行として戻す。
          *
-         * ただし定義（の連なり）が**空行に挟まれていた**場合は、戻す空行を1つ減らす。
-         * `本文` / `` / `[^x]: A` / `` / `後書き` から定義行だけを取り除くと空行が2つ
-         * 残り、本文側の空行が1つ増えてしまう（`本文\n\n後書き` であるべきところが
-         * `本文\n\n\n後書き` になる）。定義行とその片側の空行で1つのまとまりとみなし、
-         * 「定義行を消すときは隣の改行も一緒に消す」という手編集と同じ結果にする。
-         * 減らすのは**定義の直前にも空行があるとき**の1つだけなので、空行が2つ以上
-         * 並んでいた場合（`markdownToHtml` が空段落として保持するユーザーの意図的な
-         * 改行）は必ず1つ以上残る＝連続空行の保持機能と衝突しない。
+         * **定義（の連なり）の直後の flush でだけ**、戻す空行を1つ減らす。定義の
+         * 前後の**両方**に空行がある場合、定義行だけを取り除くと空行が2つ残って
+         * 本文側の空行が1つ増えてしまうため（`本文\n\n後書き` であるべきところが
+         * `本文\n\n\n後書き` になる）、定義行とその片側の空行で1つのまとまりと
+         * みなす＝「定義行を消すときは隣の改行も一緒に消す」という手編集と同じ結果。
          *
-         * 前に空行が無い場合は減らす対象が無く従来どおり。**文書末尾の定義でも、
-         * その前に空行があり後ろに空行が残っていれば1つ減る**（この場合 `contentLines`
-         * の末尾空行は `markdownToHtml` 側の `\n+$` 除去で結局落ちるため、
-         * 出力結果は減らしても減らさなくても変わらない）。
+         * **後ろに空行が無い定義では減らしてはいけない。** その場合は定義行を
+         * 取り除いても余分な空行は生じず、逆に前の空行を消すと本来必要な区切りが
+         * 失われる（リスト・引用・テーブルのブロックパーサは `seamIndices` を見ず
+         * 空行だけが区切りなので、`- item1` / `` / `[^x]: A` / `- item2` の
+         * ような入力で項目が融合する。連続空行の保持＝空段落も1つ失われる）。
+         * `afterDef` で「この flush が定義の連なりを閉じるものか」を判定している。
+         *
+         * 減らすのは1つだけなので、空行が2つ以上並んでいた場合は必ず1つ以上残る
+         * ＝連続空行の保持機能とは衝突しない。
          */
-        function flushBlankBuffer() {
+        function flushPendingBlanks() {
             const precededByBlank = contentLines.length > 0 &&
                 /^\s*$/.test(contentLines[contentLines.length - 1]);
-            if (precededByBlank && blankBuffer.length > 0) {
-                blankBuffer.shift();
+            if (afterDef && precededByBlank && pendingBlanks.length > 0) {
+                pendingBlanks.shift();
             }
-            blankBuffer.forEach(function (line) {
+            pendingBlanks.forEach(function (line) {
                 if (pendingSeam) {
                     seamIndices.add(contentLines.length);
                     pendingSeam = false;
                 }
                 contentLines.push(line);
             });
-            blankBuffer = [];
+            pendingBlanks = [];
         }
 
         entries.forEach(function (entry) {
             if (entry.def && referencedLabels.has(entry.def.label) && !labels.has(entry.def.label)) {
+                if (afterDef) {
+                    // 直前も定義＝保留分はまるごと「定義同士の間の空行」。個数を
+                    // そのまま持たせて脚注一覧の連結時に復元する（本文へは戻さない）
+                    entry.def.blanksBefore = pendingBlanks.length;
+                    pendingBlanks = [];
+                } else {
+                    // 直前は本文（または文書先頭）。定義の間に本文行が挟まっていても
+                    // 「定義の前に空行があった」という書式は脚注一覧側で復元したいので
+                    // blanksBefore を立てる。ただし**本文側の空行はそのまま残す**
+                    // （本文の区切りとして必要。脚注一覧は文書末尾に独立して出るため
+                    // 二重計上にはならない）。最初の定義の分は連結に使われず消える。
+                    entry.def.blanksBefore =
+                        defs.length > 0 && pendingBlanks.length > 0 ? 1 : 0;
+                    // ここでの flush は定義を閉じるものではないので空行を減らさない
+                    // （この分岐は afterDef === false のときだけ通り、そのとき
+                    //  pendingSeam も必ず false ＝ seam は下の本文行 push 経路で
+                    //  立てて同じ場所で消費されるため、ここで seam が漏れることはない）
+                    flushPendingBlanks();
+                }
                 labels.add(entry.def.label);
-                // 直前の定義との間にあった空行の数を控える（最初の定義は常に0）
-                entry.def.blanksBefore = afterDef ? blankBuffer.length : 0;
-                blankBuffer = [];
                 defs.push(entry.def);
                 pendingSeam = true;
                 afterDef = true;
                 return;
             }
-            if (afterDef && /^\s*$/.test(entry.line)) {
-                blankBuffer.push(entry.line);
+            if (/^\s*$/.test(entry.line)) {
+                pendingBlanks.push(entry.line);
                 return;
             }
-            flushBlankBuffer();
+            flushPendingBlanks();
             afterDef = false;
             if (pendingSeam) {
                 seamIndices.add(contentLines.length);
@@ -527,7 +552,7 @@ window.MarkdownModule = (function() {
             contentLines.push(entry.line);
         });
         // 文書が「定義＋空行」で終わる場合、保留したままの空行を戻す
-        flushBlankBuffer();
+        flushPendingBlanks();
 
         return { defs: defs, labels: labels, contentLines: contentLines, seamIndices: seamIndices };
     }
