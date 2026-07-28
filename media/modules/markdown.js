@@ -392,7 +392,11 @@ window.MarkdownModule = (function() {
      * `contentLines`から取り除く。** 取り除かないと定義行だけが本文から消えて空行が
      * 本文側に残り、往復すると最初の定義の前へ空行が集まってしまう
      * （`\n\n[^x]: A\n\n[^y]: B` → `\n\n\n[^x]: A\n[^y]: B`）。
-     * 定義の連なりが途切れた場合（次が本文行・文書末尾）は保留した空行を本文へ戻す。
+     * 定義の連なりが途切れた場合（次が本文行・文書末尾）は保留した空行を本文へ戻すが、
+     * その定義（の連なり）が**空行に挟まれていた**場合は戻す空行を1つ減らす。
+     * 減らさないと、定義行だけが消えて前後の空行が両方残り、本文側の空行が1つ増える
+     * （`本文` / `` / `[^x]: A` / `` / `後書き` → 空行2つ）。「定義行を消すときは
+     * 隣の改行も一緒に消す」という手編集と同じ結果にするための調整。
      * @returns {{ defs: {label:string, sep:string, text:string, blanksBefore:number}[],
      *            labels: Set<string>, contentLines: string[], seamIndices: Set<number> }}
      */
@@ -466,8 +470,29 @@ window.MarkdownModule = (function() {
         let blankBuffer = [];
         let afterDef = false;
 
-        /** 保留していた空行を本文行として戻す（定義の連なりが途切れたとき） */
+        /**
+         * 保留していた空行を本文行として戻す（定義の連なりが途切れたとき）。
+         *
+         * ただし定義（の連なり）が**空行に挟まれていた**場合は、戻す空行を1つ減らす。
+         * `本文` / `` / `[^x]: A` / `` / `後書き` から定義行だけを取り除くと空行が2つ
+         * 残り、本文側の空行が1つ増えてしまう（`本文\n\n後書き` であるべきところが
+         * `本文\n\n\n後書き` になる）。定義行とその片側の空行で1つのまとまりとみなし、
+         * 「定義行を消すときは隣の改行も一緒に消す」という手編集と同じ結果にする。
+         * 減らすのは**定義の直前にも空行があるとき**の1つだけなので、空行が2つ以上
+         * 並んでいた場合（`markdownToHtml` が空段落として保持するユーザーの意図的な
+         * 改行）は必ず1つ以上残る＝連続空行の保持機能と衝突しない。
+         *
+         * 前に空行が無い場合は減らす対象が無く従来どおり。**文書末尾の定義でも、
+         * その前に空行があり後ろに空行が残っていれば1つ減る**（この場合 `contentLines`
+         * の末尾空行は `markdownToHtml` 側の `\n+$` 除去で結局落ちるため、
+         * 出力結果は減らしても減らさなくても変わらない）。
+         */
         function flushBlankBuffer() {
+            const precededByBlank = contentLines.length > 0 &&
+                /^\s*$/.test(contentLines[contentLines.length - 1]);
+            if (precededByBlank && blankBuffer.length > 0) {
+                blankBuffer.shift();
+            }
             blankBuffer.forEach(function (line) {
                 if (pendingSeam) {
                     seamIndices.add(contentLines.length);

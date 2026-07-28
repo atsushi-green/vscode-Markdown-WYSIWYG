@@ -869,14 +869,113 @@ suite('MarkdownModule', () => {
             test('文書の途中に書いた定義は末尾の脚注一覧へ集約される（既存の設計）', () => {
                 // 脚注定義は本文から取り除かれ、文書末尾の脚注一覧セクションに
                 // まとめられる（一般的なMarkdownの脚注と同じ挙動）。定義の位置は
-                // 保たれないという既存仕様を、空行の保持対応で変えていないことの確認
+                // 保たれないという既存仕様は変えていない
                 env.editor.innerHTML = env.markdown.markdownToHtml(
                     '本文[^x]です。\n\n[^x]: A\n\n後書き。'
                 );
                 const out = env.markdown
                     .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
                     .replace(/\s+$/, '');
-                assert.strictEqual(out, '本文[^x]です。\n\n\n後書き。\n\n[^x]: A');
+                // 定義は末尾へ移るが、**本文側の空行は増えない**
+                assert.strictEqual(out, '本文[^x]です。\n\n後書き。\n\n[^x]: A');
+            });
+
+            test('文書途中の定義を末尾へ移した結果は2周目以降で不変（冪等）', () => {
+                let md = '本文[^x]です。\n\n[^x]: A\n\n後書き。';
+                const passes: string[] = [];
+                for (let i = 0; i < 3; i++) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    md = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    passes.push(md);
+                }
+                assert.strictEqual(passes[1], passes[0], '2周目で変化している');
+                assert.strictEqual(passes[2], passes[0], '3周目で変化している');
+            });
+
+            test('文書途中の定義が複数あっても本文側の空行は増えない', () => {
+                env.editor.innerHTML = env.markdown.markdownToHtml(
+                    '本文[^x]です。\n\n[^x]: A\n\n[^y]: B\n\n後書き。[^y]'
+                );
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '本文[^x]です。\n\n後書き。[^y]\n\n[^x]: A\n\n[^y]: B');
+            });
+
+            test('空行が2つ以上並ぶ場合は空段落として保持され、減るのは1つだけ', () => {
+                // markdownToHtml は連続空行を <p><br></p> として保持する＝空行は
+                // ユーザーのコンテンツ。減らすのは定義自身の区切り空行1つだけで、
+                // 意図的な空行は必ず残る（両機能が衝突しないことの固定）
+                for (const [md, expected] of [
+                    ['本文[^x]。\n\n\n[^x]: A\n\n後書き。', '本文[^x]。\n\n\n後書き。\n\n[^x]: A'],
+                    ['本文[^x]。\n\n[^x]: A\n\n\n後書き。', '本文[^x]。\n\n\n後書き。\n\n[^x]: A']
+                ]) {
+                    let cur = md;
+                    const passes: string[] = [];
+                    for (let i = 0; i < 3; i++) {
+                        env.editor.innerHTML = env.markdown.markdownToHtml(cur);
+                        cur = env.markdown
+                            .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                            .replace(/\s+$/, '');
+                        passes.push(cur);
+                    }
+                    assert.strictEqual(passes[0], expected, `1周目: ${md}`);
+                    assert.strictEqual(passes[1], passes[0], `冪等でない: ${md}`);
+                    assert.strictEqual(passes[2], passes[0], `冪等でない: ${md}`);
+                }
+            });
+
+            test('複数定義でも2周目以降で不変（冪等）', () => {
+                let cur = '本文[^x]と[^y]。\n\n[^x]: A\n\n[^y]: B\n\n後書き。';
+                const passes: string[] = [];
+                for (let i = 0; i < 3; i++) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(cur);
+                    cur = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    passes.push(cur);
+                }
+                assert.strictEqual(
+                    passes[0], '本文[^x]と[^y]。\n\n後書き。\n\n[^x]: A\n\n[^y]: B'
+                );
+                assert.strictEqual(passes[1], passes[0], '2周目で変化している');
+                assert.strictEqual(passes[2], passes[0], '3周目で変化している');
+            });
+
+            test('文書先頭の定義・front matter 直後の定義でも往復が安定する', () => {
+                // 文書先頭では contentLines が空＝減らす対象が無い（規則が非対称）
+                env.editor.innerHTML = env.markdown.markdownToHtml('[^x]: A\n\n本文[^x]');
+                assert.strictEqual(
+                    env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, ''),
+                    '本文[^x]\n\n[^x]: A'
+                );
+                // front matter 直後の空行は front matter 側で別途扱われるため影響しない
+                const fm = '---\ntitle: x\n---\n\n[^x]: A\n\n本文[^x]';
+                env.editor.innerHTML = env.markdown.markdownToHtml(fm);
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '---\ntitle: x\n---\n\n本文[^x]\n\n[^x]: A');
+            });
+
+            test('定義が文書末尾・空行なしのケースは従来どおり（回帰確認）', () => {
+                // 末尾の定義は元から空行が増えない＝往復が成立していた
+                env.editor.innerHTML = env.markdown.markdownToHtml('本文[^x]です。\n\n[^x]: A');
+                assert.strictEqual(
+                    env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, ''),
+                    '本文[^x]です。\n\n[^x]: A'
+                );
+                // 定義の前後に空行が無い場合は落とす空行自体が無い
+                env.editor.innerHTML = env.markdown.markdownToHtml('本文[^x]です。\n[^x]: A\n後書き。');
+                assert.strictEqual(
+                    env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, ''),
+                    '本文[^x]です。\n\n後書き。\n\n[^x]: A'
+                );
             });
 
             test('脚注定義が無ければ脚注一覧セクションも生成しない', () => {
@@ -1067,6 +1166,54 @@ suite('MarkdownModule', () => {
                     ''
                 ]);
                 assert.deepStrictEqual(Array.from(result.contentLines), ['参照[^a]', '', '']);
+            });
+
+            test('空行に挟まれた定義を取り除くとき、空行を1つ減らす', () => {
+                // 定義行とその片側の空行で1つのまとまり＝手編集で行を消したときと同じ結果
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '本文[^x]です。', '', '[^x]: A', '', '後書き。'
+                ]);
+                assert.deepStrictEqual(
+                    Array.from(result.contentLines), ['本文[^x]です。', '', '後書き。']
+                );
+                // 空行を1つ減らした結果、seam は空行ではなく後続の本文行（index 2）に立つ。
+                // seam利用側（scanDefListTerms・段落継続）は行indexで判定するため、
+                // 空行に立つ旧位置よりこちらのほうが意味的に正しい
+                assert.deepStrictEqual(Array.from(result.seamIndices), [2]);
+            });
+
+            test('定義の前に空行があれば文書末尾でも空行を1つ減らす', () => {
+                // 末尾でも規則は同じ。この場合の contentLines 末尾の空行は
+                // markdownToHtml 側の `\n+$` 除去で結局落ちるため出力は変わらない
+                assert.deepStrictEqual(
+                    Array.from(env.markdown.extractFootnoteDefinitions([
+                        '本文[^x]です。', '', '[^x]: A', ''
+                    ]).contentLines),
+                    ['本文[^x]です。', '']
+                );
+            });
+
+            test('前に空行が無い定義では空行を減らさない', () => {
+                // 減らす対象そのものが無いケース（従来どおりの結果）
+                assert.deepStrictEqual(
+                    Array.from(env.markdown.extractFootnoteDefinitions([
+                        '本文[^x]です。', '[^x]: A', '後書き。'
+                    ]).contentLines),
+                    ['本文[^x]です。', '後書き。']
+                );
+                assert.deepStrictEqual(
+                    Array.from(env.markdown.extractFootnoteDefinitions([
+                        '本文[^x]です。', '', '[^x]: A'
+                    ]).contentLines),
+                    ['本文[^x]です。', '']
+                );
+                // 定義の後にだけ空行がある場合は減らさない
+                assert.deepStrictEqual(
+                    Array.from(env.markdown.extractFootnoteDefinitions([
+                        '本文[^x]です。', '[^x]: A', '', '後書き。'
+                    ]).contentLines),
+                    ['本文[^x]です。', '', '後書き。']
+                );
             });
 
             test('定義間の空行が落ちても seam は次の本文行に立つ', () => {
