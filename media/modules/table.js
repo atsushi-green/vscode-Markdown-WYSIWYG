@@ -494,6 +494,10 @@ window.TableModule = (function() {
         const thead = table.querySelector('thead');
         const tbody = table.querySelector('tbody');
         const targetIndex = position === 'before' ? colIndex : colIndex + 1;
+        // セパレーター行の元表記（data-sep）も同時に更新する。更新しないと列数が
+        // ヘッダーと食い違い、serializeTable が全列をデフォルト書式へフォールバック
+        // させてしまい、触っていない列のアライメント（`:---` 等）まで失われる。
+        const columnCountBefore = thead ? thead.querySelectorAll('th').length : 0;
 
         // ヘッダーに列を追加
         if (thead) {
@@ -521,6 +525,13 @@ window.TableModule = (function() {
                     row.appendChild(newCell);
                 }
             });
+        }
+
+        const nextSep = markdown.insertSepColumn(
+            table.getAttribute('data-sep'), targetIndex, columnCountBefore
+        );
+        if (nextSep !== null) {
+            table.setAttribute('data-sep', nextSep);
         }
 
         const tableId = table.getAttribute('data-table-id');
@@ -579,6 +590,15 @@ window.TableModule = (function() {
                     cells[colIndex].remove();
                 }
             });
+        }
+
+        // セパレーター行の元表記（data-sep）からも同じ列を取り除く
+        // （更新しないと列数が食い違い、残る列の書式まで失われる）
+        const nextSep = markdown.removeSepColumn(
+            table.getAttribute('data-sep'), colIndex, colCount
+        );
+        if (nextSep !== null) {
+            table.setAttribute('data-sep', nextSep);
         }
 
         state.currentEditingCell = null;

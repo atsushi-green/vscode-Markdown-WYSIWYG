@@ -1443,6 +1443,71 @@ window.MarkdownModule = (function() {
         return lines.join('\n') + '\n\n';
     }
 
+    // 列を追加したときにセパレーター行へ入れる既定の表記。`sepCells.join('|')` を
+    // `|…|` で挟むと `| --- |` になり、serializeTable のフォールバック書式と一致する。
+    const DEFAULT_SEP_CELL = ' --- ';
+
+    /**
+     * `data-sep`（表のセパレーター行の元表記をカンマ区切りで保持したもの）へ
+     * 新しい列を挿入したときの属性値を組み立てる純粋関数。
+     *
+     * 列の追加・削除で `data-sep` を更新しないと、列数がヘッダーと食い違って
+     * `serializeTable` が全列をデフォルト書式へフォールバックさせるため、
+     * **触っていない列のアライメント（`:---` 等）や空白の有無まで失われる**。
+     *
+     * 属性が無い場合や、現在の列数と食い違っている（＝既に陳腐化している）場合は
+     * `null` を返して**更新しない**。陳腐化した値を splice すると、偶然列数が
+     * 一致してしまい誤った書式が復元されるおそれがあるため。
+     *
+     * 範囲外の index も `null` を返して更新しない（`removeSepColumn` と同じ方針）。
+     * 黙ってクランプすると、DOM 側の挿入位置とずれた場合に**列数だけは一致して
+     * しまい**、アライメントが1列ずれた表がそのまま書き出される（サイレントな
+     * データ破損）。更新しなければ列数不一致でデフォルト書式へフォールバックする
+     * だけなので、そちらが安全側。
+     *
+     * @param {string|null} rawSep 現在の `data-sep` 属性値
+     * @param {number} index 挿入位置（0〜現在の列数。末尾への追加は列数と等しい）
+     * @param {number} currentColumnCount 挿入前の列数
+     * @returns {string|null} 新しい属性値。更新すべきでなければ null
+     */
+    function insertSepColumn(rawSep, index, currentColumnCount) {
+        const cells = splitSepAttr(rawSep, currentColumnCount);
+        if (!cells || index < 0 || index > cells.length) {
+            return null;
+        }
+        cells.splice(index, 0, DEFAULT_SEP_CELL);
+        return cells.join(',');
+    }
+
+    /**
+     * `data-sep` から指定位置の列を取り除いた属性値を組み立てる純粋関数。
+     * 更新すべきでない場合（属性が無い・列数が食い違う・indexが範囲外）は null。
+     * @param {string|null} rawSep 現在の `data-sep` 属性値
+     * @param {number} index 削除する列のindex
+     * @param {number} currentColumnCount 削除前の列数
+     * @returns {string|null} 新しい属性値。更新すべきでなければ null
+     */
+    function removeSepColumn(rawSep, index, currentColumnCount) {
+        const cells = splitSepAttr(rawSep, currentColumnCount);
+        if (!cells || index < 0 || index >= cells.length) {
+            return null;
+        }
+        cells.splice(index, 1);
+        return cells.join(',');
+    }
+
+    /**
+     * `data-sep` を列ごとの配列へ分解する。属性が無い、または現在の列数と
+     * 食い違う場合は null（呼び出し側は更新しない＝従来どおりフォールバックする）。
+     */
+    function splitSepAttr(rawSep, expectedLength) {
+        if (typeof rawSep !== 'string' || rawSep === '') {
+            return null;
+        }
+        const cells = rawSep.split(',');
+        return cells.length === expectedLength ? cells : null;
+    }
+
     /**
      * table要素をMarkdownテーブルへ直列化
      * セル内のインライン装飾（太字・リンク等）も保持する
@@ -1958,6 +2023,8 @@ window.MarkdownModule = (function() {
         serializeInline: serializeInline,
         convertInline: convertInline,
         parseLinkDestination: parseLinkDestination,
+        insertSepColumn: insertSepColumn,
+        removeSepColumn: removeSepColumn,
         buildTitleAttr: buildTitleAttr,
         serializeTitle: serializeTitle,
         // ブロック数式の生Markdown表示（commands.js）が、復帰時に math-block

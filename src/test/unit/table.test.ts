@@ -136,6 +136,49 @@ suite('TableModule', () => {
             });
         });
 
+        test('列を追加しても他列のアライメント書式が往復で保たれる', () => {
+            // data-sep を更新しないと列数がヘッダーと食い違い、serializeTable が
+            // 全列をデフォルト書式へフォールバックさせて他列の `:---` まで失われる
+            const t = setupTable('| A | B |\n|:---|---:|\n| a1 | b1 |');
+            assert.strictEqual(t.getAttribute('data-sep'), ':---,---:');
+            env.table.selectCell(t.querySelector('tbody td') as HTMLElement, t);
+            env.table.handleAction(t, 'add-col-after');
+
+            assert.strictEqual(t.getAttribute('data-sep'), ':---, --- ,---:');
+            const md = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+            assert.ok(md.includes('|:---| --- |---:|'), md);
+
+            // 書き出した Markdown を読み直すと同じ data-sep に戻る（往復が冪等）。
+            // splitSeparatorRow が cell を trim しないことに依存しているため、
+            // 将来 trim が入った場合の退行をここで捕まえる
+            env.editor.innerHTML = env.markdown.markdownToHtml(md);
+            assert.strictEqual(
+                (env.editor.querySelector('table') as HTMLElement).getAttribute('data-sep'),
+                ':---, --- ,---:'
+            );
+        });
+
+        test('列を削除しても残る列のアライメント書式が往復で保たれる', () => {
+            const t = setupTable('| A | B | C |\n|:---|---:|:---:|\n| a1 | b1 | c1 |');
+            assert.strictEqual(t.getAttribute('data-sep'), ':---,---:,:---:');
+            const secondBodyCell = t.querySelectorAll('tbody td')[1] as HTMLElement;
+            env.table.selectCell(secondBodyCell, t);
+            env.table.handleAction(t, 'delete-col');
+
+            assert.strictEqual(t.getAttribute('data-sep'), ':---,:---:');
+            const md = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+            assert.ok(md.includes('|:---|:---:|'), md);
+        });
+
+        test('data-sep が無い表では列操作しても属性を作らない（従来どおり）', () => {
+            // 列数とセパレーター列数が食い違う不正な表は data-sep を持たない
+            const t = setupTable('| A | B |\n|---|\n| a1 | b1 |');
+            assert.strictEqual(t.getAttribute('data-sep'), null);
+            env.table.selectCell(t.querySelector('tbody td') as HTMLElement, t);
+            env.table.handleAction(t, 'add-col-after');
+            assert.strictEqual(t.getAttribute('data-sep'), null);
+        });
+
         test('delete-row: 選択行を削除する', () => {
             const secondRowCell = table.querySelectorAll('tbody tr')[1].querySelector('td') as HTMLElement;
             env.table.selectCell(secondRowCell, table);

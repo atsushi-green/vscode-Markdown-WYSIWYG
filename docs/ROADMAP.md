@@ -29,7 +29,6 @@
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | 表の列追加・削除時に他列のセパレーター書式（スペース有無・アライメント）を維持する | S | 表区切り行の元表記保持（`data-sep`、[roadmap-done.md](./roadmap-done.md)参照）は現状、列数がヘッダーと食い違うと全列がデフォルト`---`書式にフォールバックする実装（`serializeTable`）。列追加・削除（`table.js`の`addColumn`/`deleteColumn`）で`data-sep`も同時に更新し、変更していない他列の書式だけは保つようにすると良い。`/local-review`指摘（severity low, PLAUSIBLE）由来 |
 | todo | PDFエクスポート機能 | L | まずS/Mに分割してから着手。方式候補: (1) VS Code標準の印刷（Webview→ブラウザ印刷ダイアログ）にCSS `@media print` を用意して委ねる案（軽量・依存追加なし）、(2) `puppeteer-core` 等でHTML→PDFをヘッドレス変換する案（見た目の再現度は高いが依存が重く拡張機能サイズが増える）。Mermaid図のPNG化（html2canvas）で確立した「クリーンHTML抽出→変換」の流れを流用できる。まずは(1)の印刷スタイル対応から着手し、要望が強ければ(2)を検討するのが妥当 |
 | todo | 見出しパンくずバーの更新をデバウンス化する | S | 現状 `editor.js` の `updateHeadingBreadcrumb` は入力イベント（`setupEditorInputEvent`）から同期・無条件に呼ばれ、見出し数分の `getBoundingClientRect` を毎キー入力ごとに計算する。同じ関数内の行番号ガター更新（`scheduleWysiwygGutterUpdate`）は変換コストが高いためデバウンス済みだが、パンくず側は未対応。見出しの多い文書でタイピング中の遅延要因になりうるため、同様に `setTimeout`（150ms程度）でデバウンスすると良い。`/local-review`指摘（severity low）由来 |
 | todo | 「/」コマンドメニューを見出し・引用・テーブルセルなど`P`/`DIV`/`LI`以外のブロックでも使えるようにする | S | 現状 `utils.findBlockAncestor` が `P`/`DIV`/`LI` タグでしか停止しないため、`editor.js` の `updateSlashCommandMenu`（`commands.isSlashCommandTrigger`）は空の見出し（`<h1>/</h1>`等）・引用・テーブルセル内での「/」入力を検出できずメニューが出ない（初期実装の意図的な制限）。見出し直後の新規行などユーザーが「/」を打ちそうな場面もあるため、`findBlockAncestor`の対象タグ拡張や、対象ブロック種別ごとの分岐を検討すると良い。`/local-review`指摘（severity low, 確信度中）由来 |
@@ -57,6 +56,8 @@
 | todo | 段落以外のブロック（見出し・リスト・表・引用・定義リスト・脚注本文）で脚注参照が変換されない | S | `markdown.js` は `footnoteLabels` を段落（`<p>`）の `convertInline` にしか渡さないため、それ以外のブロックでは `[^label]` が脚注に変換されずリテラルのまま残る。**さらにラベルに `_` を2つ以上含むと、脚注変換されないまま強調変換だけが効いて文字列自体が変わる**（実測: `- 項目[^a_b_c]` → 往復後 `- 項目[^a*b*c]`。脚注定義の本文中に書いた参照も同様）。段落だけを正しくした結果、同一文書内でブロック種別により挙動が食い違う非対称が可視化された。既存の「定義リストの用語・定義本文中の`[^label]`が脚注参照として変換されない」項目と同根のため、対応時は「段落以外全般」としてまとめて扱うのが良い。`/local-review` B-2 由来（severity low〜medium） |
 | todo | 脚注一覧の直列化が `querySelectorAll('li')` でネストしたリストの `<li>` まで拾う | S | `markdown.js` のSECTIONケースは `el.querySelectorAll('li')` で脚注項目を集めるため、脚注本文の中に箇条書きがあるとその `<li>` まで脚注定義として拾い、`[^]: nested` のようなゴミ行が生成される（実測で再現）。`el.querySelectorAll(':scope > ol > li')` 相当へ限定すれば直る。`/local-review` B-3 由来（severity low、既存） |
 | todo | `extractFootnoteDefinitions` の空行バッファをコードフェンス・数式ブロック・front matter 内の行にも通している | S | 空行の保留バッファは`entry.scannable`（フェンス・数式ブロック・front matterの外かどうか）を見ずにすべての空行を一旦通す。保護対象ブロック内の空行も必ず順序どおり戻されるため**現状の挙動は変わらない**が（実測で確認済み）、将来`blanksBefore`の判定条件を増やしたときに保護行の空行を食う事故につながりやすい。`entry.scannable`が false の行は保留せず直接 push するなどの防御を検討する。`/local-review` C-3 由来（severity low, 確信度低、現時点で実害なし） |
+| todo | 表のアライメント（`:---` 等）がWYSIWYG表示に反映されない | S | `markdownToHtml`は区切り行のアライメント記法を`data-sep`へ保持するだけで、`<th>`/`<td>`に`style="text-align:…"`を付けていない。WYSIWYG上ではどの列が左/中央/右寄せかが見えないため、ユーザーは書式を確認できないまま列操作することになる。列追加・削除で他列の書式が保たれるようになったぶん、可視化の価値が相対的に上がった。`data-sep`の各セルからアライメントを判定してインラインスタイルを付ければよい（直列化は`data-sep`が正なので往復には影響しない）。`/local-review` B-2 由来（severity low、既存） |
+| todo | 表に列を追加したとき、既存列がコンパクト表記（`|---|`）だと追加列だけ書式が浮く | S | `DEFAULT_SEP_CELL`は` --- `固定なので、`|---|---|`のように空白なしで書かれた表へ列を追加すると`|---| --- |---|`となり追加列だけ表記が異なる。既存セルが全て同一書式ならそこからコロンだけ落として流用する（`---`/` --- `を近傍から推定する）と自然になる。「既定値は`serializeTable`のフォールバックと一致させる」という現実装の設計判断も筋は通っているため、必須ではない。`/local-review` C-3 由来（severity low, 確信度中） |
 
 ## 完了 (done)
 

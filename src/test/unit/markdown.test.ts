@@ -674,6 +674,51 @@ suite('MarkdownModule', () => {
             assert.ok(aligned.includes('data-sep=":---,---:,:---:"'), aligned);
         });
 
+        suite('data-sep の列挿入・削除（列操作で他列の書式を保つ）', () => {
+            test('insertSepColumn: 指定位置へデフォルト書式の列を挿入する', () => {
+                assert.strictEqual(
+                    env.markdown.insertSepColumn(':---,---:', 1, 2), ':---, --- ,---:'
+                );
+                assert.strictEqual(
+                    env.markdown.insertSepColumn(':---,---:', 0, 2), ' --- ,:---,---:'
+                );
+                assert.strictEqual(
+                    env.markdown.insertSepColumn(':---,---:', 2, 2), ':---,---:, --- '
+                );
+            });
+
+            test('removeSepColumn: 指定位置の列を取り除き他列はそのまま', () => {
+                assert.strictEqual(
+                    env.markdown.removeSepColumn(':---, --- ,---:', 1, 3), ':---,---:'
+                );
+                assert.strictEqual(
+                    env.markdown.removeSepColumn(':---, --- ,---:', 0, 3), ' --- ,---:'
+                );
+            });
+
+            test('属性が無い・列数が食い違う場合は null（更新しない）', () => {
+                assert.strictEqual(env.markdown.insertSepColumn(null, 0, 2), null);
+                assert.strictEqual(env.markdown.insertSepColumn('', 0, 2), null);
+                // 既に陳腐化している属性を splice して偶然一致させない
+                assert.strictEqual(env.markdown.insertSepColumn(':---,---:', 0, 3), null);
+                assert.strictEqual(env.markdown.removeSepColumn(':---,---:', 0, 3), null);
+            });
+
+            test('範囲外の index は insert/remove とも null（黙ってクランプしない）', () => {
+                // クランプするとDOM側の挿入位置とずれたとき列数だけ一致してしまい、
+                // アライメントが1列ずれた表がそのまま書き出される（サイレントな破損）。
+                // 更新しなければ列数不一致でデフォルト書式へ落ちるだけで安全
+                assert.strictEqual(env.markdown.removeSepColumn(':---,---:', 2, 2), null);
+                assert.strictEqual(env.markdown.removeSepColumn(':---,---:', -1, 2), null);
+                assert.strictEqual(env.markdown.insertSepColumn(':---,---:', -1, 2), null);
+                assert.strictEqual(env.markdown.insertSepColumn(':---,---:', 3, 2), null);
+                // 末尾への追加（index === 列数）は正当
+                assert.strictEqual(
+                    env.markdown.insertSepColumn(':---,---:', 2, 2), ':---,---:, --- '
+                );
+            });
+        });
+
         test('列数とセパレーター列数が食い違う不正な表はdata-sepを付与しない', () => {
             // isTableStartの正規表現上は区切り行として認識されるが列数がヘッダーと異なるケース
             const html = env.markdown.markdownToHtml('| A | B |\n| --- |\n| 1 | 2 |');
