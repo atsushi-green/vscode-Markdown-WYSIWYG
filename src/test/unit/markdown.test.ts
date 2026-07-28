@@ -813,6 +813,72 @@ suite('MarkdownModule', () => {
                 assert.ok(html.includes('<em>b</em>'), html);
             });
 
+            test('data-footnote-blanks が無い <li> は従来どおり改行1つで連結する（後方互換）', () => {
+                // この対応より前に生成されたHTMLが編集中のDOMに残っていても壊れない
+                env.editor.innerHTML =
+                    '<p>本文</p><section class="footnotes" data-footnotes="true"><ol>' +
+                    '<li id="fn-a" data-footnote-label="a" data-footnote-sep=" ">A</li>' +
+                    '<li id="fn-b" data-footnote-label="b" data-footnote-sep=" ">B</li>' +
+                    '</ol></section>';
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '本文\n\n[^a]: A\n[^b]: B');
+            });
+
+            test('data-footnote-blanks の不正値・巨大値でも保存経路が落ちない', () => {
+                // 属性は自モジュールしか生成しないが、外部HTMLの貼り付けに備えて
+                // クランプしている（巨大値だと String.repeat が RangeError を投げ、
+                // 保存経路である htmlToMarkdown ごと落ちる）
+                for (const [raw, expected] of [
+                    ['abc', '本文\n\n[^a]: A\n[^b]: B'],
+                    ['-3', '本文\n\n[^a]: A\n[^b]: B'],
+                    ['99999999', '本文\n\n[^a]: A' + '\n'.repeat(21) + '[^b]: B']
+                ]) {
+                    env.editor.innerHTML =
+                        '<p>本文</p><section class="footnotes" data-footnotes="true"><ol>' +
+                        '<li id="fn-a" data-footnote-label="a" data-footnote-sep=" ">A</li>' +
+                        '<li id="fn-b" data-footnote-label="b" data-footnote-sep=" "' +
+                        ' data-footnote-blanks="' + raw + '">B</li>' +
+                        '</ol></section>';
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, expected, `raw=${raw}`);
+                }
+            });
+
+            test('定義同士の間の空行が往復で保たれる', () => {
+                // 定義行は本文から取り除かれるが、定義の**間**にあった空行は
+                // 本文側に残ってしまい、往復すると最初の定義の前へ集まっていた
+                // （`\n\n[^x]: A\n\n[^y]: B` → `\n\n\n[^x]: A\n[^y]: B`）
+                for (const md of [
+                    '本文[^x]と[^y]です。\n\n[^x]: A\n[^y]: B',
+                    '本文[^x]と[^y]です。\n\n[^x]: A\n\n[^y]: B',
+                    '本文[^x]と[^y]です。\n\n[^x]: A\n\n\n[^y]: B',
+                    '本文[^x]と[^y]と[^z]です。\n\n[^x]: A\n\n[^y]: B\n[^z]: C'
+                ]) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            test('文書の途中に書いた定義は末尾の脚注一覧へ集約される（既存の設計）', () => {
+                // 脚注定義は本文から取り除かれ、文書末尾の脚注一覧セクションに
+                // まとめられる（一般的なMarkdownの脚注と同じ挙動）。定義の位置は
+                // 保たれないという既存仕様を、空行の保持対応で変えていないことの確認
+                env.editor.innerHTML = env.markdown.markdownToHtml(
+                    '本文[^x]です。\n\n[^x]: A\n\n後書き。'
+                );
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '本文[^x]です。\n\n\n後書き。\n\n[^x]: A');
+            });
+
             test('脚注定義が無ければ脚注一覧セクションも生成しない', () => {
                 const html = env.markdown.markdownToHtml('ただの本文です。');
                 assert.ok(!html.includes('footnotes'), html);
@@ -893,8 +959,8 @@ suite('MarkdownModule', () => {
                     '別の本文行'
                 ]);
                 assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
-                    { label: '1', sep: ' ', text: '定義1' },
-                    { label: 'note', sep: ' ', text: '定義2' }
+                    { label: '1', sep: ' ', text: '定義1', blanksBefore: 0 },
+                    { label: 'note', sep: ' ', text: '定義2', blanksBefore: 0 }
                 ]);
                 assert.strictEqual(result.labels.has('1'), true);
                 assert.strictEqual(result.labels.has('note'), true);
@@ -937,7 +1003,7 @@ suite('MarkdownModule', () => {
                     '[^3]: 本物の定義'
                 ]);
                 assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
-                    { label: '3', sep: ' ', text: '本物の定義' }
+                    { label: '3', sep: ' ', text: '本物の定義', blanksBefore: 0 }
                 ]);
                 assert.deepStrictEqual(Array.from(result.contentLines), [
                     '参照[^3]', '```', '[^1]: コード内', '```', '$$', '[^2]: 数式内', '$$'
@@ -954,16 +1020,95 @@ suite('MarkdownModule', () => {
                     '[^c]:   空白3つ'
                 ]);
                 assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
-                    { label: 'a', sep: '', text: '空白無し' },
-                    { label: 'b', sep: ' ', text: '空白1つ' },
-                    { label: 'c', sep: '   ', text: '空白3つ' }
+                    { label: 'a', sep: '', text: '空白無し', blanksBefore: 0 },
+                    { label: 'b', sep: ' ', text: '空白1つ', blanksBefore: 0 },
+                    { label: 'c', sep: '   ', text: '空白3つ', blanksBefore: 0 }
                 ]);
+            });
+
+            test('定義同士の間の空行を blanksBefore として定義側へ付け替える', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^a][^b][^c]',
+                    '',
+                    '[^a]: A',
+                    '',
+                    '[^b]: B',
+                    '',
+                    '',
+                    '[^c]: C'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: 'a', sep: ' ', text: 'A', blanksBefore: 0 },
+                    { label: 'b', sep: ' ', text: 'B', blanksBefore: 1 },
+                    { label: 'c', sep: ' ', text: 'C', blanksBefore: 2 }
+                ]);
+                // 付け替えた空行は本文側に残らない（最初の定義の前の空行だけが残る）
+                assert.deepStrictEqual(Array.from(result.contentLines), ['参照[^a][^b][^c]', '']);
+            });
+
+            test('定義の後に本文が続く場合、保留した空行は本文行として戻す', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^a]',
+                    '[^a]: A',
+                    '',
+                    '後書き'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: 'a', sep: ' ', text: 'A', blanksBefore: 0 }
+                ]);
+                assert.deepStrictEqual(Array.from(result.contentLines), ['参照[^a]', '', '後書き']);
+            });
+
+            test('文書が「定義＋空行」で終わる場合も空行を失わない', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^a]',
+                    '[^a]: A',
+                    '',
+                    ''
+                ]);
+                assert.deepStrictEqual(Array.from(result.contentLines), ['参照[^a]', '', '']);
+            });
+
+            test('定義間の空行が落ちても seam は次の本文行に立つ', () => {
+                // 定義間の空行を contentLines から取り除くことで「本来隣接して
+                // いなかった本文行同士が隣接する」ケースが増える。seamIndices が
+                // 正しく立たないと scanDefListTerms 等が誤結合する（過去に2度回帰した領域）
+                const result = env.markdown.extractFootnoteDefinitions([
+                    'Term',
+                    '[^a]: A',
+                    '',
+                    '[^b]: B',
+                    ': Definition',
+                    '',
+                    '参照[^a][^b]'
+                ]);
+                assert.deepStrictEqual(
+                    Array.from(result.contentLines),
+                    ['Term', ': Definition', '', '参照[^a][^b]']
+                );
+                // 'Term' と ': Definition' は元々隣接していない＝index 1 に seam が立つ
+                assert.deepStrictEqual(Array.from(result.seamIndices), [1]);
+            });
+
+            test('定義間に空行があっても定義リストへ誤結合しない（seam の実効確認）', () => {
+                const md = 'Term\n[^a]: A\n\n[^b]: B\n: Definition\n\n参照[^a][^b]';
+                const html = env.markdown.markdownToHtml(md);
+                assert.ok(!html.includes('<dl>'), html);
             });
         });
 
         suite('buildFootnotesSectionHtml', () => {
             test('定義が無ければ空文字を返す', () => {
                 assert.strictEqual(env.markdown.buildFootnotesSectionHtml([]), '');
+            });
+
+            test('data-footnote-blanksは空行がある定義にだけ付く', () => {
+                const html = env.markdown.buildFootnotesSectionHtml([
+                    { label: 'a', sep: ' ', text: 'A', blanksBefore: 0 },
+                    { label: 'b', sep: ' ', text: 'B', blanksBefore: 2 }
+                ]);
+                assert.ok(!/id="fn-a"[^>]*data-footnote-blanks/.test(html), html);
+                assert.ok(html.includes('data-footnote-blanks="2"'), html);
             });
 
             test('data-footnote-sepへ元の空白をそのまま埋め込む', () => {

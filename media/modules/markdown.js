@@ -387,8 +387,14 @@ window.MarkdownModule = (function() {
      * 呼ぶと、本関数が返す`contentLines`＝脚注除去後の行配列に対して呼び出し側が
      * 再度判定した場合に、たまたま除去後の行が`---`で始まってしまうケースなどで
      * 判定がずれる可能性があった。/local-review指摘対応）。
-     * @returns {{ defs: {label:string, sep:string, text:string}[], labels: Set<string>,
-     *            contentLines: string[], seamIndices: Set<number> }}
+     *
+     * **定義同士の間にあった空行は、後続の定義の`blanksBefore`へ付け替えて
+     * `contentLines`から取り除く。** 取り除かないと定義行だけが本文から消えて空行が
+     * 本文側に残り、往復すると最初の定義の前へ空行が集まってしまう
+     * （`\n\n[^x]: A\n\n[^y]: B` → `\n\n\n[^x]: A\n[^y]: B`）。
+     * 定義の連なりが途切れた場合（次が本文行・文書末尾）は保留した空行を本文へ戻す。
+     * @returns {{ defs: {label:string, sep:string, text:string, blanksBefore:number}[],
+     *            labels: Set<string>, contentLines: string[], seamIndices: Set<number> }}
      */
     function extractFootnoteDefinitions(lines, frontMatterEndIndex) {
         const boundary = typeof frontMatterEndIndex === 'number' ? frontMatterEndIndex : -1;
@@ -451,19 +457,52 @@ window.MarkdownModule = (function() {
         const contentLines = [];
         const seamIndices = new Set();
         let pendingSeam = false;
+        // 定義の直後に続く空行を保留するバッファ。次に来るのがまた定義なら
+        // 「定義同士の間の空行」として定義側（blanksBefore）へ付け替え、
+        // そうでなければ本文行として contentLines へ戻す。付け替えないと、
+        // 定義行だけが本文から取り除かれて空行が本文側に残り、往復すると
+        // 最初の定義の前へ空行が集まってしまう
+        // （`\n\n[^x]: A\n\n[^y]: B` → `\n\n\n[^x]: A\n[^y]: B`）。
+        let blankBuffer = [];
+        let afterDef = false;
+
+        /** 保留していた空行を本文行として戻す（定義の連なりが途切れたとき） */
+        function flushBlankBuffer() {
+            blankBuffer.forEach(function (line) {
+                if (pendingSeam) {
+                    seamIndices.add(contentLines.length);
+                    pendingSeam = false;
+                }
+                contentLines.push(line);
+            });
+            blankBuffer = [];
+        }
+
         entries.forEach(function (entry) {
             if (entry.def && referencedLabels.has(entry.def.label) && !labels.has(entry.def.label)) {
                 labels.add(entry.def.label);
+                // 直前の定義との間にあった空行の数を控える（最初の定義は常に0）
+                entry.def.blanksBefore = afterDef ? blankBuffer.length : 0;
+                blankBuffer = [];
                 defs.push(entry.def);
                 pendingSeam = true;
+                afterDef = true;
                 return;
             }
+            if (afterDef && /^\s*$/.test(entry.line)) {
+                blankBuffer.push(entry.line);
+                return;
+            }
+            flushBlankBuffer();
+            afterDef = false;
             if (pendingSeam) {
                 seamIndices.add(contentLines.length);
                 pendingSeam = false;
             }
             contentLines.push(entry.line);
         });
+        // 文書が「定義＋空行」で終わる場合、保留したままの空行を戻す
+        flushBlankBuffer();
 
         return { defs: defs, labels: labels, contentLines: contentLines, seamIndices: seamIndices };
     }
@@ -482,8 +521,11 @@ window.MarkdownModule = (function() {
         }
         let html = '<section class="footnotes" data-footnotes="true"><ol>';
         defs.forEach(function (def) {
+            // 直前の定義との間にあった空行の数（0なら属性自体を出さない＝
+            // 従来生成されたHTMLとの互換も保つ）
+            const blanks = def.blanksBefore ? ' data-footnote-blanks="' + def.blanksBefore + '"' : '';
             html += '<li id="fn-' + def.label + '" data-footnote-label="' + def.label +
-                '" data-footnote-sep="' + def.sep + '">' +
+                '" data-footnote-sep="' + def.sep + '"' + blanks + '>' +
                 convertInline(escapeHtml(def.text)) +
                 ' <a href="#fnref-' + def.label + '" class="footnote-backref">↩</a></li>';
         });
@@ -1510,6 +1552,15 @@ window.MarkdownModule = (function() {
                 if (!items.length) {
                     return '';
                 }
+                // 定義同士の間の空行数（data-footnote-blanks）を復元する。
+                // 属性が無い＝この対応より前に生成されたHTML等は0（空行なし）扱い。
+                // 外部由来のHTMLを貼り付けられた場合に備えて上限をクランプする
+                // （巨大値だと String.repeat が RangeError を投げ、保存経路である
+                // htmlToMarkdown ごと落ちるため）。実際に書ける空行数として十分な範囲。
+                const blanksBefore = items.map(li => {
+                    const raw = parseInt(li.getAttribute('data-footnote-blanks') || '0', 10);
+                    return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 20) : 0;
+                });
                 const lines = items.map(li => {
                     const label = li.getAttribute('data-footnote-label') || '';
                     // `:`直後の元の空白を復元する（属性が無い＝この機能追加前に生成された
@@ -1525,7 +1576,10 @@ window.MarkdownModule = (function() {
                     const text = serializeInlineChildren(clone).trim();
                     return `[^${label}]:${sep}${text}`;
                 });
-                return lines.join('\n') + '\n\n';
+                // 定義同士は改行1つで連結し、間にあった空行の数だけ改行を足す
+                return lines
+                    .map((line, idx) => (idx === 0 ? '' : '\n'.repeat(blanksBefore[idx])) + line)
+                    .join('\n') + '\n\n';
             }
             default:
                 return serializeInlineChildren(el);
