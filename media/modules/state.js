@@ -67,6 +67,11 @@ window.EditorState = (function() {
         // 開いた時点のRangeと編集対象の要素を保持して適用時に使う
         linkDialogRange: null,
         linkDialogTarget: null,
+        // 編集中リンクが持っていた title 属性（Markdownのタイトル記法 `(url "title")`）。
+        // ダイアログはテキストとURLしか編集しないため、適用時に引き継いで
+        // ユーザーが触っていないタイトルが失われないようにする。
+        // （ダイアログの見出しDOM要素 `linkDialogTitle` とは別物）
+        linkDialogLinkTitle: null,
 
         // Mermaid関連
         mermaidIdCounter: 0,
@@ -171,6 +176,9 @@ window.EditorState = (function() {
 
         get linkDialogTarget() { return state.linkDialogTarget; },
         set linkDialogTarget(v) { state.linkDialogTarget = v; },
+
+        get linkDialogLinkTitle() { return state.linkDialogLinkTitle; },
+        set linkDialogLinkTitle(v) { state.linkDialogLinkTitle = v; },
 
         // フラグのゲッター/セッター
         get isUpdating() { return state.isUpdating; },

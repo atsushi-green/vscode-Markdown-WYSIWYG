@@ -4,6 +4,7 @@
  * これらは vscode API に依存しないため jsdom ハーネス不要で直接importして検証できる。
  */
 import * as assert from 'assert';
+import * as path from 'path';
 import {
     mimeToExtension,
     formatTimestamp,
@@ -68,25 +69,85 @@ suite('imagePaste（クリップボード画像保存の純粋関数）', () => 
         });
     });
 
-    suite('toMarkdownRelativePath', () => {
+    // path 実装を明示的に注入し、テストの結果が**実行プラットフォームに依存しない**
+    // ようにする（既定引数のままだと macOS/Linux 向けの期待値が Windows 実行で落ちる）。
+    suite('toMarkdownRelativePath（POSIX）', () => {
         test('同じフォルダならファイル名だけ', () => {
             assert.strictEqual(
-                toMarkdownRelativePath('/home/user/docs', '/home/user/docs/image-1.png'),
+                toMarkdownRelativePath(
+                    '/home/user/docs', '/home/user/docs/image-1.png', path.posix
+                ),
                 'image-1.png'
             );
         });
 
         test('サブフォルダは POSIX 区切りの相対パス', () => {
             assert.strictEqual(
-                toMarkdownRelativePath('/home/user/docs', '/home/user/docs/assets/image-1.png'),
+                toMarkdownRelativePath(
+                    '/home/user/docs', '/home/user/docs/assets/image-1.png', path.posix
+                ),
                 'assets/image-1.png'
             );
         });
 
         test('上位フォルダへの相対も表現できる', () => {
             assert.strictEqual(
-                toMarkdownRelativePath('/home/user/docs/sub', '/home/user/docs/image-1.png'),
+                toMarkdownRelativePath(
+                    '/home/user/docs/sub', '/home/user/docs/image-1.png', path.posix
+                ),
                 '../image-1.png'
+            );
+        });
+
+        test('`\\` をファイル名の文字として保つ（区切りに化けさせない）', () => {
+            // macOS/Linux では `\` はファイル名に使える普通の文字。`\` も区切りとして
+            // 分解する旧実装（split(/[\\/]/)）では `a\b.png` が `a/b.png` という
+            // 別パスへ化けていた。この2件が本サイクルの回帰テスト
+            assert.strictEqual(
+                toMarkdownRelativePath(
+                    '/home/user/docs', '/home/user/docs/a\\b.png', path.posix
+                ),
+                'a\\b.png'
+            );
+            assert.strictEqual(
+                toMarkdownRelativePath(
+                    '/home/user/docs', '/home/user/docs/assets/a\\b.png', path.posix
+                ),
+                'assets/a\\b.png'
+            );
+        });
+    });
+
+    suite('toMarkdownRelativePath（Windows）', () => {
+        // Windows のファイル名に `\` は使えないため、`\` を区切りとして分解しても
+        // ファイル名を壊さない。これらは旧実装でも通る＝回帰テストではなく、
+        // POSIX 側の修正で Windows の正規化を壊していないことの裏付け
+        test('区切りの `\\` を `/` へ正規化する', () => {
+            assert.strictEqual(
+                toMarkdownRelativePath(
+                    'C:\\docs', 'C:\\docs\\assets\\img.png', path.win32
+                ),
+                'assets/img.png'
+            );
+        });
+
+        test('入力に `/` が混ざっていても `\\` 区切りへ正規化されてから変換される', () => {
+            // docstring が根拠にしている「path.relative の戻り値は必ず sep 区切り」
+            // という前提そのものの裏付け（win32 は入力の `/` を `\` へ正規化する）
+            assert.strictEqual(
+                toMarkdownRelativePath(
+                    'C:\\docs', 'C:\\docs/assets/img.png', path.win32
+                ),
+                'assets/img.png'
+            );
+        });
+
+        test('上位フォルダへの相対も POSIX 区切りで返す', () => {
+            assert.strictEqual(
+                toMarkdownRelativePath(
+                    'C:\\docs\\sub', 'C:\\docs\\img.png', path.win32
+                ),
+                '../img.png'
             );
         });
     });

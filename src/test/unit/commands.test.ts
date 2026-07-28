@@ -77,6 +77,108 @@ suite('CommandsModule', () => {
             assert.ok(!env.editor.querySelector('img'), env.editor.innerHTML);
         });
 
+        test('タイトル記法のライブ変換で title 属性へ分離する（画像・リンク）', () => {
+            env.editor.innerHTML = '<p>![説明](a.png "タイトル") 後続</p>';
+            env.commands.applyInlineFormatting();
+            const img = env.editor.querySelector('img');
+            assert.ok(img, env.editor.innerHTML);
+            assert.strictEqual(img!.getAttribute('src'), 'a.png');
+            assert.strictEqual(img!.getAttribute('alt'), '説明');
+            assert.strictEqual(img!.getAttribute('title'), 'タイトル');
+
+            env.editor.innerHTML = '<p>[text](https://e.com "タイトル") 後続</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            assert.strictEqual(a!.getAttribute('href'), 'https://e.com');
+            assert.strictEqual(a!.getAttribute('title'), 'タイトル');
+        });
+
+        test('ライブ変換したタイトル記法は往復で保たれる', () => {
+            for (const md of ['![説明](a.png "タイトル")', '[text](https://e.com "タイトル")']) {
+                env.editor.innerHTML = '<p>' + md + '</p>';
+                env.commands.applyInlineFormatting();
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md, `roundtrip: ${md}`);
+            }
+        });
+
+        test('ライブ変換でもURL・タイトル中の _ / * が強調に食われない', () => {
+            env.editor.innerHTML = '<p>[t](https://e.com/a_b_c "x_y_z") 後続</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            assert.strictEqual(a!.getAttribute('href'), 'https://e.com/a_b_c');
+            assert.strictEqual(a!.getAttribute('title'), 'x_y_z');
+            assert.ok(!env.editor.querySelector('em'), env.editor.innerHTML);
+        });
+
+        test('ライブ変換でもURL・タイトル・alt中のコード/数式が属性に展開されない', () => {
+            env.editor.innerHTML = '<p>[t](http://e/a`b`c "x$y$z") 後続</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            assert.strictEqual(a!.getAttribute('href'), 'http://e/a`b`c');
+            assert.strictEqual(a!.getAttribute('title'), 'x$y$z');
+            assert.ok(!env.editor.querySelector('code'), env.editor.innerHTML);
+            assert.ok(!env.editor.querySelector('.math-inline'), env.editor.innerHTML);
+        });
+
+        test('ライブ変換でもコード/数式を含むURLが往復する', () => {
+            for (const md of [
+                '[t](http://e/a`b`c)',
+                '![a`b`c](http://e/x)',
+                '[t](http://e/$a_1$)'
+            ]) {
+                env.editor.innerHTML = '<p>' + md + '</p>';
+                env.commands.applyInlineFormatting();
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md, `roundtrip: ${md}`);
+            }
+        });
+
+        test('ライブ変換でも数式に入れ子のコード・\\$ が元テキストへ戻る', () => {
+            for (const md of [
+                '[t](http://e/$a`b`c$)',
+                '[t](http://e/$a\\$b$)',
+                '![$a`b`c$](http://e/x)'
+            ]) {
+                env.editor.innerHTML = '<p>' + md + '</p>';
+                env.commands.applyInlineFormatting();
+                assert.ok(!env.editor.querySelector('code'), env.editor.innerHTML);
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md, `roundtrip: ${md}`);
+            }
+        });
+
+        test('ライブ変換でもリンクテキスト内の強調は変換される（回帰確認）', () => {
+            env.editor.innerHTML = '<p>[**太字**](https://e.com) 後続</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            assert.ok(a!.querySelector('strong'), env.editor.innerHTML);
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(out, '[**太字**](https://e.com) 後続');
+        });
+
+        test('タイトル記法の属性値は " をエスケープして埋め込む（ライブ変換）', () => {
+            env.editor.innerHTML = '<p>[text](https://e.com \'a"b\')</p>';
+            env.commands.applyInlineFormatting();
+            const a = env.editor.querySelector('a');
+            assert.ok(a, env.editor.innerHTML);
+            // getAttribute は実体参照を戻すので、属性が途中で閉じていなければ a"b になる
+            assert.strictEqual(a!.getAttribute('title'), 'a"b');
+            assert.strictEqual(a!.getAttribute('href'), 'https://e.com');
+        });
+
         test('_ を含む画像パスのライブ変換で src が強調に壊れない', () => {
             env.editor.innerHTML = '<p>![](my_img_1.png) 後続</p>';
             env.commands.applyInlineFormatting();
@@ -668,6 +770,60 @@ suite('CommandsModule', () => {
             assert.strictEqual(a.textContent, 'ここ', env.editor.innerHTML);
             const md = env.markdown.htmlToMarkdown(env.editor.innerHTML);
             assert.ok(/\[ここ\]\(https:\/\/example\.com\)をリンクにする/.test(md), JSON.stringify(md));
+        });
+
+        test('既存リンクのタイトルはダイアログ経由でも失われない', () => {
+            // ダイアログはテキストとURLしか編集できない。タイトルを引き継がないと
+            // ユーザーが触っていないタイトルが保存時に消える（データ喪失）
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '[text](https://e.com "タイトル")'
+            );
+            const a0 = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a0.getAttribute('title'), 'タイトル', '前提: title が付いている');
+            selectIn(a0, 0, 1);
+            assert.strictEqual(env.commands.insertLink(), true);
+            // URL欄にタイトルが混入していない
+            assert.strictEqual(dialog().url.value, 'https://e.com');
+            dialog().text.value = 'changed';
+            assert.strictEqual(env.commands.applyLinkDialog(), true);
+
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('title'), 'タイトル', env.editor.innerHTML);
+            const md = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(md, '[changed](https://e.com "タイトル")');
+        });
+
+        test('生Markdown展開中のリンクでもタイトルがURL欄に混入しない', () => {
+            // parseRawLink が `url "title"` をそのまま href として返すと、
+            // URL欄にタイトルが入り、適用すると不正なhrefのリンクができる
+            env.editor.innerHTML =
+                '<p><span class="raw-markdown">[text](https://e.com "タイトル")</span></p>';
+            const span = env.editor.querySelector('span') as HTMLElement;
+            selectIn(span, 0, 1);
+            assert.strictEqual(env.commands.insertLink(), true);
+            assert.strictEqual(dialog().url.value, 'https://e.com');
+            assert.strictEqual(dialog().text.value, 'text');
+
+            assert.strictEqual(env.commands.applyLinkDialog(), true);
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.getAttribute('href'), 'https://e.com', env.editor.innerHTML);
+            assert.strictEqual(a.getAttribute('title'), 'タイトル', env.editor.innerHTML);
+        });
+
+        test('タイトルの無いリンクを編集しても title 属性は付かない（回帰確認）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('[text](https://e.com)');
+            selectIn(env.editor.querySelector('a') as HTMLElement, 0, 1);
+            env.commands.insertLink();
+            dialog().text.value = 'changed';
+            env.commands.applyLinkDialog();
+            const a = env.editor.querySelector('a') as HTMLAnchorElement;
+            assert.strictEqual(a.hasAttribute('title'), false, env.editor.innerHTML);
+            const md = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(md, '[changed](https://e.com)');
         });
 
         test('適用後はダイアログが閉じる', () => {
@@ -1937,6 +2093,27 @@ suite('CommandsModule', () => {
             assert.strictEqual(ref!.querySelector('a')!.getAttribute('href'), '#fn-1');
         });
 
+        test('ラベル中の _ を含む参照が読込パスと同一の <sup> になる（対称性）', () => {
+            // ライブ変換側は以前からプレースホルダへ退避しており壊れていなかった。
+            // 読込パス（markdown.js）を揃えたので、両者の出力が一致することを
+            // outerHTML の実比較で固定する
+            const md = '本文[^a_b_c]です。\n\n[^a_b_c]: 脚注。';
+            env.editor.innerHTML = env.markdown.markdownToHtml(md);
+            const expected = env.editor.querySelector('sup.footnote-ref')!.outerHTML;
+
+            env.editor.innerHTML =
+                '<p>本文[^a_b_c]です。</p>' +
+                '<section class="footnotes" data-footnotes="true"><ol>' +
+                '<li id="fn-a_b_c" data-footnote-label="a_b_c">脚注。' +
+                '<a href="#fnref-a_b_c" class="footnote-backref">back</a></li>' +
+                '</ol></section>';
+            env.commands.applyInlineFormatting();
+            const ref = env.editor.querySelector('sup.footnote-ref');
+            assert.ok(ref, env.editor.innerHTML);
+            assert.strictEqual(ref!.outerHTML, expected, '読込パスとライブ変換で出力が異なる');
+            assert.ok(!env.editor.querySelector('em'), env.editor.innerHTML);
+        });
+
         test('対応する脚注一覧セクションがまだ無い参照はライブ変換されない（リテラルのまま）', () => {
             env.editor.innerHTML = '<p>本文[^1]です。</p>';
             const { didFormat } = env.commands.applyInlineFormatting();
@@ -2444,8 +2621,112 @@ suite('CommandsModule', () => {
                 );
             });
 
+            test('URLの区切り文字（#・?）をエンコードする', () => {
+                // エンコードしないと resolveImageSrc の結合後にフラグメント/クエリと
+                // 解釈され、その位置以降がパスから切り落とされて画像が表示されない
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a#b.png'), '![](a%23b.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a?b.png'), '![](a%3Fb.png)'
+                );
+            });
+
+            test('インライン退避に巻き込まれる文字（`・$）をエンコードする', () => {
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a`b`c.png'), '![](a%60b%60c.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a$b$c.png'), '![](a%24b%24c.png)'
+                );
+            });
+
+            test('Markdown/HTMLであいまいな文字（<>"\\[]）をエンコードする', () => {
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a<b>c".png'),
+                    '![](a%3Cb%3Ec%22.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a\\b[c].png'),
+                    '![](a%5Cb%5Bc%5D.png)'
+                );
+            });
+
+            test('% は %25 へエンコードし、二重エンコードしない', () => {
+                // 単一パス置換なので、生成した %20 の % が再度拾われない
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('100% a.png'), '![](100%25%20a.png)'
+                );
+            });
+
+            test('強調記法文字（_ * ~ +）と非ASCIIはエンコードしない', () => {
+                // 画像はプレースホルダへ退避されてから強調変換が走るため化けない。
+                // エンコードするとパスが読みにくくなるだけなので対象外にしている
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('image_1*2~3+4.png'),
+                    '![](image_1*2~3+4.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('画像-1.png'), '![](画像-1.png)'
+                );
+            });
+
+            test('対応表に無い空白（タブ・全角スペース）は encodeURIComponent へ委ねる', () => {
+                // 正規表現の \s は半角スペース以外の空白にもマッチする。これらを
+                // 一律 %20 へ潰すと別の文字になり実ファイルへ解決できなくなるため、
+                // 元の文字を保つ encodeURIComponent でエンコードする
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a\tb.png'), '![](a%09b.png)'
+                );
+                assert.strictEqual(
+                    env.commands.buildImageMarkdown('a　b.png'),
+                    '![](a%E3%80%80b.png)'
+                );
+            });
+
             test('空パスは ![]() ', () => {
                 assert.strictEqual(env.commands.buildImageMarkdown(''), '![]()');
+            });
+
+            test('エンコード済みパスは読込変換（convertInline）の往復で保たれる', () => {
+                // ` と $ はインラインコード・数式として画像より先に退避され、画像より
+                // 後で復元されるため、生のままだと src の値が汚染される（`）か、
+                // 属性値が途中で閉じてHTML構造ごと壊れる（$）
+                const md = env.commands.buildImageMarkdown('a`b`c $d$ (e).png');
+                env.editor.innerHTML = env.markdown.markdownToHtml(md);
+
+                const img = env.editor.querySelector('img');
+                assert.ok(img, '<img> が生成される');
+                assert.strictEqual(img!.getAttribute('src'),
+                    'a%60b%60c%20%24d%24%20%28e%29.png');
+                // 退避したコード・数式が属性値の中で展開されていない
+                // （<img> は void 要素なので innerHTML では検出できない）
+                assert.ok(!env.editor.querySelector('code'), env.editor.innerHTML);
+                assert.ok(!env.editor.querySelector('.math-inline'), env.editor.innerHTML);
+                assert.strictEqual(env.editor.textContent!.trim(), '',
+                    '壊れた属性値の残骸が本文へ落ちていない');
+
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md);
+            });
+
+            test('エンコード済みパスはライブ変換（convertInlineText）でも壊れない', () => {
+                // 貼り付け直後に走る経路。読込変換と同じ退避順序の問題を持つため、
+                // 主目的である「貼り付けた瞬間から壊れない」ことをこちらでも確認する
+                const md = env.commands.buildImageMarkdown('a`b`c $d$ (e).png');
+                env.editor.innerHTML = '<p>' + md + ' 後続</p>';
+                env.commands.applyInlineFormatting();
+
+                const img = env.editor.querySelector('img');
+                assert.ok(img, env.editor.innerHTML);
+                assert.strictEqual(img!.getAttribute('src'),
+                    'a%60b%60c%20%24d%24%20%28e%29.png');
+                assert.ok(!env.editor.querySelector('code'), env.editor.innerHTML);
+                assert.ok(!env.editor.querySelector('.math-inline'), env.editor.innerHTML);
+                assert.strictEqual(env.editor.textContent!.trim(), '後続',
+                    '壊れた属性値の残骸が本文へ落ちていない');
             });
         });
 

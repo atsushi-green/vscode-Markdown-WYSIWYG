@@ -64,6 +64,49 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * 画像・リンクの丸括弧の中身（`(url "title")` の `url "title"` 部分）を
+     * URLとタイトルへ分ける純粋関数。Markdown標準のタイトル記法に対応する。
+     *
+     * タイトルは `"…"` と `'…'` の両方を受け付け、**URLとの間に空白が必要**
+     * （`a"b"` のような空白無しはURLの一部とみなす＝ファイル名に引用符を含む
+     * パスを誤ってタイトル扱いしない）。閉じ引用符は文字列の末尾になければ
+     * ならず、`a "b" c` のような不正な形はタイトル無しとして扱う。
+     *
+     * **URLの前後の空白は落とす**（`[t]( u )` → `href="u"`）。CommonMark と同じ
+     * 正規化で、Markdownとしての意味は変わらないが、保存時にバイト列は変わる。
+     *
+     * **引用符が2組ある場合**（`(u "a" "b")`）はURL側を最短・タイトル側を最長に
+     * 取るため `url="u"` / `title='a" "b'` になる。CommonMark は不正として扱うが、
+     * 往復は保たれるためこの解釈を許容する。
+     *
+     * **既知の制約**: 呼び出し元の正規表現が `([^)]+)` で丸括弧の中身を取るため、
+     * URL・タイトルのどちらにも `)` を含められない（タイトル記法の追加で
+     * 生じた制約ではなく、リンク・画像記法に元からある制約）。CommonMarkの
+     * `(…)` 形式のタイトルも、この `)` 制約と両立しないため非対応。
+     *
+     * @param {string} dest 丸括弧の中身
+     * @returns {{url: string, title: string|null}} タイトルが無ければ title は null
+     */
+    function parseLinkDestination(dest) {
+        const s = String(dest == null ? '' : dest);
+        // 先頭から最短でURLを取り、空白＋引用符で囲まれた末尾をタイトルとみなす
+        const m = /^([\s\S]*?)\s+(["'])([\s\S]*)\2\s*$/.exec(s);
+        if (!m) {
+            return { url: s.trim(), title: null };
+        }
+        return { url: m[1].trim(), title: m[3] };
+    }
+
+    /**
+     * `title` 属性のHTML断片（` title="…"`）を組み立てる。タイトルが無ければ空文字。
+     * @param {string|null} title
+     * @param {function(string): string} escape 属性値へ埋め込む際のエスケープ関数
+     */
+    function buildTitleAttr(title, escape) {
+        return title === null ? '' : ' title="' + escape(title) + '"';
+    }
+
+    /**
      * インラインMarkdown記法をHTMLへ変換（エスケープ済みテキストに適用）
      * commands.jsのライブ変換（convertInlineText）と同じ記法をサポートする
      */
@@ -100,11 +143,53 @@ window.MarkdownModule = (function() {
         // `$a_1$` の `_` が強調に化けてしまう（インラインコード退避と同じ方針）。
         // 実際のレンダリングは math.js（KaTeX）が data-math を読んで後から行う。
         const mathSpans = [];
-        html = html.replace(/\$([^$\n]+)\$/g, function (_m, expr) {
+        // 属性値（URL・タイトル・alt）へ戻すための元のMarkdownテキストも控える
+        const mathSources = [];
+        html = html.replace(/\$([^$\n]+)\$/g, function (m, expr) {
             mathSpans.push('<span class="math-inline" data-math="' + escapeAttr(expr) +
                 '" contenteditable="false"></span>');
+            mathSources.push(m);
             return '\u0002' + (mathSpans.length - 1) + '\u0002';
         });
+
+        /**
+         * 画像・リンクの**属性になる部分**（URL・タイトル・alt）に紛れ込んだ
+         * コード・数式・`\$` のプレースホルダを、元のMarkdownテキストへ戻す。
+         *
+         * これらの退避は画像・リンクより**前**に行われ、復元は**後**に行われるため、
+         * 戻さないとプレースホルダが属性値の中に取り込まれたまま復元され、
+         * `href="http://e/a<code>b</code>c"` のように値が壊れる。数式に至っては
+         * 復元される `<span class="math-inline" …>` が `"` を含むため属性値がそこで
+         * 途中終了し、**タグ構造ごと壊れる**（往復結果が `["&gt;t](http://e/<span class=)`
+         * のようになる）。
+         *
+         * 戻す先はHTMLではなく**元の記法テキスト**にする。URLやタイトルの中の
+         * `` `…` `` や `$…$` は「コード」「数式」ではなく単なる文字列なので、
+         * 文字どおり保つのが往復にとっても正しい。
+         *
+         * リンクテキスト（`[…]` の中身）はHTMLの流れに残って通常どおり復元されるため、
+         * ここでは戻さない（`` [`code`](u) `` のリンクテキスト内コードは従来どおり）。
+         */
+        function unstashToText(s) {
+            // **戻す順序は退避の逆**（数式 → コード → `\$`）にする。数式の退避は
+            // コード・`\$` の退避より後に行われるため、控えている元テキストの中には
+            // それらのプレースホルダが残っている。コード→数式の順で戻すと、最後に
+            // 差し戻した数式ソース中のプレースホルダを誰も復元しないまま
+            // 属性値へ入ってしまい、元の不具合（`href` への `<code>` 混入や、
+            // コード内の `"` による属性値の早期終了＝タグ構造の破壊）が再発する。
+            // 入れ子は1段しか起こらない（コードの中身と `\$` にはプレースホルダが
+            // 入り得ない）ので、この順序なら単一パスで解決する。
+            return String(s)
+                .replace(/\u0002(\d+)\u0002/g, function (_m, i) {
+                    return mathSources[Number(i)];
+                })
+                .replace(/\u0000(\d+)\u0000/g, function (_m, i) {
+                    return '`' + codeSpans[Number(i)] + '`';
+                })
+                .replace(/\u0001(\d+)\u0001/g, function () {
+                    return '\\$';
+                });
+        }
 
         // 画像（![alt](url)）。リンクより**先に**処理する（`![` を `!`＋リンクに
         // 割らないため）。alt は空も許容（貼り付け画像は alt 無し）。属性を閉じる
@@ -113,13 +198,29 @@ window.MarkdownModule = (function() {
         // `_`/`*`/`~`/`+` が後続の強調変換で `src="a<em>b</em>c"` のように壊れ、往復が
         // 崩れる（インラインコード・数式と同じ保護方針）。
         const imgSpans = [];
-        html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_m, alt, url) {
-            imgSpans.push('<img src="' + escapeAttr(url) + '" alt="' + escapeAttr(alt) + '">');
+        html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function (_m, alt, dest) {
+            const d = parseLinkDestination(unstashToText(dest));
+            imgSpans.push('<img src="' + escapeAttr(d.url) +
+                '" alt="' + escapeAttr(unstashToText(alt)) +
+                '"' + buildTitleAttr(d.title, escapeAttr) + '>');
             return '' + (imgSpans.length - 1) + '';
         });
 
-        // リンク
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+        // リンク（`(url "title")` のタイトルは title 属性へ分離する）。
+        // 画像と同じ理由で**開始タグをプレースホルダへ退避する**。退避しないと
+        // URL・タイトル中の `_`/`*` が後続の強調変換に拾われ、
+        // `href="a<em>b</em>c"` のように属性値が壊れて往復が崩れる。
+        // 画像（void要素）と違いリンクは中身を持つため、退避するのは**開始タグだけ**で、
+        // テキストと `</a>` はそのまま残す（`[**太字**](url)` のようにリンクテキスト内の
+        // 強調は従来どおり変換される必要があるため）。`</a>` は記法文字を含まないので
+        // 強調変換に巻き込まれない。
+        const linkSpans = [];
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, text, dest) {
+            const d = parseLinkDestination(unstashToText(dest));
+            linkSpans.push('<a href="' + escapeAttr(d.url) + '"' +
+                buildTitleAttr(d.title, escapeAttr) + '>');
+            return '\u0005' + (linkSpans.length - 1) + '\u0005' + text + '</a>';
+        });
 
         // 脚注参照（[^label]）。対応する脚注定義（footnoteLabelsに含まれるラベル）が
         // 実在する場合のみ変換し、無ければリテラルテキストのまま残す
@@ -128,13 +229,21 @@ window.MarkdownModule = (function() {
         // 直後に`:`が続くもの（`[^label]:`＝定義行の体裁。重複ラベルで無効化された
         // 定義が通常の段落へ回されたケースなど）は参照として変換しない
         // （extractFootnoteDefinitionsの参照カウント側と同じ`(?!:)`ガード）。
+        // 生成した `<sup>` はプレースホルダへ退避する（commands.js の convertInlineText と
+        // 同じ方針・同じ番号 4）。実HTMLのまま埋めると、ラベルが許す `_` を2つ以上
+        // 含むとき（`[^a_b_c]`）に後続の強調変換が属性値まで巻き込み、
+        // `data-footnote-label="a<em>b</em>c"`・`href="#fn-a<em>b</em>c"`・
+        // `id="fnref-a<em>b</em>c"` に化けて脚注リンクのジャンプが壊れる
+        // （脚注一覧側の `<li>` は別経路で生成されるため無事で、参照側だけがずれる）。
+        const footnoteSpans = [];
         if (footnoteLabels) {
             html = html.replace(/\[\^([A-Za-z0-9_-]+)\](?!:)/g, function (match, label) {
                 if (!footnoteLabels.has(label)) {
                     return match;
                 }
-                return '<sup class="footnote-ref" data-footnote-label="' + label + '">' +
-                    '<a href="#fn-' + label + '" id="fnref-' + label + '">' + label + '</a></sup>';
+                footnoteSpans.push('<sup class="footnote-ref" data-footnote-label="' + label + '">' +
+                    '<a href="#fn-' + label + '" id="fnref-' + label + '">' + label + '</a></sup>');
+                return '\u0004' + (footnoteSpans.length - 1) + '\u0004';
             });
         }
 
@@ -156,6 +265,11 @@ window.MarkdownModule = (function() {
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
 
+        // 退避したリンクの開始タグを復元（属性中の記法文字を強調変換から守った）
+        html = html.replace(/\u0005(\d+)\u0005/g, function (_m, i) {
+            return linkSpans[Number(i)];
+        });
+
         // 退避した画像を <img> として復元（属性中の記法文字を強調変換から守った）
         html = html.replace(/(\d+)/g, function (_m, i) {
             return imgSpans[Number(i)];
@@ -169,6 +283,14 @@ window.MarkdownModule = (function() {
         // 退避した \$ をリテラルのドル記号として復元（この時点なら数式判定は済んでいる）
         html = html.replace(/\u0001(\d+)\u0001/g, function (_m, i) {
             return escapedDollars[Number(i)];
+        });
+
+        // 退避した脚注参照を <sup> として復元。デリミタ付きなので順序には依存しないが、
+        // commands.js の convertInlineText と同じ「全復元の最後（コード復元の直前）」に
+        // 揃えている（ほぼ同一の2関数を並べて読むため、位置がずれていると片側だけ
+        // 直す事故を招く）。
+        html = html.replace(/\u0004(\d+)\u0004/g, function (_m, i) {
+            return footnoteSpans[Number(i)];
         });
 
         // 退避したインラインコードを <code> として復元（中身は整形しない）
@@ -265,8 +387,25 @@ window.MarkdownModule = (function() {
      * 呼ぶと、本関数が返す`contentLines`＝脚注除去後の行配列に対して呼び出し側が
      * 再度判定した場合に、たまたま除去後の行が`---`で始まってしまうケースなどで
      * 判定がずれる可能性があった。/local-review指摘対応）。
-     * @returns {{ defs: {label:string, sep:string, text:string}[], labels: Set<string>,
-     *            contentLines: string[], seamIndices: Set<number> }}
+     *
+     * **定義同士の間にあった空行は、後続の定義の`blanksBefore`へ付け替えて
+     * `contentLines`から取り除く。** 取り除かないと定義行だけが本文から消えて空行が
+     * 本文側に残り、往復すると最初の定義の前へ空行が集まってしまう
+     * （`\n\n[^x]: A\n\n[^y]: B` → `\n\n\n[^x]: A\n[^y]: B`）。
+     * 定義の間に本文行が挟まっていても、その定義の直前に空行があれば
+     * `blanksBefore` を立てる（脚注一覧側の区切りとして復元するため）。ただしこの場合
+     * **本文側の空行はそのまま残す**（本文の区切りとして必要。脚注一覧は文書末尾に
+     * 独立して出るため二重計上にはならない）。
+     *
+     * 定義の連なりが途切れた場合（次が本文行・文書末尾）は保留した空行を本文へ戻すが、
+     * その定義（の連なり）が**前後の両方を空行に挟まれていた**場合は戻す空行を1つ減らす。
+     * 減らさないと、定義行だけが消えて前後の空行が両方残り、本文側の空行が1つ増える
+     * （`本文` / `` / `[^x]: A` / `` / `後書き` → 空行2つ）。「定義行を消すときは
+     * 隣の改行も一緒に消す」という手編集と同じ結果にするための調整。
+     * **後ろに空行が無い定義では減らさない**（減らすと本来必要な区切りが失われ、
+     * リスト・引用・テーブルが融合したり連続空行が1つ失われる）。
+     * @returns {{ defs: {label:string, sep:string, text:string, blanksBefore:number}[],
+     *            labels: Set<string>, contentLines: string[], seamIndices: Set<number> }}
      */
     function extractFootnoteDefinitions(lines, frontMatterEndIndex) {
         const boundary = typeof frontMatterEndIndex === 'number' ? frontMatterEndIndex : -1;
@@ -329,19 +468,91 @@ window.MarkdownModule = (function() {
         const contentLines = [];
         const seamIndices = new Set();
         let pendingSeam = false;
+        // 定義の直後に続く空行を保留するバッファ。次に来るのがまた定義なら
+        // 「定義同士の間の空行」として定義側（blanksBefore）へ付け替え、
+        // そうでなければ本文行として contentLines へ戻す。付け替えないと、
+        // 定義行だけが本文から取り除かれて空行が本文側に残り、往復すると
+        // 最初の定義の前へ空行が集まってしまう
+        // （`\n\n[^x]: A\n\n[^y]: B` → `\n\n\n[^x]: A\n[^y]: B`）。
+        let pendingBlanks = [];
+        let afterDef = false;
+
+        /**
+         * 保留していた空行を本文行として戻す。
+         *
+         * **定義（の連なり）の直後の flush でだけ**、戻す空行を1つ減らす。定義の
+         * 前後の**両方**に空行がある場合、定義行だけを取り除くと空行が2つ残って
+         * 本文側の空行が1つ増えてしまうため（`本文\n\n後書き` であるべきところが
+         * `本文\n\n\n後書き` になる）、定義行とその片側の空行で1つのまとまりと
+         * みなす＝「定義行を消すときは隣の改行も一緒に消す」という手編集と同じ結果。
+         *
+         * **後ろに空行が無い定義では減らしてはいけない。** その場合は定義行を
+         * 取り除いても余分な空行は生じず、逆に前の空行を消すと本来必要な区切りが
+         * 失われる（リスト・引用・テーブルのブロックパーサは `seamIndices` を見ず
+         * 空行だけが区切りなので、`- item1` / `` / `[^x]: A` / `- item2` の
+         * ような入力で項目が融合する。連続空行の保持＝空段落も1つ失われる）。
+         * `afterDef` で「この flush が定義の連なりを閉じるものか」を判定している。
+         *
+         * 減らすのは1つだけなので、空行が2つ以上並んでいた場合は必ず1つ以上残る
+         * ＝連続空行の保持機能とは衝突しない。
+         */
+        function flushPendingBlanks() {
+            const precededByBlank = contentLines.length > 0 &&
+                /^\s*$/.test(contentLines[contentLines.length - 1]);
+            if (afterDef && precededByBlank && pendingBlanks.length > 0) {
+                pendingBlanks.shift();
+            }
+            pendingBlanks.forEach(function (line) {
+                if (pendingSeam) {
+                    seamIndices.add(contentLines.length);
+                    pendingSeam = false;
+                }
+                contentLines.push(line);
+            });
+            pendingBlanks = [];
+        }
+
         entries.forEach(function (entry) {
             if (entry.def && referencedLabels.has(entry.def.label) && !labels.has(entry.def.label)) {
+                if (afterDef) {
+                    // 直前も定義＝保留分はまるごと「定義同士の間の空行」。個数を
+                    // そのまま持たせて脚注一覧の連結時に復元する（本文へは戻さない）
+                    entry.def.blanksBefore = pendingBlanks.length;
+                    pendingBlanks = [];
+                } else {
+                    // 直前は本文（または文書先頭）。定義の間に本文行が挟まっていても
+                    // 「定義の前に空行があった」という書式は脚注一覧側で復元したいので
+                    // blanksBefore を立てる。ただし**本文側の空行はそのまま残す**
+                    // （本文の区切りとして必要。脚注一覧は文書末尾に独立して出るため
+                    // 二重計上にはならない）。最初の定義の分は連結に使われず消える。
+                    entry.def.blanksBefore =
+                        defs.length > 0 && pendingBlanks.length > 0 ? 1 : 0;
+                    // ここでの flush は定義を閉じるものではないので空行を減らさない
+                    // （この分岐は afterDef === false のときだけ通り、そのとき
+                    //  pendingSeam も必ず false ＝ seam は下の本文行 push 経路で
+                    //  立てて同じ場所で消費されるため、ここで seam が漏れることはない）
+                    flushPendingBlanks();
+                }
                 labels.add(entry.def.label);
                 defs.push(entry.def);
                 pendingSeam = true;
+                afterDef = true;
                 return;
             }
+            if (/^\s*$/.test(entry.line)) {
+                pendingBlanks.push(entry.line);
+                return;
+            }
+            flushPendingBlanks();
+            afterDef = false;
             if (pendingSeam) {
                 seamIndices.add(contentLines.length);
                 pendingSeam = false;
             }
             contentLines.push(entry.line);
         });
+        // 文書が「定義＋空行」で終わる場合、保留したままの空行を戻す
+        flushPendingBlanks();
 
         return { defs: defs, labels: labels, contentLines: contentLines, seamIndices: seamIndices };
     }
@@ -360,8 +571,11 @@ window.MarkdownModule = (function() {
         }
         let html = '<section class="footnotes" data-footnotes="true"><ol>';
         defs.forEach(function (def) {
+            // 直前の定義との間にあった空行の数（0なら属性自体を出さない＝
+            // 従来生成されたHTMLとの互換も保つ）
+            const blanks = def.blanksBefore ? ' data-footnote-blanks="' + def.blanksBefore + '"' : '';
             html += '<li id="fn-' + def.label + '" data-footnote-label="' + def.label +
-                '" data-footnote-sep="' + def.sep + '">' +
+                '" data-footnote-sep="' + def.sep + '"' + blanks + '>' +
                 convertInline(escapeHtml(def.text)) +
                 ' <a href="#fnref-' + def.label + '" class="footnote-backref">↩</a></li>';
         });
@@ -985,6 +1199,36 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * `<a>`/`<img>` の `title` 属性を Markdown のタイトル記法（` "title"`）へ戻す。
+     * 属性が無ければ空文字を返す（`parseLinkDestination` の逆変換）。
+     *
+     * 引用符はタイトルの中身に応じて選ぶ: `"` を含むなら `'…'`、そうでなければ
+     * `"…"`。`"` と `'` の両方を含むタイトルは記法で表現できないため、
+     * `"` をエスケープせずそのまま `'…'` で囲む（再パースでは末尾の `'` が
+     * 閉じとして働くので往復は保たれる）。
+     *
+     * **`)` と改行を含むタイトルはタイトルごと捨てる**。`)` は呼び出し元の
+     * 正規表現が `([^)]+)` で丸括弧の中身を取る以上表現できず、改行はリンク記法が
+     * 1行内で完結する前提を壊す。どちらもそのまま出力すると再パース時に記法が
+     * 途中で切れ、**リンク記法の外まで文字列が漏れて文書が壊れる**。タイトルだけを
+     * 失う方が被害が小さいためこちらを選ぶ（`parseLinkDestination` 経由では
+     * どちらも生じ得ず、HTMLを直接貼り付けた場合のみ到達する）。
+     * @param {Element} node
+     * @returns {string} ` "title"` 形式、またはタイトルが無ければ空文字
+     */
+    function serializeTitle(node) {
+        const title = node.getAttribute && node.getAttribute('title');
+        if (title === null || title === undefined || title === '') {
+            return '';
+        }
+        if (/[)\r\n]/.test(title)) {
+            return '';
+        }
+        const quote = title.indexOf('"') !== -1 ? "'" : '"';
+        return ' ' + quote + title + quote;
+    }
+
+    /**
      * 単一ノードをインラインMarkdownへ直列化
      */
     function serializeInline(node) {
@@ -1030,7 +1274,7 @@ window.MarkdownModule = (function() {
             }
             case 'A': {
                 const href = node.getAttribute('href') || '';
-                return `[${serializeInlineChildren(node)}](${href})`;
+                return `[${serializeInlineChildren(node)}](${href}${serializeTitle(node)})`;
             }
             case 'SUP': {
                 // 脚注参照（<sup class="footnote-ref"><a>label</a></sup>）は
@@ -1048,7 +1292,7 @@ window.MarkdownModule = (function() {
                 const src = node.getAttribute('data-original-src') ||
                     node.getAttribute('src') || '';
                 const alt = node.getAttribute('alt') || '';
-                return src ? `![${alt}](${src})` : '';
+                return src ? `![${alt}](${src}${serializeTitle(node)})` : '';
             }
             case 'SPAN':
                 // 生Markdown表示中のspan（リンク・強調・インライン数式の展開中）は
@@ -1197,6 +1441,71 @@ window.MarkdownModule = (function() {
             });
         }
         return lines.join('\n') + '\n\n';
+    }
+
+    // 列を追加したときにセパレーター行へ入れる既定の表記。`sepCells.join('|')` を
+    // `|…|` で挟むと `| --- |` になり、serializeTable のフォールバック書式と一致する。
+    const DEFAULT_SEP_CELL = ' --- ';
+
+    /**
+     * `data-sep`（表のセパレーター行の元表記をカンマ区切りで保持したもの）へ
+     * 新しい列を挿入したときの属性値を組み立てる純粋関数。
+     *
+     * 列の追加・削除で `data-sep` を更新しないと、列数がヘッダーと食い違って
+     * `serializeTable` が全列をデフォルト書式へフォールバックさせるため、
+     * **触っていない列のアライメント（`:---` 等）や空白の有無まで失われる**。
+     *
+     * 属性が無い場合や、現在の列数と食い違っている（＝既に陳腐化している）場合は
+     * `null` を返して**更新しない**。陳腐化した値を splice すると、偶然列数が
+     * 一致してしまい誤った書式が復元されるおそれがあるため。
+     *
+     * 範囲外の index も `null` を返して更新しない（`removeSepColumn` と同じ方針）。
+     * 黙ってクランプすると、DOM 側の挿入位置とずれた場合に**列数だけは一致して
+     * しまい**、アライメントが1列ずれた表がそのまま書き出される（サイレントな
+     * データ破損）。更新しなければ列数不一致でデフォルト書式へフォールバックする
+     * だけなので、そちらが安全側。
+     *
+     * @param {string|null} rawSep 現在の `data-sep` 属性値
+     * @param {number} index 挿入位置（0〜現在の列数。末尾への追加は列数と等しい）
+     * @param {number} currentColumnCount 挿入前の列数
+     * @returns {string|null} 新しい属性値。更新すべきでなければ null
+     */
+    function insertSepColumn(rawSep, index, currentColumnCount) {
+        const cells = splitSepAttr(rawSep, currentColumnCount);
+        if (!cells || index < 0 || index > cells.length) {
+            return null;
+        }
+        cells.splice(index, 0, DEFAULT_SEP_CELL);
+        return cells.join(',');
+    }
+
+    /**
+     * `data-sep` から指定位置の列を取り除いた属性値を組み立てる純粋関数。
+     * 更新すべきでない場合（属性が無い・列数が食い違う・indexが範囲外）は null。
+     * @param {string|null} rawSep 現在の `data-sep` 属性値
+     * @param {number} index 削除する列のindex
+     * @param {number} currentColumnCount 削除前の列数
+     * @returns {string|null} 新しい属性値。更新すべきでなければ null
+     */
+    function removeSepColumn(rawSep, index, currentColumnCount) {
+        const cells = splitSepAttr(rawSep, currentColumnCount);
+        if (!cells || index < 0 || index >= cells.length) {
+            return null;
+        }
+        cells.splice(index, 1);
+        return cells.join(',');
+    }
+
+    /**
+     * `data-sep` を列ごとの配列へ分解する。属性が無い、または現在の列数と
+     * 食い違う場合は null（呼び出し側は更新しない＝従来どおりフォールバックする）。
+     */
+    function splitSepAttr(rawSep, expectedLength) {
+        if (typeof rawSep !== 'string' || rawSep === '') {
+            return null;
+        }
+        const cells = rawSep.split(',');
+        return cells.length === expectedLength ? cells : null;
     }
 
     /**
@@ -1358,6 +1667,15 @@ window.MarkdownModule = (function() {
                 if (!items.length) {
                     return '';
                 }
+                // 定義同士の間の空行数（data-footnote-blanks）を復元する。
+                // 属性が無い＝この対応より前に生成されたHTML等は0（空行なし）扱い。
+                // 外部由来のHTMLを貼り付けられた場合に備えて上限をクランプする
+                // （巨大値だと String.repeat が RangeError を投げ、保存経路である
+                // htmlToMarkdown ごと落ちるため）。実際に書ける空行数として十分な範囲。
+                const blanksBefore = items.map(li => {
+                    const raw = parseInt(li.getAttribute('data-footnote-blanks') || '0', 10);
+                    return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 20) : 0;
+                });
                 const lines = items.map(li => {
                     const label = li.getAttribute('data-footnote-label') || '';
                     // `:`直後の元の空白を復元する（属性が無い＝この機能追加前に生成された
@@ -1373,7 +1691,10 @@ window.MarkdownModule = (function() {
                     const text = serializeInlineChildren(clone).trim();
                     return `[^${label}]:${sep}${text}`;
                 });
-                return lines.join('\n') + '\n\n';
+                // 定義同士は改行1つで連結し、間にあった空行の数だけ改行を足す
+                return lines
+                    .map((line, idx) => (idx === 0 ? '' : '\n'.repeat(blanksBefore[idx])) + line)
+                    .join('\n') + '\n\n';
             }
             default:
                 return serializeInlineChildren(el);
@@ -1701,6 +2022,11 @@ window.MarkdownModule = (function() {
         // 展開／復帰の結果が通常のレンダリング結果と食い違わないことを保証する。
         serializeInline: serializeInline,
         convertInline: convertInline,
+        parseLinkDestination: parseLinkDestination,
+        insertSepColumn: insertSepColumn,
+        removeSepColumn: removeSepColumn,
+        buildTitleAttr: buildTitleAttr,
+        serializeTitle: serializeTitle,
         // ブロック数式の生Markdown表示（commands.js）が、復帰時に math-block
         // コンテナを再生成するために使う（読込時の変換と同じ関数を共有する）。
         buildMathBlockHtml: buildMathBlockHtml,

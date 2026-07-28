@@ -112,6 +112,321 @@ suite('MarkdownModule', () => {
             assert.ok(html.includes('alt="a&quot;b"'), html);
         });
 
+        suite('タイトル記法 ![alt](url "title") / [text](url "title")', () => {
+            suite('parseLinkDestination', () => {
+                // 返り値は jsdom 側のレルムで生成されるため deepStrictEqual は
+                // プロトタイプ不一致で落ちる。プロパティごとに比較する
+                const assertDest = (
+                    dest: string, url: string, title: string | null
+                ) => {
+                    const d = env.markdown.parseLinkDestination(dest);
+                    assert.strictEqual(d.url, url, `url of ${JSON.stringify(dest)}`);
+                    assert.strictEqual(d.title, title, `title of ${JSON.stringify(dest)}`);
+                };
+
+                test('空白＋"…" をタイトルとして分離する', () => {
+                    assertDest('u.png "説明"', 'u.png', '説明');
+                });
+
+                test("'…' も受け付ける", () => {
+                    assertDest("u.png '説明'", 'u.png', '説明');
+                });
+
+                test('タイトルが無ければ title は null', () => {
+                    assertDest('u.png', 'u.png', null);
+                });
+
+                test('空白が無ければURLの一部として扱う（引用符入りのパスを守る）', () => {
+                    assertDest('a"b".png', 'a"b".png', null);
+                });
+
+                test('閉じ引用符が末尾に無い不正な形はタイトル無しとして扱う', () => {
+                    assertDest('u.png "a" b', 'u.png "a" b', null);
+                });
+
+                test('空のタイトル・前後の余分な空白を許容する', () => {
+                    assertDest('u.png   ""  ', 'u.png', '');
+                });
+            });
+
+            test('画像・リンクのタイトルを title 属性へ分離する', () => {
+                assert.strictEqual(
+                    env.markdown.markdownToHtml('![説明](a.png "タイトル")'),
+                    '<p><img src="a.png" alt="説明" title="タイトル"></p>'
+                );
+                assert.ok(
+                    env.markdown.markdownToHtml('[text](https://e.com "タイトル")')
+                        .includes('<a href="https://e.com" title="タイトル">text</a>'),
+                    env.markdown.markdownToHtml('[text](https://e.com "タイトル")')
+                );
+            });
+
+            test('タイトル中の " は属性値としてエスケープされる', () => {
+                const html = env.markdown.markdownToHtml("![a](u.png 'a\"b')");
+                assert.ok(html.includes('title="a&quot;b"'), html);
+                assert.ok(html.includes('src="u.png"'), html);
+            });
+
+            test('タイトル記法は往復で保たれる（画像・リンク）', () => {
+                const cases = [
+                    '![説明](a.png "タイトル")',
+                    '[text](https://e.com "タイトル")',
+                    "[text](https://e.com 'タ\"イトル')"
+                ];
+                for (const md of cases) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            test('URL・タイトル中の _ / * が強調変換に食われない', () => {
+                // 画像と同じくリンクもプレースホルダへ退避してから強調変換を通す
+                const html = env.markdown.markdownToHtml('[t](https://e.com/a_b_c "x_y_z")');
+                assert.ok(!html.includes('<em>'), html);
+                env.editor.innerHTML = html;
+                const a = env.editor.querySelector('a');
+                assert.ok(a, html);
+                assert.strictEqual(a!.getAttribute('href'), 'https://e.com/a_b_c');
+                assert.strictEqual(a!.getAttribute('title'), 'x_y_z');
+            });
+
+            test('URL中の _ / * を含むリンクが往復する', () => {
+                for (const md of [
+                    '[t](https://e.com/a_b_c)',
+                    '[t](https://e.com/a*b*c)',
+                    '[t](https://e.com/x "a_b_c")',
+                    // 退避によって同時に守られる他の強調記法も固定しておく
+                    '[t](https://e.com/a~~b~~c)',
+                    '[t](https://e.com/a++b++c)',
+                    '[t](https://e.com/a__b__c)',
+                    '[t](https://e.com/x "a***b***c")'
+                ]) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            suite('URL・タイトル・alt 中のコード/数式記法が退避に巻き込まれない', () => {
+                test('バッククォートが <code> に展開されない（リンク・画像・タイトル・alt）', () => {
+                    const cases: Array<[string, string, string]> = [
+                        ['[t](http://e/a`b`c)', 'a', 'href'],
+                        ['![alt](http://e/a`b`c)', 'img', 'src'],
+                        ['[t](http://e/x "a`b`c")', 'a', 'title'],
+                        ['![a`b`c](http://e/x)', 'img', 'alt']
+                    ];
+                    for (const [md, tag, attr] of cases) {
+                        const html = env.markdown.markdownToHtml(md);
+                        assert.ok(!html.includes('<code>'), `${md} → ${html}`);
+                        env.editor.innerHTML = html;
+                        const el = env.editor.querySelector(tag);
+                        assert.ok(el, `${md} → ${html}`);
+                        assert.ok(
+                            el!.getAttribute(attr)!.includes('a`b`c'),
+                            `${md} → ${attr}=${el!.getAttribute(attr)}`
+                        );
+                    }
+                });
+
+                test('インライン数式が属性値の中で展開されずタグ構造も壊れない', () => {
+                    // 復元される <span class="math-inline" …> の " で属性値が途中終了し、
+                    // タグ構造ごと壊れていた（往復結果が ["&gt;t](http://e/<span class=) になる）
+                    const html = env.markdown.markdownToHtml('[t](http://e/$a_1$)');
+                    assert.ok(!html.includes('math-inline'), html);
+                    env.editor.innerHTML = html;
+                    const a = env.editor.querySelector('a');
+                    assert.ok(a, html);
+                    assert.strictEqual(a!.getAttribute('href'), 'http://e/$a_1$');
+                    assert.strictEqual(a!.textContent, 't', html);
+                });
+
+                test('エスケープされたドル記号（\\$）がURLに混入しない', () => {
+                    env.editor.innerHTML = env.markdown.markdownToHtml('[t](http://e/\\$100)');
+                    const a = env.editor.querySelector('a');
+                    assert.ok(a, env.editor.innerHTML);
+                    assert.strictEqual(a!.getAttribute('href'), 'http://e/\\$100');
+                });
+
+                test('コード・数式を含むURL/タイトル/altが往復する', () => {
+                    for (const md of [
+                        '[t](http://e/a`b`c)',
+                        '![alt](http://e/a`b`c)',
+                        '[t](http://e/x "a`b`c")',
+                        '![a`b`c](http://e/x)',
+                        '[t](http://e/$a_1$)',
+                        '[t](http://e/x "$a_1$")',
+                        '[t](http://e/\\$100)'
+                    ]) {
+                        env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                        const out = env.markdown
+                            .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                            .replace(/\s+$/, '');
+                        assert.strictEqual(out, md, `roundtrip: ${md}`);
+                    }
+                });
+
+                test('数式の中に入れ子になったコード・\\$ も元テキストへ戻る', () => {
+                    // 数式の退避はコード・\$ の**後**に行われるため、控えている元テキスト
+                    // には両者のプレースホルダが残っている。戻す順序を
+                    // 数式→コード→\$ にしないと入れ子分が誰にも復元されない
+                    for (const md of [
+                        '[t](http://e/$a`b`c$)',
+                        '[t](http://e/$a\\$b$)',
+                        '![$a`b`c$](http://e/x)',
+                        '[t](http://e/x "$a`b`c$")'
+                    ]) {
+                        const html = env.markdown.markdownToHtml(md);
+                        assert.ok(!html.includes('<code>'), `${md} → ${html}`);
+                        env.editor.innerHTML = html;
+                        const out = env.markdown
+                            .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                            .replace(/\s+$/, '');
+                        assert.strictEqual(out, md, `roundtrip: ${md}`);
+                    }
+                });
+
+                test('入れ子のコード内に " があってもタグ構造が壊れない', () => {
+                    // 属性値が <code>" で途中終了し、リンク記法の外まで文字列が漏れて
+                    // 往復結果が [b\$">t](http://e/$a<code>) tail になっていた
+                    const md = '[t](http://e/$a`"`b$) tail';
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const a = env.editor.querySelector('a');
+                    assert.ok(a, env.editor.innerHTML);
+                    assert.strictEqual(a!.textContent, 't', env.editor.innerHTML);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md);
+                });
+
+                test('リンクテキスト内のコード・数式は従来どおり変換される（回帰確認）', () => {
+                    // 退避を戻すのは属性になる部分（URL・タイトル・alt）だけで、
+                    // リンクテキストはHTMLの流れに残るため従来どおり変換される
+                    const html = env.markdown.markdownToHtml('[`code`と$x$](http://e/u)');
+                    assert.ok(html.includes('<code>code</code>'), html);
+                    assert.ok(html.includes('math-inline'), html);
+                    env.editor.innerHTML = html;
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, '[`code`と$x$](http://e/u)');
+                });
+
+                test('コード内に書いたリンク記法は従来どおり変換されない（回帰確認）', () => {
+                    // コード退避をリンク/画像より先に行う順序自体は変えていない
+                    const html = env.markdown.markdownToHtml('`[t](http://e/u)`');
+                    assert.ok(html.includes('<code>'), html);
+                    assert.ok(!html.includes('<a '), html);
+                });
+            });
+
+            test('リンクテキスト内の強調は従来どおり変換される（回帰確認）', () => {
+                // 退避するのは開始タグ（属性）だけで、テキストは変換対象のまま
+                const html = env.markdown.markdownToHtml('[**太字**と*斜体*](https://e.com)');
+                assert.ok(html.includes('<strong>太字</strong>'), html);
+                assert.ok(html.includes('<em>斜体</em>'), html);
+                env.editor.innerHTML = html;
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '[**太字**と*斜体*](https://e.com)');
+            });
+
+            test('data URL（内部に空白と \' を含む）＋タイトルでも往復する', () => {
+                // sample.md のタイトル付き画像と同型。URL中の `'` を閉じ引用符と
+                // 誤認すると URL が途中で切れる（最長のURL＋末尾の引用符対が正しい）
+                const md = '![緑の四角](data:image/svg+xml;utf8,' +
+                    "<svg xmlns='http://www.w3.org/2000/svg' width='48'>" +
+                    "<rect x='8' fill='%234caf50'/></svg> \"タイトル付きの画像です\")";
+                env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                const img = env.editor.querySelector('img');
+                assert.ok(img, env.editor.innerHTML);
+                assert.strictEqual(img!.getAttribute('title'), 'タイトル付きの画像です');
+                assert.ok(
+                    img!.getAttribute('src')!.endsWith('</svg>'),
+                    `src: ${img!.getAttribute('src')}`
+                );
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, md);
+            });
+
+            test('空タイトル（""）は往復で削除される（既知の正規化）', () => {
+                // 空のタイトルは意味を持たないため title 属性が空になり、直列化で
+                // 落ちる。保存のたびに `![](a.png)` へ正規化される仕様として受け入れる
+                env.editor.innerHTML = env.markdown.markdownToHtml('![](a.png "")');
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '![](a.png)');
+            });
+
+            test('タイトル記法が無い場合は従来どおり出力する（回帰確認）', () => {
+                for (const md of ['![説明](a.png)', '[text](https://e.com)']) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            suite('serializeTitle', () => {
+                const el = (html: string) => {
+                    const d = env.document.createElement('div');
+                    d.innerHTML = html;
+                    return d.firstElementChild;
+                };
+
+                test('title 属性を " で囲んで戻す', () => {
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u" title="t">x</a>')),
+                        ' "t"'
+                    );
+                });
+
+                test('title が無い・空なら空文字', () => {
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u">x</a>')), ''
+                    );
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u" title="">x</a>')), ''
+                    );
+                });
+
+                test('" を含むタイトルは \' で囲む', () => {
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u" title="a&quot;b">x</a>')),
+                        " 'a\"b'"
+                    );
+                });
+
+                test('改行を含むタイトルは捨てる（文書の破壊を防ぐため）', () => {
+                    // リンク記法は1行内で完結する前提。改行をそのまま出すと
+                    // 段落が分断され、記法の外まで文字列が漏れる
+                    const a = el('<a href="u" title="x">t</a>') as HTMLElement;
+                    a.setAttribute('title', 'a\nb');
+                    assert.strictEqual(env.markdown.serializeTitle(a), '');
+                    a.setAttribute('title', 'a\rb');
+                    assert.strictEqual(env.markdown.serializeTitle(a), '');
+                });
+
+                test(') を含むタイトルは捨てる（文書の破壊を防ぐため）', () => {
+                    // ) は ([^)]+) の外なので出力すると再パース時にURLが途中で切れ、
+                    // リンク記法の外まで文字列が漏れて文書が壊れる
+                    assert.strictEqual(
+                        env.markdown.serializeTitle(el('<a href="u" title="a)b">x</a>')), ''
+                    );
+                });
+            });
+        });
+
         test('画像記法は WYSIWYG 往復で保たれる', () => {
             ['![](image-1.png)', '![説明](assets/x.png)', '前 ![](a.png) 後'].forEach(src => {
                 const rt = env.markdown.htmlToMarkdown(env.markdown.markdownToHtml(src));
@@ -359,6 +674,51 @@ suite('MarkdownModule', () => {
             assert.ok(aligned.includes('data-sep=":---,---:,:---:"'), aligned);
         });
 
+        suite('data-sep の列挿入・削除（列操作で他列の書式を保つ）', () => {
+            test('insertSepColumn: 指定位置へデフォルト書式の列を挿入する', () => {
+                assert.strictEqual(
+                    env.markdown.insertSepColumn(':---,---:', 1, 2), ':---, --- ,---:'
+                );
+                assert.strictEqual(
+                    env.markdown.insertSepColumn(':---,---:', 0, 2), ' --- ,:---,---:'
+                );
+                assert.strictEqual(
+                    env.markdown.insertSepColumn(':---,---:', 2, 2), ':---,---:, --- '
+                );
+            });
+
+            test('removeSepColumn: 指定位置の列を取り除き他列はそのまま', () => {
+                assert.strictEqual(
+                    env.markdown.removeSepColumn(':---, --- ,---:', 1, 3), ':---,---:'
+                );
+                assert.strictEqual(
+                    env.markdown.removeSepColumn(':---, --- ,---:', 0, 3), ' --- ,---:'
+                );
+            });
+
+            test('属性が無い・列数が食い違う場合は null（更新しない）', () => {
+                assert.strictEqual(env.markdown.insertSepColumn(null, 0, 2), null);
+                assert.strictEqual(env.markdown.insertSepColumn('', 0, 2), null);
+                // 既に陳腐化している属性を splice して偶然一致させない
+                assert.strictEqual(env.markdown.insertSepColumn(':---,---:', 0, 3), null);
+                assert.strictEqual(env.markdown.removeSepColumn(':---,---:', 0, 3), null);
+            });
+
+            test('範囲外の index は insert/remove とも null（黙ってクランプしない）', () => {
+                // クランプするとDOM側の挿入位置とずれたとき列数だけ一致してしまい、
+                // アライメントが1列ずれた表がそのまま書き出される（サイレントな破損）。
+                // 更新しなければ列数不一致でデフォルト書式へ落ちるだけで安全
+                assert.strictEqual(env.markdown.removeSepColumn(':---,---:', 2, 2), null);
+                assert.strictEqual(env.markdown.removeSepColumn(':---,---:', -1, 2), null);
+                assert.strictEqual(env.markdown.insertSepColumn(':---,---:', -1, 2), null);
+                assert.strictEqual(env.markdown.insertSepColumn(':---,---:', 3, 2), null);
+                // 末尾への追加（index === 列数）は正当
+                assert.strictEqual(
+                    env.markdown.insertSepColumn(':---,---:', 2, 2), ':---,---:, --- '
+                );
+            });
+        });
+
         test('列数とセパレーター列数が食い違う不正な表はdata-sepを付与しない', () => {
             // isTableStartの正規表現上は区切り行として認識されるが列数がヘッダーと異なるケース
             const html = env.markdown.markdownToHtml('| A | B |\n| --- |\n| 1 | 2 |');
@@ -432,6 +792,275 @@ suite('MarkdownModule', () => {
                 const html = env.markdown.markdownToHtml('本文[^1]です。');
                 assert.ok(html.includes('本文[^1]です。'), html);
                 assert.ok(!html.includes('footnote-ref'), html);
+            });
+
+            test('ラベル中の _ が強調変換に食われない（参照側）', () => {
+                // ラベルは [A-Za-z0-9_-] を許すので `_` は正当な文字。
+                // 参照の <sup> を実HTMLのまま埋めると属性・href・id が
+                // `a<em>b</em>c` に化けて脚注リンクのジャンプが壊れる
+                const html = env.markdown.markdownToHtml(
+                    '本文[^a_b_c]です。\n\n[^a_b_c]: 脚注の本文。'
+                );
+                assert.ok(!html.includes('<em>'), html);
+                env.editor.innerHTML = html;
+                const sup = env.editor.querySelector('sup.footnote-ref');
+                assert.ok(sup, html);
+                assert.strictEqual(sup!.getAttribute('data-footnote-label'), 'a_b_c');
+                const ref = sup!.querySelector('a');
+                assert.strictEqual(ref!.getAttribute('href'), '#fn-a_b_c');
+                assert.strictEqual(ref!.getAttribute('id'), 'fnref-a_b_c');
+                // 参照先の脚注一覧側の id と一致する（ジャンプが成立する）
+                const li = env.editor.querySelector('section.footnotes li');
+                assert.strictEqual(li!.getAttribute('id'), 'fn-a_b_c', html);
+            });
+
+            test('_ を含むラベルの脚注が往復する', () => {
+                for (const md of [
+                    // 斜体経路（(^|[^_])_([^_]+)_(?!_)）で壊れていたケース
+                    '本文[^a_b_c]です。\n\n[^a_b_c]: 脚注の本文。',
+                    // 太字経路（__(.+?)__ の非貪欲マッチが <sup> を跨ぐ）。修正前は
+                    // `本文[^a<strong>b]です。` となり </strong> すら残らずラベルの
+                    // 一部が消える、_ より重い壊れ方をしていた
+                    '本文[^a__b]です。\n\n[^a__b]: 脚注の本文。',
+                    // 強調が参照を跨ぐケース
+                    '*強調[^a_b_c]中*\n\n[^a_b_c]: 脚注。'
+                ]) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            test('同一段落に複数の参照があっても番号採番が混ざらない', () => {
+                // 退避のインデックス機構そのものの検証（隣接プレースホルダを含む）
+                const html = env.markdown.markdownToHtml(
+                    '本文[^a_1][^b_2]と[^a_1]です。\n\n[^a_1]: A\n[^b_2]: B'
+                );
+                env.editor.innerHTML = html;
+                const refs = env.editor.querySelectorAll('sup.footnote-ref');
+                assert.strictEqual(refs.length, 3, html);
+                assert.strictEqual(refs[0].getAttribute('data-footnote-label'), 'a_1');
+                assert.strictEqual(refs[1].getAttribute('data-footnote-label'), 'b_2');
+                assert.strictEqual(refs[2].getAttribute('data-footnote-label'), 'a_1');
+                assert.ok(!html.includes('<em>'), html);
+                assert.ok(!/\u0004/.test(html), 'プレースホルダが残っている');
+            });
+
+            test('* はラベル文字ではないので脚注にならない（仕様確認）', () => {
+                // ラベルは [A-Za-z0-9_-] に限定される。`[^a*b*c]` は脚注として
+                // 成立せず、ただの段落テキストとして斜体変換されるだけ
+                const html = env.markdown.markdownToHtml(
+                    '本文[^a*b*c]です。\n\n[^a*b*c]: 脚注の本文。'
+                );
+                assert.ok(!html.includes('footnote-ref'), html);
+                assert.ok(html.includes('<em>b</em>'), html);
+            });
+
+            test('data-footnote-blanks が無い <li> は従来どおり改行1つで連結する（後方互換）', () => {
+                // この対応より前に生成されたHTMLが編集中のDOMに残っていても壊れない
+                env.editor.innerHTML =
+                    '<p>本文</p><section class="footnotes" data-footnotes="true"><ol>' +
+                    '<li id="fn-a" data-footnote-label="a" data-footnote-sep=" ">A</li>' +
+                    '<li id="fn-b" data-footnote-label="b" data-footnote-sep=" ">B</li>' +
+                    '</ol></section>';
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '本文\n\n[^a]: A\n[^b]: B');
+            });
+
+            test('data-footnote-blanks の不正値・巨大値でも保存経路が落ちない', () => {
+                // 属性は自モジュールしか生成しないが、外部HTMLの貼り付けに備えて
+                // クランプしている（巨大値だと String.repeat が RangeError を投げ、
+                // 保存経路である htmlToMarkdown ごと落ちる）
+                for (const [raw, expected] of [
+                    ['abc', '本文\n\n[^a]: A\n[^b]: B'],
+                    ['-3', '本文\n\n[^a]: A\n[^b]: B'],
+                    ['99999999', '本文\n\n[^a]: A' + '\n'.repeat(21) + '[^b]: B']
+                ]) {
+                    env.editor.innerHTML =
+                        '<p>本文</p><section class="footnotes" data-footnotes="true"><ol>' +
+                        '<li id="fn-a" data-footnote-label="a" data-footnote-sep=" ">A</li>' +
+                        '<li id="fn-b" data-footnote-label="b" data-footnote-sep=" "' +
+                        ' data-footnote-blanks="' + raw + '">B</li>' +
+                        '</ol></section>';
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, expected, `raw=${raw}`);
+                }
+            });
+
+            test('定義同士の間の空行が往復で保たれる', () => {
+                // 定義行は本文から取り除かれるが、定義の**間**にあった空行は
+                // 本文側に残ってしまい、往復すると最初の定義の前へ集まっていた
+                // （`\n\n[^x]: A\n\n[^y]: B` → `\n\n\n[^x]: A\n[^y]: B`）
+                for (const md of [
+                    '本文[^x]と[^y]です。\n\n[^x]: A\n[^y]: B',
+                    '本文[^x]と[^y]です。\n\n[^x]: A\n\n[^y]: B',
+                    '本文[^x]と[^y]です。\n\n[^x]: A\n\n\n[^y]: B',
+                    '本文[^x]と[^y]と[^z]です。\n\n[^x]: A\n\n[^y]: B\n[^z]: C'
+                ]) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, md, `roundtrip: ${md}`);
+                }
+            });
+
+            test('文書の途中に書いた定義は末尾の脚注一覧へ集約される（既存の設計）', () => {
+                // 脚注定義は本文から取り除かれ、文書末尾の脚注一覧セクションに
+                // まとめられる（一般的なMarkdownの脚注と同じ挙動）。定義の位置は
+                // 保たれないという既存仕様は変えていない
+                env.editor.innerHTML = env.markdown.markdownToHtml(
+                    '本文[^x]です。\n\n[^x]: A\n\n後書き。'
+                );
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                // 定義は末尾へ移るが、**本文側の空行は増えない**
+                assert.strictEqual(out, '本文[^x]です。\n\n後書き。\n\n[^x]: A');
+            });
+
+            test('文書途中の定義を末尾へ移した結果は2周目以降で不変（冪等）', () => {
+                let md = '本文[^x]です。\n\n[^x]: A\n\n後書き。';
+                const passes: string[] = [];
+                for (let i = 0; i < 3; i++) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    md = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    passes.push(md);
+                }
+                assert.strictEqual(passes[1], passes[0], '2周目で変化している');
+                assert.strictEqual(passes[2], passes[0], '3周目で変化している');
+            });
+
+            test('文書途中の定義が複数あっても本文側の空行は増えない', () => {
+                env.editor.innerHTML = env.markdown.markdownToHtml(
+                    '本文[^x]です。\n\n[^x]: A\n\n[^y]: B\n\n後書き。[^y]'
+                );
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '本文[^x]です。\n\n後書き。[^y]\n\n[^x]: A\n\n[^y]: B');
+            });
+
+            test('空行が2つ以上並ぶ場合は空段落として保持され、減るのは1つだけ', () => {
+                // markdownToHtml は連続空行を <p><br></p> として保持する＝空行は
+                // ユーザーのコンテンツ。減らすのは定義自身の区切り空行1つだけで、
+                // 意図的な空行は必ず残る（両機能が衝突しないことの固定）
+                for (const [md, expected] of [
+                    ['本文[^x]。\n\n\n[^x]: A\n\n後書き。', '本文[^x]。\n\n\n後書き。\n\n[^x]: A'],
+                    ['本文[^x]。\n\n[^x]: A\n\n\n後書き。', '本文[^x]。\n\n\n後書き。\n\n[^x]: A']
+                ]) {
+                    let cur = md;
+                    const passes: string[] = [];
+                    for (let i = 0; i < 3; i++) {
+                        env.editor.innerHTML = env.markdown.markdownToHtml(cur);
+                        cur = env.markdown
+                            .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                            .replace(/\s+$/, '');
+                        passes.push(cur);
+                    }
+                    assert.strictEqual(passes[0], expected, `1周目: ${md}`);
+                    assert.strictEqual(passes[1], passes[0], `冪等でない: ${md}`);
+                    assert.strictEqual(passes[2], passes[0], `冪等でない: ${md}`);
+                }
+            });
+
+            test('本文行を挟んだ定義同士でも脚注一覧で空行が保たれる（往復）', () => {
+                for (const [md, expected] of [
+                    ['本文[^a][^b]\n\n[^a]: A\n\n[^0-9]: 地の文\n\n[^b]: B',
+                     '本文[^a][^b]\n\n[^0-9]: 地の文\n\n[^a]: A\n\n[^b]: B'],
+                    ['本文[^a][^b]\n\n[^a]: A\n\n普通の段落\n\n[^b]: B',
+                     '本文[^a][^b]\n\n普通の段落\n\n[^a]: A\n\n[^b]: B']
+                ]) {
+                    let cur = md;
+                    const passes: string[] = [];
+                    for (let i = 0; i < 3; i++) {
+                        env.editor.innerHTML = env.markdown.markdownToHtml(cur);
+                        cur = env.markdown
+                            .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                            .replace(/\s+$/, '');
+                        passes.push(cur);
+                    }
+                    assert.strictEqual(passes[0], expected, `1周目: ${md}`);
+                    assert.strictEqual(passes[1], passes[0], `冪等でない: ${md}`);
+                    assert.strictEqual(passes[2], passes[0], `冪等でない: ${md}`);
+                }
+            });
+
+            test('定義の後ろに空行が無い場合は直前の空行を残す（ブロック融合の防止）', () => {
+                // 「定義行は直前の空行を持っていく」を無条件に適用すると、後ろに空行が
+                // 無い定義で本来必要な区切り行まで消え、リスト・引用・表が融合したり
+                // ユーザーが意図的に空けた行が失われる（リスト/引用/表のブロック
+                // パーサは seamIndices を見ないため、空行が唯一の区切りになる）
+                for (const [md, expected] of [
+                    ['- item1[^x]\n\n[^x]: A\n- item2', '- item1[^x]\n\n- item2\n\n[^x]: A'],
+                    ['> a[^x]\n\n[^x]: A\n> b', '> a[^x]\n\n> b\n\n[^x]: A'],
+                    ['本文[^x]\n\n\n[^x]: A\n後書き', '本文[^x]\n\n\n後書き\n\n[^x]: A']
+                ]) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(md);
+                    const out = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    assert.strictEqual(out, expected, `roundtrip: ${md}`);
+                }
+            });
+
+            test('複数定義でも2周目以降で不変（冪等）', () => {
+                let cur = '本文[^x]と[^y]。\n\n[^x]: A\n\n[^y]: B\n\n後書き。';
+                const passes: string[] = [];
+                for (let i = 0; i < 3; i++) {
+                    env.editor.innerHTML = env.markdown.markdownToHtml(cur);
+                    cur = env.markdown
+                        .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, '');
+                    passes.push(cur);
+                }
+                assert.strictEqual(
+                    passes[0], '本文[^x]と[^y]。\n\n後書き。\n\n[^x]: A\n\n[^y]: B'
+                );
+                assert.strictEqual(passes[1], passes[0], '2周目で変化している');
+                assert.strictEqual(passes[2], passes[0], '3周目で変化している');
+            });
+
+            test('文書先頭の定義・front matter 直後の定義でも往復が安定する', () => {
+                // 文書先頭では contentLines が空＝減らす対象が無い（規則が非対称）
+                env.editor.innerHTML = env.markdown.markdownToHtml('[^x]: A\n\n本文[^x]');
+                assert.strictEqual(
+                    env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, ''),
+                    '本文[^x]\n\n[^x]: A'
+                );
+                // front matter 直後の空行は front matter 側で別途扱われるため影響しない
+                const fm = '---\ntitle: x\n---\n\n[^x]: A\n\n本文[^x]';
+                env.editor.innerHTML = env.markdown.markdownToHtml(fm);
+                const out = env.markdown
+                    .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                    .replace(/\s+$/, '');
+                assert.strictEqual(out, '---\ntitle: x\n---\n\n本文[^x]\n\n[^x]: A');
+            });
+
+            test('定義が文書末尾・空行なしのケースは従来どおり（回帰確認）', () => {
+                // 末尾の定義は元から空行が増えない＝往復が成立していた
+                env.editor.innerHTML = env.markdown.markdownToHtml('本文[^x]です。\n\n[^x]: A');
+                assert.strictEqual(
+                    env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, ''),
+                    '本文[^x]です。\n\n[^x]: A'
+                );
+                // 定義の前後に空行が無い場合は落とす空行自体が無い
+                env.editor.innerHTML = env.markdown.markdownToHtml('本文[^x]です。\n[^x]: A\n後書き。');
+                assert.strictEqual(
+                    env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                        .replace(/\s+$/, ''),
+                    '本文[^x]です。\n\n後書き。\n\n[^x]: A'
+                );
             });
 
             test('脚注定義が無ければ脚注一覧セクションも生成しない', () => {
@@ -514,8 +1143,8 @@ suite('MarkdownModule', () => {
                     '別の本文行'
                 ]);
                 assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
-                    { label: '1', sep: ' ', text: '定義1' },
-                    { label: 'note', sep: ' ', text: '定義2' }
+                    { label: '1', sep: ' ', text: '定義1', blanksBefore: 0 },
+                    { label: 'note', sep: ' ', text: '定義2', blanksBefore: 0 }
                 ]);
                 assert.strictEqual(result.labels.has('1'), true);
                 assert.strictEqual(result.labels.has('note'), true);
@@ -558,7 +1187,7 @@ suite('MarkdownModule', () => {
                     '[^3]: 本物の定義'
                 ]);
                 assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
-                    { label: '3', sep: ' ', text: '本物の定義' }
+                    { label: '3', sep: ' ', text: '本物の定義', blanksBefore: 0 }
                 ]);
                 assert.deepStrictEqual(Array.from(result.contentLines), [
                     '参照[^3]', '```', '[^1]: コード内', '```', '$$', '[^2]: 数式内', '$$'
@@ -575,16 +1204,161 @@ suite('MarkdownModule', () => {
                     '[^c]:   空白3つ'
                 ]);
                 assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
-                    { label: 'a', sep: '', text: '空白無し' },
-                    { label: 'b', sep: ' ', text: '空白1つ' },
-                    { label: 'c', sep: '   ', text: '空白3つ' }
+                    { label: 'a', sep: '', text: '空白無し', blanksBefore: 0 },
+                    { label: 'b', sep: ' ', text: '空白1つ', blanksBefore: 0 },
+                    { label: 'c', sep: '   ', text: '空白3つ', blanksBefore: 0 }
                 ]);
+            });
+
+            test('定義同士の間の空行を blanksBefore として定義側へ付け替える', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^a][^b][^c]',
+                    '',
+                    '[^a]: A',
+                    '',
+                    '[^b]: B',
+                    '',
+                    '',
+                    '[^c]: C'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: 'a', sep: ' ', text: 'A', blanksBefore: 0 },
+                    { label: 'b', sep: ' ', text: 'B', blanksBefore: 1 },
+                    { label: 'c', sep: ' ', text: 'C', blanksBefore: 2 }
+                ]);
+                // 付け替えた空行は本文側に残らない（最初の定義の前の空行だけが残る）
+                assert.deepStrictEqual(Array.from(result.contentLines), ['参照[^a][^b][^c]', '']);
+            });
+
+            test('定義の後に本文が続く場合、保留した空行は本文行として戻す', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^a]',
+                    '[^a]: A',
+                    '',
+                    '後書き'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: 'a', sep: ' ', text: 'A', blanksBefore: 0 }
+                ]);
+                assert.deepStrictEqual(Array.from(result.contentLines), ['参照[^a]', '', '後書き']);
+            });
+
+            test('文書が「定義＋空行」で終わる場合も空行を失わない', () => {
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '参照[^a]',
+                    '[^a]: A',
+                    '',
+                    ''
+                ]);
+                assert.deepStrictEqual(Array.from(result.contentLines), ['参照[^a]', '', '']);
+            });
+
+            test('前後を空行に挟まれた定義を取り除くとき、空行を1つ減らす', () => {
+                // 定義行とその片側の空行で1つのまとまり＝手編集で行を消したときと同じ結果
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '本文[^x]です。', '', '[^x]: A', '', '後書き。'
+                ]);
+                assert.deepStrictEqual(
+                    Array.from(result.contentLines), ['本文[^x]です。', '', '後書き。']
+                );
+                // 空行を1つ減らした結果、seam は空行ではなく後続の本文行（index 2）に立つ。
+                // seam利用側（scanDefListTerms・段落継続）は行indexで判定するため、
+                // 空行に立つ旧位置よりこちらのほうが意味的に正しい
+                assert.deepStrictEqual(Array.from(result.seamIndices), [2]);
+            });
+
+            test('定義の前後に空行があれば文書末尾でも1つ減らす', () => {
+                // 末尾でも規則は同じ。この場合の contentLines 末尾の空行は
+                // markdownToHtml 側の `\n+$` 除去で結局落ちるため出力は変わらない
+                assert.deepStrictEqual(
+                    Array.from(env.markdown.extractFootnoteDefinitions([
+                        '本文[^x]です。', '', '[^x]: A', ''
+                    ]).contentLines),
+                    ['本文[^x]です。', '']
+                );
+            });
+
+            test('本文行を挟んだ定義同士でも間の空行が保たれる', () => {
+                // 未参照の「定義行らしき行」や通常の段落が定義の間に挟まると、
+                // 直前が定義でなくなるため以前は blanksBefore が 0 になり、
+                // 脚注一覧で `[^a]: A\n[^b]: B` と詰まっていた
+                const result = env.markdown.extractFootnoteDefinitions([
+                    '本文[^a][^b]', '', '[^a]: A', '', '[^0-9]: 地の文', '', '[^b]: B'
+                ]);
+                assert.deepStrictEqual(Array.from(result.defs, (d: any) => ({ ...d })), [
+                    { label: 'a', sep: ' ', text: 'A', blanksBefore: 0 },
+                    { label: 'b', sep: ' ', text: 'B', blanksBefore: 1 }
+                ]);
+                // 未参照の定義風行は本文として残る。本文側の空行は区切りとして
+                // そのまま残し、脚注一覧側の区切りは blanksBefore で別に表現する
+                assert.deepStrictEqual(
+                    Array.from(result.contentLines), ['本文[^a][^b]', '', '[^0-9]: 地の文', '']
+                );
+            });
+
+            test('前に空行が無い定義では空行を減らさない', () => {
+                // 減らす対象そのものが無いケース（従来どおりの結果）
+                assert.deepStrictEqual(
+                    Array.from(env.markdown.extractFootnoteDefinitions([
+                        '本文[^x]です。', '[^x]: A', '後書き。'
+                    ]).contentLines),
+                    ['本文[^x]です。', '後書き。']
+                );
+                assert.deepStrictEqual(
+                    Array.from(env.markdown.extractFootnoteDefinitions([
+                        '本文[^x]です。', '', '[^x]: A'
+                    ]).contentLines),
+                    ['本文[^x]です。', '']
+                );
+                // 定義の後にだけ空行がある場合は減らさない
+                assert.deepStrictEqual(
+                    Array.from(env.markdown.extractFootnoteDefinitions([
+                        '本文[^x]です。', '[^x]: A', '', '後書き。'
+                    ]).contentLines),
+                    ['本文[^x]です。', '', '後書き。']
+                );
+            });
+
+            test('定義間の空行が落ちても seam は次の本文行に立つ', () => {
+                // 定義間の空行を contentLines から取り除くことで「本来隣接して
+                // いなかった本文行同士が隣接する」ケースが増える。seamIndices が
+                // 正しく立たないと scanDefListTerms 等が誤結合する（過去に2度回帰した領域）
+                const result = env.markdown.extractFootnoteDefinitions([
+                    'Term',
+                    '[^a]: A',
+                    '',
+                    '[^b]: B',
+                    ': Definition',
+                    '',
+                    '参照[^a][^b]'
+                ]);
+                assert.deepStrictEqual(
+                    Array.from(result.contentLines),
+                    ['Term', ': Definition', '', '参照[^a][^b]']
+                );
+                // 'Term' と ': Definition' は元々隣接していない＝index 1 に seam が立つ
+                assert.deepStrictEqual(Array.from(result.seamIndices), [1]);
+            });
+
+            test('定義間に空行があっても定義リストへ誤結合しない（seam の実効確認）', () => {
+                const md = 'Term\n[^a]: A\n\n[^b]: B\n: Definition\n\n参照[^a][^b]';
+                const html = env.markdown.markdownToHtml(md);
+                assert.ok(!html.includes('<dl>'), html);
             });
         });
 
         suite('buildFootnotesSectionHtml', () => {
             test('定義が無ければ空文字を返す', () => {
                 assert.strictEqual(env.markdown.buildFootnotesSectionHtml([]), '');
+            });
+
+            test('data-footnote-blanksは空行がある定義にだけ付く', () => {
+                const html = env.markdown.buildFootnotesSectionHtml([
+                    { label: 'a', sep: ' ', text: 'A', blanksBefore: 0 },
+                    { label: 'b', sep: ' ', text: 'B', blanksBefore: 2 }
+                ]);
+                assert.ok(!/id="fn-a"[^>]*data-footnote-blanks/.test(html), html);
+                assert.ok(html.includes('data-footnote-blanks="2"'), html);
             });
 
             test('data-footnote-sepへ元の空白をそのまま埋め込む', () => {

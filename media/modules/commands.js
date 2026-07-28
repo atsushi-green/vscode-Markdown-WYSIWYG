@@ -755,17 +755,73 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * `buildImageMarkdown` がパーセントエンコードする文字の対応表。
+     * 目的は2つ:
+     *
+     * 1. **生Markdownとして正しいURLにする** — `#`（フラグメント）・`?`（クエリ）は
+     *    URLの区切りなので、外部ビューア（VS Codeのプレビュー・GitHub など）が
+     *    この行を読んだときにその位置以降がパスから切り落とされ、画像が表示されない。
+     *    エディタ内の表示だけなら `resolveImageSrc`（markdown.js）が結合時に
+     *    `%23`/`%3F` へ逃がすため既に壊れないが、**保存されたMarkdownファイル自体**を
+     *    正しく保つのはこちらの責務。半角スペース・丸括弧・`<`/`>`/`"`/`\` も
+     *    URL／Markdown記法上あいまいになる（`(` はリンク記法の閉じ括弧、
+     *    `"` は `![](url "title")` のタイトル記法、`\` はMarkdownのエスケープ文字）。
+     * 2. **インライン変換の退避処理に巻き込まれないようにする** —
+     *    `convertInlineText`（および markdown.js の `convertInline`）は
+     *    インラインコード `` ` `` と数式 `$…$` を**画像より先に**プレースホルダへ
+     *    退避し、画像の復元より**後で**復元する。そのためパスにこれらが含まれると、
+     *    画像を組み立てたあとの属性値の中でプレースホルダが展開されてしまう:
+     *    - `` ` `` → `<img src="a<code>b</code>c.png">`。属性値は引用符の中なので
+     *      HTML構造は壊れないが、`src` の**値そのもの**が汚染されて往復が崩れる。
+     *    - `$` → 復元される `<span class="math-inline" data-math="…">` が `"` を含み、
+     *      属性値がそこで途中で閉じるため**HTML構造ごと壊れる**（残骸が本文へ落ちる）。
+     *
+     * `_`・`*`・`~`・`+` などの強調記法文字は**あえてエンコードしない**。両変換関数は
+     * 画像を生成した時点でプレースホルダへ退避し、強調変換が終わってから復元するため
+     * 属性値が強調に化けることはなく、エンコードするとパスが徒に読みにくくなる
+     * （`image_1.png` → `image%5F1.png`）。同じ理由で日本語などの非ASCII文字も
+     * そのまま残す（ブラウザ側でエンコードされて解決される）。ただし全角スペース
+     * （U+3000）等の**非ASCIIの空白**は下記 `\s` にマッチするためエンコード対象。
+     */
+    const IMAGE_PATH_ENCODE_MAP = {
+        '%': '%25', // 先頭に置く意味はない（単一パス置換のため二重エンコードは起きない）
+        ' ': '%20',
+        '(': '%28',
+        ')': '%29',
+        '<': '%3C',
+        '>': '%3E',
+        '"': '%22',
+        '`': '%60',
+        '$': '%24',
+        '#': '%23',
+        '?': '%3F',
+        '\\': '%5C',
+        '[': '%5B',
+        ']': '%5D'
+    };
+
+    /**
      * 相対パスから画像のMarkdown記法 `![](path)` を組み立てる純粋関数。
-     * alt は空（貼り付け画像に説明は無いため）。URLとして壊れないよう、パス中の
-     * 半角スペースは `%20` へ、丸括弧は `%28`/`%29` へエンコードする。
+     * alt は空（貼り付け画像に説明は無いため）。パス中の記号は
+     * `IMAGE_PATH_ENCODE_MAP` に従ってパーセントエンコードする。
+     *
+     * 置換は**1回の走査で行う**（`.replace()` の連鎖にしない）。連鎖すると先に
+     * 生成した `%` が後段の `%` エンコードに拾われて `%2520` のような二重エンコードに
+     * なるため。
+     *
+     * 直列化（`serializeInline` の IMG 分岐）はエンコード済み文字列をそのまま
+     * `![](…)` へ戻すため往復は不変。表示時は `resolveImageSrc` がベースURIと結合し、
+     * パーセント記法はブラウザがデコードして実ファイルへ解決する（既存の `%20` と同じ）。
      * @param {string} relPath 画像への相対パス（POSIX区切り）
      * @returns {string} `![](encoded)`
      */
     function buildImageMarkdown(relPath) {
         const encoded = String(relPath || '')
-            .replace(/ /g, '%20')
-            .replace(/\(/g, '%28')
-            .replace(/\)/g, '%29');
+            .replace(/[%\s()<>"`$#?\\[\]]/g, function (ch) {
+                // 対応表に無い空白（タブ・改行など）は encodeURIComponent に委ねる
+                // （`%20` へ潰すと別の文字になってしまい実ファイルへ解決できない）。
+                return IMAGE_PATH_ENCODE_MAP[ch] || encodeURIComponent(ch);
+            });
         return '![](' + encoded + ')';
     }
 
@@ -876,17 +932,24 @@ window.CommandsModule = (function() {
         let text = '';
         let href = '';
         let target = null;
+        // 編集対象が元々持っていたタイトルを控えておき、適用時に引き継ぐ。
+        // ダイアログはテキストとURLしか編集できないため、引き継がないと
+        // ユーザーが触っていないタイトルが保存時に消える（データ喪失）。
+        let title = null;
         if (anchor) {
             target = anchor;
             text = anchor.textContent;
             href = anchor.getAttribute('href') || '';
+            title = anchor.hasAttribute('title') ? anchor.getAttribute('title') : null;
         } else if (rawLink) {
             target = raw;
             text = rawLink.text;
             href = rawLink.href;
+            title = rawLink.title;
         } else {
             text = range.toString();
         }
+        state.linkDialogLinkTitle = title;
 
         state.linkDialogRange = range.cloneRange();
         state.linkDialogTarget = target;
@@ -941,6 +1004,10 @@ window.CommandsModule = (function() {
 
         const a = document.createElement('a');
         a.setAttribute('href', href);
+        // 編集前のリンクが持っていたタイトルを引き継ぐ（insertLink が控えた値）
+        if (state.linkDialogLinkTitle !== null && state.linkDialogLinkTitle !== undefined) {
+            a.setAttribute('title', state.linkDialogLinkTitle);
+        }
         a.textContent = text;
 
         const target = state.linkDialogTarget;
@@ -1361,7 +1428,15 @@ window.CommandsModule = (function() {
      */
     function parseRawLink(text) {
         const m = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(text);
-        return m ? { text: m[1], href: m[2] } : null;
+        if (!m) {
+            return null;
+        }
+        // 丸括弧の中身は `url "title"` の可能性があるため、読込パスと同じ規則で
+        // URLとタイトルへ分ける。分けずに href として扱うと、リンクを開く経路
+        // （handleLinkClick）へタイトル込みの不正なURLが渡り、リンク編集ダイアログ
+        // （insertLink）のURL欄にもタイトルが混入する。
+        const d = markdown.parseLinkDestination(m[2]);
+        return { text: m[1], href: d.url, title: d.title };
     }
 
     /**
@@ -2414,6 +2489,18 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 未エスケープの入力テキストを属性値へ埋め込める形へ変換する。
+     * `&`/`<`/`>` を実体参照にし、属性を閉じてしまう `"` も潰す
+     * （読込パスの `escapeHtml`＋`escapeAttr` と同じ結果になる）。
+     * @param {string} text
+     * @returns {string}
+     */
+    function attrValue(text) {
+        return markdown.escapeHtml(String(text == null ? '' : text))
+            .replace(/"/g, '&quot;');
+    }
+
+    /**
      * インラインテキストを変換
      */
     function convertInlineText(text, footnoteLabels) {
@@ -2448,25 +2535,75 @@ window.CommandsModule = (function() {
         // 読んで行う（markdown.js と同じ役割分担）。入力テキストは未エスケープのため、
         // 属性値は escapeHtml と " のエスケープを施す。
         const mathSpans = [];
-        html = html.replace(/\$([^$\n]+)\$/g, function (_m, expr) {
+        // 属性値（URL・タイトル・alt）へ戻すための元のMarkdownテキストも控える
+        const mathSources = [];
+        html = html.replace(/\$([^$\n]+)\$/g, function (m, expr) {
             const attr = markdown.escapeHtml(expr).replace(/"/g, '&quot;');
             mathSpans.push('<span class="math-inline" data-math="' + attr +
                 '" contenteditable="false"></span>');
+            mathSources.push(m);
             return '' + (mathSpans.length - 1) + '';
         });
+
+        /**
+         * 画像・リンクの**属性になる部分**（URL・タイトル・alt）に紛れ込んだ
+         * コード・数式・エスケープ済みドル記号のプレースホルダを、元のMarkdown
+         * テキストへ戻す（markdown.js の convertInline と同じ対処）。
+         *
+         * 戻さないと、これらの復元が画像・リンクより後段で行われる都合上、
+         * プレースホルダが属性値の中で展開されて `href="http://e/a<code>b</code>c"`
+         * のように壊れる。数式は復元される `<span …>` が `"` を含むため属性値が
+         * 途中終了し**タグ構造ごと壊れる**。
+         *
+         * エスケープ由来のドル記号は、入力されたままの `\$` とゼロ幅スペース付きの
+         * `$`（読込時に convertInline が展開した形）の2形態があるが、属性値は
+         * 直列化時に再エスケープされずそのまま書き戻されるため、**どちらも `\$` へ**
+         * 戻すことでファイル上の表記が保たれる。
+         *
+         * リンクテキストはHTMLの流れに残って通常どおり復元されるため戻さない。
+         */
+        function unstashToText(s) {
+            // **戻す順序は退避の逆**（数式 → コード → `\$`）。数式の退避はコード・`\$`
+            // の後に行われるため、控えている元テキストにはそれらのプレースホルダが
+            // 残っており、コードを先に戻すと数式ソース中の分が復元されないまま
+            // 属性値へ入って元の不具合が再発する（markdown.js 側と同じ理由）。
+            return String(s)
+                .replace(/(\d+)/g, function (_m, i) {
+                    return mathSources[Number(i)];
+                })
+                .replace(/\u0000(\d+)\u0000/g, function (_m, i) {
+                    return '`' + codeSpans[Number(i)] + '`';
+                })
+                .replace(/(\d+)/g, function () {
+                    return '\\$';
+                });
+        }
 
         // 画像（![alt](url)）。リンクより先に処理して `![` を `!`＋リンクに割らない。
         // 入力テキストは未エスケープのため属性値は escapeHtml＋" を潰す（数式と同方針）。
         const imgSpans = [];
-        html = html.replace(/!\[([^\]]*)]\(([^)]+)\)/g, function (_m, alt, url) {
-            const s = markdown.escapeHtml(url).replace(/"/g, '&quot;');
-            const a = markdown.escapeHtml(alt).replace(/"/g, '&quot;');
-            imgSpans.push('<img src="' + s + '" alt="' + a + '">');
+        html = html.replace(/!\[([^\]]*)]\(([^)]+)\)/g, function (_m, alt, dest) {
+            const d = markdown.parseLinkDestination(unstashToText(dest));
+            const s = attrValue(d.url);
+            const a = attrValue(unstashToText(alt));
+            imgSpans.push('<img src="' + s + '" alt="' + a + '"' +
+                markdown.buildTitleAttr(d.title, attrValue) + '>');
             return '' + (imgSpans.length - 1) + '';
         });
 
-        // リンク
-        html = html.replace(/\[([^\]]+)]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+        // リンク（`(url "title")` のタイトルは title 属性へ分離する）。
+        // markdown.js の convertInline と同じく**開始タグをプレースホルダへ退避する**
+        // （退避しないとURL・タイトル中の `_`/`*` が後続の強調変換に拾われ、
+        // `href="a<em>b</em>c"` のように属性値が壊れて往復が崩れる）。
+        // 退避するのは開始タグだけで、テキストと `</a>` は残す＝リンクテキスト内の
+        // 強調（`[**太字**](url)`）は従来どおり変換される。
+        const linkSpans = [];
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, text, dest) {
+            const d = markdown.parseLinkDestination(unstashToText(dest));
+            linkSpans.push('<a href="' + attrValue(d.url) + '"' +
+                markdown.buildTitleAttr(d.title, attrValue) + '>');
+            return '\u0005' + (linkSpans.length - 1) + '\u0005' + text + '</a>';
+        });
 
         // 脚注参照（[^label]）。対応する脚注定義がすでにエディタ内に存在する場合
         // （footnoteLabelsに含まれるラベル）のみ変換し、無ければリテラルテキストの
@@ -2501,6 +2638,11 @@ window.CommandsModule = (function() {
         // 斜体
         html = html.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/(^|[^_])_([^_]+)_(?!_)/g, '$1<em>$2</em>');
+
+        // 退避したリンクの開始タグを復元（属性中の記法文字を強調変換から守った）
+        html = html.replace(/\u0005(\d+)\u0005/g, function (_m, i) {
+            return linkSpans[Number(i)];
+        });
 
         // 退避した画像を <img> として復元（属性中の記法文字を強調変換から守った）
         html = html.replace(/(\d+)/g, function (_m, i) {
