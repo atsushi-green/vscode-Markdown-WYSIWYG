@@ -196,6 +196,50 @@
     }
 
     /**
+     * 印刷（PDFとして出力）を実行する。
+     *
+     * **Rawモード表示中はWYSIWYG表示へ戻してから印刷する。** Rawモードでは
+     * `#wysiwygEditorWrap` がインラインスタイルで `display:none` になっており、
+     * 印刷用スタイル（`@media print`）は `#rawEditor` の方を隠すため、
+     * そのまま印刷すると**白紙になる**。
+     *
+     * ⚠️ Mermaid図・数式（KaTeX）・ローカル画像は非同期に描画されるため、
+     * モードを戻した直後に印刷すると図や式が欠けることがある。ここでは
+     * レイアウト確定を待つ最小限（`requestAnimationFrame` 2回）だけ挟んでおり、
+     * 描画完了まで待ち合わせる対応は ROADMAP「PDFエクスポート (4/4)」で行う。
+     */
+    function exportPdf() {
+        const wasRawMode = state.isRawMode;
+        if (wasRawMode) {
+            toggleRawMode();
+            // 印刷が終わったら元のRaw表示へ戻す（編集中だったモードを勝手に変えない）。
+            // `afterprint` が発火しない環境ではWYSIWYG表示のまま残るが、
+            // 内容は失われないため実害は無い。
+            window.addEventListener('afterprint', () => {
+                if (!state.isRawMode) {
+                    toggleRawMode();
+                }
+            }, { once: true });
+        }
+        // 直前のDOM変更（モード切替・再描画）が反映されてから印刷ダイアログを開く
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                window.print();
+            });
+        });
+    }
+
+    /**
+     * 印刷（PDFとして出力）ボタンの設定。
+     */
+    function setupExportPdf() {
+        if (!state.exportPdfBtn) {
+            return;
+        }
+        state.exportPdfBtn.addEventListener('click', exportPdf);
+    }
+
+    /**
      * 行折り返しトグルボタンの設定。
      */
     function setupRawWrapToggle() {
@@ -306,7 +350,13 @@
      */
     function showWysiwygLineGutter() {
         if (wysiwygEditorWrap) {
-            wysiwygEditorWrap.style.display = 'flex';
+            // `display:flex` を**インラインで書かない**。クラス `.wysiwyg-editor-wrap`
+            // が既に `display:flex` を持っており、インラインスタイルはカスケード上
+            // クラスより強いため、書き込むと印刷用スタイル
+            // （`@media print { .wysiwyg-editor-wrap { display:block } }`）に勝ってしまう。
+            // その結果「一度Rawへ切り替えて戻した後の印刷」で本文がフレックスアイテムの
+            // まま用紙へ出る（1/4で意図した用紙幅いっぱいのブロック配置が無効化される）。
+            wysiwygEditorWrap.style.display = '';
         }
         updateWysiwygLineGutter();
     }
@@ -769,6 +819,7 @@
 
         // Rawモードの行折り返しトグルボタン
         setupRawWrapToggle();
+        setupExportPdf();
 
         // グローバルキーボードショートカット
         setupGlobalKeyboardShortcuts();
@@ -1111,6 +1162,10 @@
                     break;
                 case 'insertImagePath':
                     handleInsertImagePath(message);
+                    break;
+                case 'print':
+                    // コマンドパレットの「Markdown: PDFとして出力」から届く
+                    exportPdf();
                     break;
             }
         });

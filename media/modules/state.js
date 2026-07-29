@@ -18,6 +18,7 @@ window.EditorState = (function() {
         rawEditor: null,
         toggleBtn: null,
         toggleRawWrapBtn: null,
+        exportPdfBtn: null,
         mermaidContextMenu: null,
         findWidget: null,
         findInput: null,
@@ -103,6 +104,7 @@ window.EditorState = (function() {
         state.rawEditor = document.getElementById('rawEditor');
         state.toggleBtn = document.getElementById('toggleView');
         state.toggleRawWrapBtn = document.getElementById('toggleRawWrap');
+        state.exportPdfBtn = document.getElementById('exportPdf');
         state.mermaidContextMenu = document.getElementById('mermaidContextMenu');
         state.findWidget = document.getElementById('findWidget');
         state.findInput = document.getElementById('findInput');
@@ -149,6 +151,7 @@ window.EditorState = (function() {
         get rawEditor() { return state.rawEditor; },
         get toggleBtn() { return state.toggleBtn; },
         get toggleRawWrapBtn() { return state.toggleRawWrapBtn; },
+        get exportPdfBtn() { return state.exportPdfBtn; },
         get mermaidContextMenu() { return state.mermaidContextMenu; },
         get findWidget() { return state.findWidget; },
         get findInput() { return state.findInput; },

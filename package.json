@@ -50,6 +50,11 @@
         "command": "markdown-wysiwyg-editor.newMarkdownFile",
         "title": "Markdown: 新しいWYSIWYGドキュメントを作成",
         "category": "Markdown WYSIWYG"
+      },
+      {
+        "command": "markdown-wysiwyg-editor.exportPdf",
+        "title": "Markdown: PDFとして出力（印刷）",
+        "category": "Markdown WYSIWYG"
       }
     ],
     "keybindings": [
