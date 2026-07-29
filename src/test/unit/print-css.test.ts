@@ -39,7 +39,12 @@ suite('印刷用スタイル（@media print）', () => {
      * 用紙幅用に2つ目のブロックを足したときも検証から漏れないよう、最初の1つに
      * 限定しない。
      */
-    function extractPrintBlocks(source: string): string {
+    function extractPrintBlocks(rawSource: string): string {
+        // **波括弧を数える前に**コメントを取り除く。方針を説明するコメントに
+        // `@page { margin: 0 }` のような例示コードを書くと、そこに含まれる波括弧で
+        // 対応が狂ってブロックが途中で切れる／別ブロックを飲み込む。あわせて、
+        // 「使わないと書いた宣言」がコメント中にあっても誤検出しなくなる。
+        const source = rawSource.replace(/\/\*[\s\S]*?\*\//g, ' ');
         let out = '';
         let from = 0;
         for (;;) {
@@ -66,13 +71,42 @@ suite('印刷用スタイル（@media print）', () => {
     const printBlock = extractPrintBlocks(css);
 
     /**
-     * セレクタとして `sel` が現れるか（部分文字列判定だと `.toolbar` が
-     * `.mermaid-toolbar` に含まれて誤合格しうるため、直前が識別子文字でないことを
-     * 確かめる。宣言の書式（`,` 区切り / `{` 直結）にも依存しない）。
+     * セレクタとして `sel` が `@media print` 内のどこかに現れるか
+     * （直前が識別子文字でないことを確かめ、`.toolbar` が `.mermaid-toolbar` に
+     * 含まれて誤合格するのを防ぐ）。**どのルールに入っているかは問わない**ので、
+     * 宣言との対応まで見たい場合は `ruleHas` を使う。
      */
     function hasSelector(sel: string): boolean {
         const escaped = sel.replace(/[.#*]/g, '\\$&');
         return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}\\s*[,{\\n]`).test(printBlock);
+    }
+
+    /**
+     * `@media print` 内の全ルールを `[セレクタ, 宣言]` の組で返す。
+     * ネストしていない単純なルール（`セレクタ { 宣言 }`）だけを対象にする。
+     */
+    function printRules(): Array<[string, string]> {
+        const rules: Array<[string, string]> = [];
+        for (const m of printBlock.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+            rules.push([m[1], m[2]]);
+        }
+        return rules;
+    }
+
+    /**
+     * `sel` が `decl` を宣言しているルールに含まれているか。
+     *
+     * ブロック全体を対象にした素朴な文字列検索では、同じセレクタが別のルールにも
+     * 現れる場合（`#editor pre` は折り返し・背景の両方に出る）に「そのルールに
+     * 入っている」ことを何も保証できないため、**ルール単位**で突き合わせる。
+     */
+    function ruleHas(sel: string, decl: string): boolean {
+        const escaped = sel.replace(/[.#*]/g, '\\$&');
+        const selRe = new RegExp(`(^|[^A-Za-z0-9_-])${escaped}\\s*(,|$)`, 'm');
+        const declRe = new RegExp(decl);
+        return printRules().some(
+            ([selectors, decls]) => selRe.test(selectors.trim()) && declRe.test(decls)
+        );
     }
 
     test('画面専用UIを隠す指定が入っている', () => {
@@ -151,6 +185,92 @@ suite('印刷用スタイル（@media print）', () => {
         assert.ok(
             /print-color-adjust:\s*exact/.test(printBlock),
             'print-color-adjust: exact でコードブロックの背景を残していない'
+        );
+    });
+
+    test('ページ境界で分断したくない要素に break-inside: avoid を当てている', () => {
+        // 紙ではスクロールできないため、まとまりで読む要素が2ページにまたがると
+        // 極端に読みにくくなる。**そのセレクタが break-inside ルールに入っているか**を
+        // ルール単位で見る（ブロック全体の検索だと、別ルールに同じセレクタがあるだけで
+        // 通ってしまい何も保証できない）
+        for (const sel of [
+            '#editor pre', '#editor table', '#editor blockquote',
+            '#editor img', '#editor .math-block', '.mermaid-container'
+        ]) {
+            assert.ok(
+                ruleHas(sel, 'break-inside:\\s*avoid'),
+                `${sel} が break-inside: avoid のルールに入っていない`
+            );
+        }
+        // 古い実装向けの別名も併記しているか（Chromiumは両方を解釈する）
+        assert.ok(
+            ruleHas('#editor table', 'page-break-inside:\\s*avoid'),
+            '旧仕様の page-break-inside を併記していない'
+        );
+    });
+
+    test('見出しがページ末尾に取り残されないようにしている', () => {
+        assert.ok(
+            ruleHas('#editor h1', 'break-after:\\s*avoid'),
+            '見出しが break-after: avoid のルールに入っていない'
+        );
+    });
+
+    test('用紙余白（@page）を指定している', () => {
+        assert.ok(/@page\s*\{[^}]*margin:/.test(printBlock), '@page の margin 指定が無い');
+    });
+
+    test('用紙幅からはみ出す要素を折り返す', () => {
+        // 画面では横スクロールで見られるが紙では切れてしまう
+        assert.ok(
+            ruleHas('#editor pre', 'white-space:\\s*pre-wrap'),
+            'コードブロックを折り返していない'
+        );
+        assert.ok(
+            ruleHas('#editor pre', 'overflow:\\s*visible'),
+            'コードブロックの横スクロールを解除していない'
+        );
+        // `anywhere` は `break-word` と違い min-content 幅も縮むため、
+        // 長いURL等を含む列が実際に狭くなる
+        assert.ok(
+            ruleHas('#editor td', 'overflow-wrap:\\s*anywhere'),
+            '表セルの折り返し指定が無い'
+        );
+        // 列幅を均等にしてしまう table-layout: fixed は使わない方針
+        assert.ok(
+            !/table-layout:\s*fixed/.test(printBlock),
+            'table-layout: fixed を使っている（元の列幅の見た目から離れる）'
+        );
+    });
+
+    test('表のスクロールコンテナと min-width を解除して用紙内に収める', () => {
+        // 紙にはスクロールバーが無いため、.table-wrapper(overflow:auto) /
+        // .table-container(overflow:hidden) のままだと、はみ出した列が
+        // **無音でクリップされて印刷結果から消える**
+        assert.ok(
+            ruleHas('.table-wrapper', 'overflow:\\s*visible'),
+            '.table-wrapper の横スクロールを解除していない'
+        );
+        assert.ok(
+            ruleHas('.table-container', 'overflow:\\s*visible'),
+            '.table-container の overflow:hidden を解除していない'
+        );
+        // セル幅の下限が残っていると列数の多い表は縮まない
+        assert.ok(
+            ruleHas('#editor td', 'min-width:\\s*0'),
+            'セル幅の下限（min-width:100px）を解除していない'
+        );
+    });
+
+    test('Mermaid図の背景を紙にも残す（ダークテーマ対策）', () => {
+        // resolveTheme() がVS Codeのテーマに追随するため、ダークテーマでは
+        // 明るい色の線・文字のSVGになる。白背景に出すと「白紙に白い図」になる
+        assert.ok(hasSelector('.mermaid-container'), '.mermaid-container が扱われていない');
+        const mermaidRule = /\.mermaid-container\s*\{[^}]*\}/g;
+        const rules = printBlock.match(mermaidRule) || [];
+        assert.ok(
+            rules.some(r => /print-color-adjust:\s*exact/.test(r)),
+            'Mermaidコンテナの背景を print-color-adjust: exact で残していない'
         );
     });
 
