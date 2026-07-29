@@ -1489,3 +1489,105 @@ pre.mermaid-source {
 table:not(.table-rendered) {
     display: none;
 }
+/* ==========================================================================
+   印刷用スタイル（Ctrl+P →「PDFとして保存」で使う）
+
+   画面用のUI（ツールバー・パンくず・行番号ガター・各種ダイアログ/メニュー・
+   ステータス表示・トースト・検索ハイライト）を全て隠し、本文だけが用紙へ流れる
+   ようにする。
+
+   色は VS Code のテーマ変数（`--vscode-editor-foreground` など）で決まるため、
+   ダークテーマのまま印刷すると「暗い背景に明るい文字」の指定が用紙へ持ち込まれ、
+   多くのブラウザが背景色を落とす結果**白紙に白い文字**になる。そこで背景と
+   地の文の色だけを白/黒へ固定する。ただし `color` を全要素へ一括で当てると
+   コードのシンタックスハイライト（`#editor .hljs-*`）まで潰れてしまうため、
+   **地の文に限定**する。そのハイライト（vs2015系）は**暗い背景を前提とした
+   明るいトークン色**なので、`#editor pre` の背景だけは `print-color-adjust: exact`
+   で紙にも残す（背景が落ちると白地に薄いグレーの文字になって読めなくなる）。
+
+   ⚠️ 既知の制約: Rawモード表示中は `#wysiwygEditorWrap`（`#editor` の親ラッパー）が
+   インラインスタイルで `display:none` になるため、この状態で印刷すると白紙になる。
+   救済（印刷前にWYSIWYGへ戻す）は ROADMAP「PDFエクスポート (2/4)」で対応する。
+   ========================================================================== */
+@media print {
+    /* 画面用のレイアウト制約（画面高に収める・内部スクロール）を解除し、
+       本文がページをまたいで流れるようにする */
+    body {
+        height: auto;
+        display: block;
+        color: #000;
+        background-color: #fff;
+    }
+
+    /* ラッパーは横並び（flex-direction:row）のフレックスコンテナで、
+       `#editor` の `flex` は**高さではなく幅**を決めている。ここを block へ
+       落とすことで `#editor` が通常のブロック＝用紙幅いっぱいになり、
+       フレックスコンテナのままページ分割される問題も避けられる。
+       （`#editor` に `flex: none` を当てると flex base size が max-content に
+       なり、本文が用紙幅を超えて右端で切れる） */
+    .wysiwyg-editor-wrap {
+        display: block;
+        min-height: 0;
+    }
+
+    #editor {
+        overflow: visible;
+        padding: 0;
+        color: #000;
+        background-color: transparent;
+    }
+
+    /* コードブロックの背景は紙にも残す（上記コメントの理由） */
+    #editor pre {
+        overflow: visible;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /* 画面専用UI。印刷には不要なので全て隠す */
+    .toolbar,
+    .heading-breadcrumb-bar,
+    .wysiwyg-line-gutter,
+    .raw-line-gutter,
+    #rawEditor,
+    .word-count-status,
+    .mermaid-toast,
+    .link-dialog,
+    .table-insert-dialog,
+    .table-context-menu,
+    .mermaid-context-menu,
+    .math-context-menu,
+    .table-toolbar,
+    .find-widget,
+    .slash-command-menu,
+    .code-copy-btn,
+    .code-lang-selector,
+    .mermaid-toolbar,
+    .mermaid-source-panel,
+    .footnote-tooltip {
+        display: none !important;
+    }
+
+    /* 編集中だけ意味を持つ装飾は紙に出さない。検索ハイライトは背景色に加えて
+       `outline` も持ち、outline は背景色と違って印刷設定で落ちないため明示的に消す */
+    .find-highlight,
+    .find-highlight.current {
+        background-color: transparent !important;
+        outline: none !important;
+    }
+
+    .table-cell.table-cell-selected,
+    .table-cell.table-cell-range-selected {
+        background-color: transparent;
+        color: inherit;
+    }
+
+    /* キャレット位置のブロックは生Markdown（`**太字**` 等）で表示されている。
+       印刷時にこれを消すと本文が欠けるためそのまま出すが、画面用の淡色
+       （`--vscode-descriptionForeground`）のままだと紙で読めないので黒へ戻す。
+       記法がそのまま印刷される点は仕様（印刷前にキャレットを外せば通常表示になる）。 */
+    #editor .raw-markdown {
+        color: #000;
+        opacity: 1;
+    }
+}

@@ -194,6 +194,8 @@ npm run package
 - マークダウンテンプレート機能
 - カスタムCSSテーマ
 
+- **印刷用スタイル（`@media print`・PDFエクスポート 1/4）**: `media/editor.css` 末尾の `@media print` ブロック。画面専用UI（`.toolbar`・`.heading-breadcrumb-bar`・`.raw-line-gutter`・`#rawEditor`・`.word-count-status`・`.mermaid-toast`・`.link-dialog`・`.table-insert-dialog`・`.mermaid-context-menu`/`.math-context-menu`・`.table-toolbar`・`.find-widget`・`.slash-command-menu`・`.code-copy-btn`・`.code-lang-selector`・`.mermaid-toolbar`/`.mermaid-source-panel`・`.footnote-tooltip`）を `display:none !important` で隠し、`body`/`#editor` の画面用レイアウト制約（`height:100vh`・`display:flex`・`overflow-y:auto`・`min-height:0`）を解除して本文が用紙へ流れるようにする。**色は `body` と `#editor` の地の色だけを `#000`/`#fff` へ固定する**——テーマ変数のままだとダークテーマで「白紙に白文字」になる一方、全称セレクタ等で一括指定すると `#editor .hljs-*` のシンタックスハイライトが潰れるため。**幅**: `.wysiwyg-editor-wrap` は `flex-direction: row` なので `#editor` の `flex` は高さではなく**幅**を決める（`flex: none` を当てると flex base size が max-content になり本文が用紙幅を超えて切れる）。ラッパーを `display: block` へ落として `#editor` を通常のブロック＝用紙幅いっぱいにする（フレックスコンテナのままページ分割される問題も同時に避けられる）。編集中だけ意味を持つ装飾（選択セルのハイライト・検索ハイライト）も紙では消す（検索ハイライトは背景色に加えて `outline` を持ち、outline は背景色と違って印刷設定で落ちないため明示的に消す）。キャレット位置の生Markdown表示（`.raw-markdown`）は消すと本文が欠けるためそのまま出し、淡色を黒へ戻すだけにする。**検証**: 印刷結果は実機でしか目視できないため、`src/test/unit/print-css.test.ts` が「`@media print` が参照するクラス/idがコードベースに実在するか」を静的に検証する（存在しない名前を書いてもCSSはエラーにならず黙って何も隠さないため。実際に `.mermaid-view-toggle` という誤名をこの検証で検出した）。**既知の制約**: Rawモード表示中は `#wysiwygEditorWrap`（`#editor` の親ラッパー）がインラインスタイルで `display:none` になるため印刷すると白紙になる（救済は ROADMAP「PDFエクスポート (2/4)」）／改ページ制御は (3/4)／Mermaid図のテーマ追随による見えにくさは (3/4)／非同期描画の待ち合わせは (4/4)
+
 ## 自動開発ループ（`/evolve` × `/loop`）
 
 このリポジトリは Claude Code のスキル `.claude/skills/evolve/SKILL.md` を使い、機能追加・バグ修正を半自動で少しずつ進めています。
