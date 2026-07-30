@@ -133,3 +133,66 @@ suite('MermaidModule', () => {
         });
     });
 });
+
+suite('render の直列化（印刷前の待ち合わせが効くこと）', () => {
+    let env: EditorEnv;
+
+    setup(() => {
+        env = createEditorEnv();
+    });
+
+    /**
+     * Mermaid本体を偽物に差し替える。`render` は手動で解決できる Promise を返し、
+     * 「描画中にもう一度 render() が呼ばれる」状況を再現する。
+     */
+    function stubMermaid() {
+        const pending: Array<() => void> = [];
+        (env.window as any).mermaid = {
+            initialize: () => { /* no-op */ },
+            render: () => new Promise(resolve => {
+                pending.push(() => resolve({ svg: '<svg></svg>' }));
+            })
+        };
+        return pending;
+    }
+
+    test('描画中に呼ばれた render() は、進行中の描画の完了まで解決しない', async () => {
+        const pending = stubMermaid();
+        env.editor.innerHTML =
+            '<pre><code data-lang="mermaid">graph TD; A-->B;</code></pre>';
+
+        /** マイクロタスクを n 回流す（チェーン＋async のホップ分だけ進める） */
+        const flush = async (n: number) => {
+            for (let i = 0; i < n; i++) { await Promise.resolve(); }
+        };
+
+        // 1回目（進行中のまま止まる）
+        const first = env.mermaid.render();
+        await flush(20);
+        assert.strictEqual(pending.length, 1, '1回目の描画が始まっていない');
+
+        // 2回目。`renderPending` 単体だと「コンテナがある」のでスキップして
+        // 即解決してしまい、SVGが空のまま印刷される原因になる
+        let secondDone = false;
+        const second = env.mermaid.render().then(() => { secondDone = true; });
+        await flush(30);
+        assert.strictEqual(secondDone, false, '進行中の描画を待たずに解決している');
+
+        // 1回目を完了させると両方解決する
+        pending[0]();
+        await first;
+        await second;
+        assert.strictEqual(secondDone, true);
+    });
+
+    test('描画が失敗しても後続の render() は解決する', async () => {
+        (env.window as any).mermaid = {
+            initialize: () => { /* no-op */ },
+            render: () => Promise.reject(new Error('boom'))
+        };
+        env.editor.innerHTML =
+            '<pre><code data-lang="mermaid">graph TD; A-->B;</code></pre>';
+        await env.mermaid.render();
+        await env.mermaid.render();
+    });
+});

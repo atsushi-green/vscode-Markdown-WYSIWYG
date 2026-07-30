@@ -82,7 +82,32 @@ window.MermaidModule = (function() {
     /**
      * Mermaidコードブロックをレンダリング
      */
-    async function render() {
+    /**
+     * 進行中の描画を直列化するためのチェーン。
+     *
+     * `renderPending()` は「コンテナが既にある `pre` はスキップ」するが、その
+     * コンテナは **SVG生成の `await` より前**に挿入される。そのため描画中に
+     * もう一度 `render()` を呼ぶと、進行中のブロックはスキップされ**SVGの完成を
+     * 待たずに解決してしまう**。印刷前の待ち合わせ（`utils.waitForRenderComplete`）は
+     * この戻り値に依存しているため、待ち漏れると空の図が印刷される。
+     * 呼び出しをチェーンで直列化し、`render()` の戻り値が
+     * 「進行中の描画も含めて完了した」ことを表すようにする。
+     */
+    let renderChain = Promise.resolve();
+
+    /**
+     * まだ描画されていない Mermaid ブロックを描画する。
+     * 進行中の描画がある場合も含めて完了したら解決する。
+     * @returns {Promise<void>}
+     */
+    function render() {
+        renderChain = renderChain
+            .catch(function() { /* 直前の失敗は次の描画を止めない */ })
+            .then(renderPending);
+        return renderChain;
+    }
+
+    async function renderPending() {
         if (!isReady()) {
             console.warn('[Mermaid] mermaid.js is not loaded yet');
             return;

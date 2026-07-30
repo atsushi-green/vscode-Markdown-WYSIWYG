@@ -196,6 +196,12 @@
     }
 
     /**
+     * 印刷前に描画完了を待つ上限時間。これを超えたら待たずに印刷ダイアログを開く
+     * （図が欠けても「押しても何も起きない」よりは良い）。
+     */
+    const PRINT_RENDER_TIMEOUT_MS = 5000;
+
+    /**
      * 印刷（PDFとして出力）を実行する。
      *
      * **Rawモード表示中はWYSIWYG表示へ戻してから印刷する。** Rawモードでは
@@ -203,10 +209,11 @@
      * 印刷用スタイル（`@media print`）は `#rawEditor` の方を隠すため、
      * そのまま印刷すると**白紙になる**。
      *
-     * ⚠️ Mermaid図・数式（KaTeX）・ローカル画像は非同期に描画されるため、
-     * モードを戻した直後に印刷すると図や式が欠けることがある。ここでは
-     * レイアウト確定を待つ最小限（`requestAnimationFrame` 2回）だけ挟んでおり、
-     * 描画完了まで待ち合わせる対応は ROADMAP「PDFエクスポート (4/4)」で行う。
+     * Mermaid図・数式（KaTeX）・ローカル画像は非同期に描画されるため、
+     * `utils.waitForRenderComplete` で完了を待ってから印刷ダイアログを開く
+     * （待たないと図や式が欠けたPDFになる。とくにRawモードから戻した直後は
+     * フル再描画が走る）。待ち合わせは失敗しても reject せず、上限時間で必ず
+     * 解決するので「押しても何も起きない」状態にはならない。
      */
     function exportPdf() {
         const wasRawMode = state.isRawMode;
@@ -221,10 +228,21 @@
                 }
             }, { once: true });
         }
-        // 直前のDOM変更（モード切替・再描画）が反映されてから印刷ダイアログを開く
-        requestAnimationFrame(() => {
+        // Mermaid図・数式（KaTeXのWebフォント）・画像は遅れて描画されるため、
+        // 完了を待ってから印刷ダイアログを開く。待たないと図・式・画像が欠けた
+        // PDFになる（とくにRawモードから戻した直後はフル再描画が走る）。
+        // `waitForRenderComplete` は失敗しても reject せず、上限時間で必ず解決する。
+        utils.waitForRenderComplete({
+            renderMermaid: () => mermaidModule.render(),
+            fontsReady: (document.fonts && document.fonts.ready) || null,
+            images: state.editor.querySelectorAll('img'),
+            timeoutMs: PRINT_RENDER_TIMEOUT_MS
+        }).then(() => {
+            // 直前のDOM変更が反映されてから開く（レイアウト確定待ち）
             requestAnimationFrame(() => {
-                window.print();
+                requestAnimationFrame(() => {
+                    window.print();
+                });
             });
         });
     }

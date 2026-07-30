@@ -678,3 +678,129 @@ suite('EditorState', () => {
         assert.strictEqual(env.state.isRawWrapEnabled, true);
     });
 });
+
+suite('waitForRenderComplete（印刷前の描画待ち合わせ）', () => {
+    let env: EditorEnv;
+
+    setup(() => {
+        env = createEditorEnv();
+    });
+
+    /** すぐには解決しない Promise と、その解決関数を返す */
+    function deferred(): { promise: Promise<void>; resolve: () => void } {
+        let resolve!: () => void;
+        const promise = new Promise<void>(r => { resolve = r as () => void; });
+        return { promise, resolve };
+    }
+
+    test('待ち対象が無ければすぐ解決する', async () => {
+        await env.utils.waitForRenderComplete();
+        await env.utils.waitForRenderComplete({});
+    });
+
+    /** マイクロタスクを十分に流す（Promise.all→race→then のホップ分） */
+    async function flush(n = 30): Promise<void> {
+        for (let i = 0; i < n; i++) { await Promise.resolve(); }
+    }
+
+    test('Mermaid再描画・フォント・画像のどれか1つでも未完了なら解決しない', async () => {
+        // 3つのうち2つだけ解決させて「まだ待っている」ことを確認する。
+        // 1つ resolve しただけで通るような弱い検証だと、待ち漏れ（例: 進行中の
+        // Mermaid描画を待たない）を検出できない
+        const cases: Array<'mermaid' | 'fonts' | 'image'> = ['mermaid', 'fonts', 'image'];
+        for (const remaining of cases) {
+            const mermaid = deferred();
+            const fonts = deferred();
+            const img = env.document.createElement('img');
+            Object.defineProperty(img, 'complete', { value: false });
+
+            let done = false;
+            const p = env.utils.waitForRenderComplete({
+                renderMermaid: () => mermaid.promise,
+                fontsReady: fonts.promise,
+                images: [img],
+                timeoutMs: 10000
+            }).then(() => { done = true; });
+
+            // `remaining` 以外を全部解決させる
+            if (remaining !== 'mermaid') { mermaid.resolve(); }
+            if (remaining !== 'fonts') { fonts.resolve(); }
+            if (remaining !== 'image') { img.dispatchEvent(new env.window.Event('load')); }
+            await flush();
+            assert.strictEqual(done, false, `${remaining} を待たずに解決している`);
+
+            // 残りも解決させれば完了する
+            mermaid.resolve();
+            fonts.resolve();
+            img.dispatchEvent(new env.window.Event('load'));
+            await p;
+            assert.strictEqual(done, true, `${remaining} の解決後に完了しない`);
+        }
+    });
+
+    test('読み込み済みの画像は待たない', async () => {
+        const img = env.document.createElement('img');
+        Object.defineProperty(img, 'complete', { value: true });
+        // load を発火させなくても解決する
+        await env.utils.waitForRenderComplete({ images: [img], timeoutMs: 10000 });
+    });
+
+    test('画像の読み込みが error でも解決する（1枚の失敗で印刷を止めない）', async () => {
+        const img = env.document.createElement('img');
+        Object.defineProperty(img, 'complete', { value: false });
+        const p = env.utils.waitForRenderComplete({ images: [img], timeoutMs: 10000 });
+        img.dispatchEvent(new env.window.Event('error'));
+        await p;
+    });
+
+    test('待ち対象が reject しても reject せず解決する', async () => {
+        await env.utils.waitForRenderComplete({
+            renderMermaid: () => Promise.reject(new Error('render failed')),
+            fontsReady: Promise.reject(new Error('fonts failed')),
+            timeoutMs: 10000
+        });
+    });
+
+    test('renderMermaid が同期例外を投げても解決する', async () => {
+        await env.utils.waitForRenderComplete({
+            renderMermaid: () => { throw new Error('boom'); },
+            timeoutMs: 10000
+        });
+    });
+
+    test('timeoutMs が不正（NaN・0以下）なら既定値へ倒す', async () => {
+        // setTimeout(fn, NaN) は即時発火＝待ち合わせが丸ごと無効になる
+        for (const bad of [NaN, 0, -1, undefined]) {
+            let fired: number | null = null;
+            await env.utils.waitForRenderComplete({
+                fontsReady: new Promise<void>(() => { /* 解決しない */ }),
+                timeoutMs: bad,
+                setTimeoutFn: (fn: () => void, ms: number) => { fired = ms; fn(); return 0; }
+            });
+            assert.strictEqual(fired, 5000, `timeoutMs=${String(bad)} で既定値になっていない`);
+        }
+    });
+
+    test('待ち対象が先に終わったら上限タイマーを解除する', async () => {
+        let cleared: unknown = null;
+        await env.utils.waitForRenderComplete({
+            fontsReady: Promise.resolve(),
+            timeoutMs: 10000,
+            setTimeoutFn: () => 'timer-id',
+            clearTimeoutFn: (id: unknown) => { cleared = id; }
+        });
+        assert.strictEqual(cleared, 'timer-id', 'タイマーを解除していない');
+    });
+
+    test('待ち対象が解決しなくても上限時間で解決する', async () => {
+        const never = new Promise<void>(() => { /* 解決しない */ });
+        let fired: number | null = null;
+        await env.utils.waitForRenderComplete({
+            fontsReady: never,
+            timeoutMs: 1234,
+            // タイマーは注入して即時発火させる（テストを実時間で待たせない）
+            setTimeoutFn: (fn: () => void, ms: number) => { fired = ms; fn(); return 0; }
+        });
+        assert.strictEqual(fired, 1234, '指定した上限時間でタイマーを張っていない');
+    });
+});

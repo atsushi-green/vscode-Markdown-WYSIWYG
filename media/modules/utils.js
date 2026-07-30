@@ -8,6 +8,77 @@ window.EditorUtils = (function() {
     const state = window.EditorState;
 
     /**
+     * 遅れて描画される要素の完了を待つ（印刷前の待ち合わせ用）。
+     *
+     * Mermaid図は `mermaid.render()` が非同期、数式（KaTeX）は描画自体は同期だが
+     * **Webフォントの読み込みが終わるまで字形が確定しない**、ローカル画像は
+     * webview URI へ差し替えたあと実際に読み込まれるまで空のままになる。
+     * これらを待たずに `window.print()` を呼ぶと、図・式・画像が欠けたPDFになる。
+     *
+     * **決して reject せず、必ず `timeoutMs` 以内に解決する**。印刷は
+     * 「多少崩れても実行される」ほうが「何も起きない」より良いため、
+     * 個々の待ち対象が失敗しても握りつぶして先へ進む。
+     *
+     * 依存はすべて引数で受け取る（呼び出し側が実物を渡し、テストは偽物を渡せる）。
+     * @param {Object} [deps]
+     * @param {function(): (Promise|undefined)} [deps.renderMermaid] Mermaid再描画（Promiseを返す）
+     * @param {Promise} [deps.fontsReady] `document.fonts.ready` 相当
+     * @param {ArrayLike<HTMLImageElement>} [deps.images] 読み込み待ちする画像
+     * @param {number} [deps.timeoutMs=5000] 全体の上限。超えたら待たずに解決する
+     * @param {function(function(), number): *} [deps.setTimeoutFn] タイマー（テスト用）
+     * @param {function(*): void} [deps.clearTimeoutFn] タイマー解除（テスト用）
+     * @returns {Promise<void>}
+     */
+    function waitForRenderComplete(deps) {
+        const d = deps || {};
+        // NaN や 0以下は「上限指定なし」とみなして既定値へ倒す
+        // （`setTimeout(fn, NaN)` は即時発火＝待ち合わせが丸ごと無効になるため）
+        const timeoutMs = Number.isFinite(d.timeoutMs) && d.timeoutMs > 0
+            ? d.timeoutMs
+            : 5000;
+        const setTimeoutFn = d.setTimeoutFn || setTimeout;
+        const clearTimeoutFn = d.clearTimeoutFn || clearTimeout;
+        const tasks = [];
+
+        if (typeof d.renderMermaid === 'function') {
+            // 同期例外もここで拾う（Promise化して以降の握りつぶしに乗せる）
+            tasks.push(new Promise(function(resolve) {
+                resolve(d.renderMermaid());
+            }));
+        }
+        if (d.fontsReady && typeof d.fontsReady.then === 'function') {
+            tasks.push(d.fontsReady);
+        }
+        if (d.images) {
+            Array.prototype.forEach.call(d.images, function(img) {
+                // 読み込み済み（complete）はそのまま。デコード前でも印刷までには間に合う
+                if (!img || img.complete) {
+                    return;
+                }
+                tasks.push(new Promise(function(resolve) {
+                    // error でも resolve する（1枚の失敗で印刷全体を止めない）
+                    img.addEventListener('load', resolve, { once: true });
+                    img.addEventListener('error', resolve, { once: true });
+                }));
+            });
+        }
+
+        const all = Promise.all(tasks.map(function(t) {
+            return Promise.resolve(t).catch(function() { /* 失敗しても先へ進む */ });
+        }));
+        let timerId = null;
+        const timeout = new Promise(function(resolve) {
+            timerId = setTimeoutFn(resolve, timeoutMs);
+        });
+        return Promise.race([all, timeout]).then(function() {
+            // 待ち対象が先に終わった場合、上限タイマーは不要なので片付ける
+            if (timerId !== null) {
+                clearTimeoutFn(timerId);
+            }
+        });
+    }
+
+    /**
      * 改行コードをLFへ正規化
      */
     function normalizeEol(text) {
@@ -513,6 +584,7 @@ window.EditorUtils = (function() {
 
     // 公開API
     return {
+        waitForRenderComplete: waitForRenderComplete,
         normalizeEol: normalizeEol,
         countText: countText,
         countLines: countLines,
