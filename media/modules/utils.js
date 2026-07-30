@@ -79,6 +79,58 @@ window.EditorUtils = (function() {
     }
 
     /**
+     * 関数をデバウンスする（最後の呼び出しから `waitMs` 経過してから1度だけ実行）。
+     *
+     * キー入力のたびに走る重い処理（見出しパンくずの再計算は見出し数分の
+     * `getBoundingClientRect` を伴う）を、入力が落ち着いてから1回にまとめるために使う。
+     *
+     * 返す関数は `cancel()` を持ち、保留中の実行を取り消せる（モード切替や破棄時に
+     * 遅れて発火するのを止めたい場合に使う）。パンくず更新の用途では
+     * `updateHeadingBreadcrumb` 自身が Raw モードを見て早期 return するため
+     * 現時点で呼び出し箇所は無いが、遅延実行を止めたい別の用途のために用意している。
+     *
+     * @param {function(...*): void} fn 実行したい関数
+     * @param {number} waitMs 待ち時間（ミリ秒）
+     * @param {Object} [timers] タイマー関数（テストから差し替えるための注入口）
+     * @param {function(function(), number): *} [timers.setTimeoutFn]
+     * @param {function(*): void} [timers.clearTimeoutFn]
+     * @returns {function(...*): void} デバウンスされた関数（`cancel` プロパティ付き）
+     */
+    function debounce(fn, waitMs, timers) {
+        const t = timers || {};
+        const setTimeoutFn = t.setTimeoutFn || setTimeout;
+        const clearTimeoutFn = t.clearTimeoutFn || clearTimeout;
+        // NaN などが来ると `setTimeout(fn, NaN)` が即時発火してデバウンスが効かなくなる。
+        // 0 は「次のタスクへ回す」という正当な指定なので許す（`waitForRenderComplete`
+        // が 0 を弾くのは、あちらでは 0 = 待ち合わせ無効を意味するため）。
+        const delay = Number.isFinite(waitMs) && waitMs >= 0 ? waitMs : 0;
+        // 注入された setTimeout が undefined/0 を返す場合も「保留中」を正しく扱えるよう
+        // 未スケジュール状態は undefined ではなく null で持ち、比較も `!= null` にする
+        let timerId = null;
+
+        function debounced() {
+            const args = Array.prototype.slice.call(arguments);
+            const self = this;
+            if (timerId != null) {
+                clearTimeoutFn(timerId);
+            }
+            timerId = setTimeoutFn(function () {
+                timerId = null;
+                fn.apply(self, args);
+            }, delay);
+        }
+
+        debounced.cancel = function () {
+            if (timerId != null) {
+                clearTimeoutFn(timerId);
+                timerId = null;
+            }
+        };
+
+        return debounced;
+    }
+
+    /**
      * 改行コードをLFへ正規化
      */
     function normalizeEol(text) {
@@ -584,6 +636,7 @@ window.EditorUtils = (function() {
 
     // 公開API
     return {
+        debounce: debounce,
         waitForRenderComplete: waitForRenderComplete,
         normalizeEol: normalizeEol,
         countText: countText,

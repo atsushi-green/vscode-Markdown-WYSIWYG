@@ -413,6 +413,19 @@
     }
 
     /**
+     * 入力イベントからのパンくず更新をデバウンスする。
+     *
+     * `updateHeadingBreadcrumb` は見出しの数だけ `getBoundingClientRect` を呼ぶため、
+     * キー入力のたびに同期実行すると見出しの多い文書でタイピングが引っかかる。
+     * 同じ入力イベントで走る行番号ガター更新（`scheduleWysiwygGutterUpdate`）と
+     * 同じ150msでまとめる。
+     *
+     * スクロール由来の更新は下の rAF 間引き（`scheduleHeadingBreadcrumbUpdate`）の
+     * ままにする——スクロールは追従が遅れると体感で分かるため、150ms待たせない。
+     */
+    const debounceHeadingBreadcrumbUpdate = utils.debounce(updateHeadingBreadcrumb, 150);
+
+    /**
      * スクロールイベントの間引き（rAF）。スクロール中に何度も呼ばれても
      * 1フレームにつき1回だけ再計算する。
      */
@@ -974,8 +987,9 @@
             // 行番号ガターを更新（変換コストが高いためデバウンス）
             scheduleWysiwygGutterUpdate();
 
-            // 見出しパンくずバーを更新（見出しの追加・削除・移動に追従）
-            updateHeadingBreadcrumb();
+            // 見出しパンくずバーを更新（見出しの追加・削除・移動に追従）。
+            // 入力のたびに同期実行すると重いためデバウンスする
+            debounceHeadingBreadcrumbUpdate();
 
             // 文書への書き戻し（変換コストが高いためデバウンス）
             if (editSyncTimeout) {

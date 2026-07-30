@@ -804,3 +804,142 @@ suite('waitForRenderComplete（印刷前の描画待ち合わせ）', () => {
         assert.strictEqual(fired, 1234, '指定した上限時間でタイマーを張っていない');
     });
 });
+
+suite('debounce（入力のたびに走る重い処理をまとめる）', () => {
+    let env: EditorEnv;
+
+    setup(() => {
+        env = createEditorEnv();
+    });
+
+    /** 手動で進められる偽タイマー。指定された待ち時間も記録する */
+    function fakeTimers() {
+        let nextId = 1;
+        const scheduled = new Map<number, () => void>();
+        const delays: number[] = [];
+        return {
+            delays,
+            setTimeoutFn: (fn: () => void, ms: number) => {
+                const id = nextId++;
+                scheduled.set(id, fn);
+                delays.push(ms);
+                return id;
+            },
+            clearTimeoutFn: (id: number) => { scheduled.delete(id); },
+            /** 保留中のものを全て実行する */
+            run: () => {
+                const fns = Array.from(scheduled.values());
+                scheduled.clear();
+                fns.forEach(fn => fn());
+            },
+            get pending() { return scheduled.size; }
+        };
+    }
+
+    test('連続して呼んでも最後の1回だけ実行される', () => {
+        const timers = fakeTimers();
+        let calls = 0;
+        const debounced = env.utils.debounce(() => { calls++; }, 150, timers);
+
+        debounced();
+        debounced();
+        debounced();
+        assert.strictEqual(calls, 0, '待ち時間の前に実行されている');
+        assert.strictEqual(timers.pending, 1, 'タイマーが積み上がっている');
+
+        timers.run();
+        assert.strictEqual(calls, 1);
+    });
+
+    test('指定した待ち時間でタイマーを張る', () => {
+        // 待ち時間が渡っていない／別の値に化けてもデバウンスの体裁は保たれるため、
+        // 実際に何ミリ秒でスケジュールしたかを確認する
+        const timers = fakeTimers();
+        const debounced = env.utils.debounce(() => { /* no-op */ }, 150, timers);
+        debounced();
+        assert.deepStrictEqual(timers.delays, [150]);
+    });
+
+    test('waitMs が不正（NaN）でも 0 へ倒して動く', () => {
+        // setTimeout(fn, NaN) は即時発火してデバウンスが効かなくなる。
+        // 0 は「次のタスクへ回す」という正当な指定なので弾かない
+        const timers = fakeTimers();
+        const debounced = env.utils.debounce(() => { /* no-op */ }, NaN, timers);
+        debounced();
+        assert.deepStrictEqual(timers.delays, [0]);
+
+        const zero = fakeTimers();
+        env.utils.debounce(() => { /* no-op */ }, 0, zero)();
+        assert.deepStrictEqual(zero.delays, [0]);
+    });
+
+    test('cancel() の後でも再びスケジュールできる', () => {
+        // cancel が timerId を戻し忘れると、以降 clear されず
+        // デバウンスが効かなくなる／cancel が二度と効かなくなる
+        const timers = fakeTimers();
+        let calls = 0;
+        const debounced = env.utils.debounce(() => { calls++; }, 150, timers);
+
+        debounced();
+        debounced.cancel();
+        debounced();
+        debounced();
+        assert.strictEqual(timers.pending, 1, 'cancel後にタイマーが積み上がっている');
+        timers.run();
+        assert.strictEqual(calls, 1);
+
+        // 2度目の cancel も効く
+        debounced();
+        debounced.cancel();
+        timers.run();
+        assert.strictEqual(calls, 1, 'cancel後に実行されている');
+    });
+
+    test('最後の呼び出しの引数で実行される', () => {
+        const timers = fakeTimers();
+        const received: unknown[] = [];
+        const debounced = env.utils.debounce((...args: unknown[]) => {
+            received.push(...args);
+        }, 150, timers);
+
+        debounced('a');
+        debounced('b', 2);
+        timers.run();
+        assert.deepStrictEqual(received, ['b', 2]);
+    });
+
+    test('待ち時間が経過するたびに実行される（1回きりではない）', () => {
+        const timers = fakeTimers();
+        let calls = 0;
+        const debounced = env.utils.debounce(() => { calls++; }, 150, timers);
+
+        debounced();
+        timers.run();
+        assert.strictEqual(calls, 1);
+
+        debounced();
+        timers.run();
+        assert.strictEqual(calls, 2);
+    });
+
+    test('cancel() で保留中の実行を取り消せる', () => {
+        const timers = fakeTimers();
+        let calls = 0;
+        const debounced = env.utils.debounce(() => { calls++; }, 150, timers);
+
+        debounced();
+        assert.strictEqual(timers.pending, 1);
+        debounced.cancel();
+        assert.strictEqual(timers.pending, 0, 'タイマーが残っている');
+
+        timers.run();
+        assert.strictEqual(calls, 0, 'cancel 後に実行されている');
+    });
+
+    test('cancel() は保留が無くても安全に呼べる', () => {
+        const timers = fakeTimers();
+        const debounced = env.utils.debounce(() => { /* no-op */ }, 150, timers);
+        debounced.cancel();
+        debounced.cancel();
+    });
+});
