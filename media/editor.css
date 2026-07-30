@@ -1489,3 +1489,187 @@ pre.mermaid-source {
 table:not(.table-rendered) {
     display: none;
 }
+/* ==========================================================================
+   印刷用スタイル（Ctrl+P →「PDFとして保存」で使う）
+
+   画面用のUI（ツールバー・パンくず・行番号ガター・各種ダイアログ/メニュー・
+   ステータス表示・トースト・検索ハイライト）を全て隠し、本文だけが用紙へ流れる
+   ようにする。
+
+   色は VS Code のテーマ変数（`--vscode-editor-foreground` など）で決まるため、
+   ダークテーマのまま印刷すると「暗い背景に明るい文字」の指定が用紙へ持ち込まれ、
+   多くのブラウザが背景色を落とす結果**白紙に白い文字**になる。そこで背景と
+   地の文の色だけを白/黒へ固定する。ただし `color` を全要素へ一括で当てると
+   コードのシンタックスハイライト（`#editor .hljs-*`）まで潰れてしまうため、
+   **地の文に限定**する。そのハイライト（vs2015系）は**暗い背景を前提とした
+   明るいトークン色**なので、`#editor pre` の背景だけは `print-color-adjust: exact`
+   で紙にも残す（背景が落ちると白地に薄いグレーの文字になって読めなくなる）。
+
+   ⚠️ 既知の制約: Rawモード表示中は `#wysiwygEditorWrap`（`#editor` の親ラッパー）が
+   インラインスタイルで `display:none` になるため、この状態で印刷すると白紙になる。
+   救済（印刷前にWYSIWYGへ戻す）は ROADMAP「PDFエクスポート (2/4)」で対応する。
+   ========================================================================== */
+@media print {
+    /* 画面用のレイアウト制約（画面高に収める・内部スクロール）を解除し、
+       本文がページをまたいで流れるようにする */
+    body {
+        height: auto;
+        display: block;
+        color: #000;
+        background-color: #fff;
+    }
+
+    /* ラッパーは横並び（flex-direction:row）のフレックスコンテナで、
+       `#editor` の `flex` は**高さではなく幅**を決めている。ここを block へ
+       落とすことで `#editor` が通常のブロック＝用紙幅いっぱいになり、
+       フレックスコンテナのままページ分割される問題も避けられる。
+       （`#editor` に `flex: none` を当てると flex base size が max-content に
+       なり、本文が用紙幅を超えて右端で切れる） */
+    .wysiwyg-editor-wrap {
+        display: block;
+        min-height: 0;
+    }
+
+    #editor {
+        overflow: visible;
+        padding: 0;
+        color: #000;
+        background-color: transparent;
+    }
+
+    /* コードブロックの背景は紙にも残す（上記コメントの理由）。
+       折り返し・改ページの指定も同じルールにまとめる（同一セレクタが離れた
+       2箇所にあると片方だけ直す事故が起きやすいため）。 */
+    #editor pre,
+    #editor pre code {
+        /* 画面では横スクロールで見られるが、紙ではスクロールできず切れてしまう */
+        overflow: visible;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
+    #editor pre {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /* 画面専用UI。印刷には不要なので全て隠す */
+    .toolbar,
+    .heading-breadcrumb-bar,
+    .wysiwyg-line-gutter,
+    .raw-line-gutter,
+    #rawEditor,
+    .word-count-status,
+    .mermaid-toast,
+    .link-dialog,
+    .table-insert-dialog,
+    .table-context-menu,
+    .mermaid-context-menu,
+    .math-context-menu,
+    .table-toolbar,
+    .find-widget,
+    .slash-command-menu,
+    .code-copy-btn,
+    .code-lang-selector,
+    .mermaid-toolbar,
+    .mermaid-source-panel,
+    .footnote-tooltip {
+        display: none !important;
+    }
+
+    /* 編集中だけ意味を持つ装飾は紙に出さない。検索ハイライトは背景色に加えて
+       `outline` も持ち、outline は背景色と違って印刷設定で落ちないため明示的に消す */
+    .find-highlight,
+    .find-highlight.current {
+        background-color: transparent !important;
+        outline: none !important;
+    }
+
+    .table-cell.table-cell-selected,
+    .table-cell.table-cell-range-selected {
+        background-color: transparent;
+        color: inherit;
+    }
+
+    /* --- 用紙サイズ・余白 ---------------------------------------------- */
+    /* 用紙の物理余白。本文側の余白は #editor の padding を0にして、ここで一元管理する */
+    @page {
+        margin: 15mm;
+    }
+
+    /* --- 改ページ制御 -------------------------------------------------- */
+    /* まとまりで読む要素はページ境界で分断しない。`break-inside` が新仕様だが、
+       古い実装向けに `page-break-inside` も併記する（Chromiumは両方を解釈する）。 */
+    #editor pre,
+    #editor table,
+    #editor blockquote,
+    #editor img,
+    #editor .math-block,
+    #editor .frontmatter,
+    #editor section.footnotes li,
+    .mermaid-container {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+
+    /* 見出しだけがページ末尾に取り残されないようにする（直後の本文と同じページへ） */
+    #editor h1,
+    #editor h2,
+    #editor h3,
+    #editor h4,
+    #editor h5,
+    #editor h6 {
+        page-break-after: avoid;
+        break-after: avoid;
+    }
+
+    /* 段落の1〜2行だけが前後のページへ飛ばされる（孤立行）のを防ぐ */
+    #editor p,
+    #editor li {
+        orphans: 3;
+        widows: 3;
+    }
+
+    /* --- 用紙幅からのはみ出し対策 -------------------------------------- */
+    /* 表は画面では `.table-wrapper`（`overflow:auto`）の横スクロールで見られるが、
+       **紙にはスクロールバーが無いのではみ出した列が無音でクリップされる**。
+       印刷時はスクロールコンテナを解除して、はみ出さずに収まるようにする。
+       セル幅の下限（`.table-container th/td { min-width: 100px }`）も外す——
+       これが残っていると列数の多い表は縮まず、A4（本文幅≒180mm≒680px）では
+       7列で下限700pxを超えて右側の列が印刷結果から丸ごと消える。
+       `#editor th` は詳細度(1,0,1)で `.table-container th`(0,1,1) に勝つ。
+       折り返しは `overflow-wrap: anywhere` を使う（`break-word` と違い
+       **min-content幅も縮む**ため、長いURL等を含む列が実際に狭くなる）。
+       `table-layout: fixed` は列幅を均等にして元の見た目から離れるので使わない。 */
+    .table-container,
+    .table-wrapper {
+        overflow: visible;
+        max-width: 100%;
+    }
+
+    #editor th,
+    #editor td {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    /* Mermaid図はVS Codeのテーマに追随して描画される（`mermaid.js` の
+       `resolveTheme()`）ため、ダークテーマ環境では**明るい色の線・文字**のSVGになる。
+       白背景の紙にそのまま出すと「白紙に白い図」になるので、コンテナの暗い背景を
+       `print-color-adjust: exact` で紙にも残して図が読める状態を保つ
+       （印刷のたびにライトテーマで再描画する方式は再描画の待ち合わせが要るため、
+       ROADMAP「PDFエクスポート (4/4)」とあわせて検討する）。 */
+    .mermaid-container {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /* キャレット位置のブロックは生Markdown（`**太字**` 等）で表示されている。
+       印刷時にこれを消すと本文が欠けるためそのまま出すが、画面用の淡色
+       （`--vscode-descriptionForeground`）のままだと紙で読めないので黒へ戻す。
+       記法がそのまま印刷される点は仕様（印刷前にキャレットを外せば通常表示になる）。 */
+    #editor .raw-markdown {
+        color: #000;
+        opacity: 1;
+    }
+}

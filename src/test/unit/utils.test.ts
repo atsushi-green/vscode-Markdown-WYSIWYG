@@ -645,6 +645,7 @@ suite('EditorState', () => {
         assert.ok(env.state.rawEditor);
         assert.ok(env.state.toggleBtn);
         assert.ok(env.state.toggleRawWrapBtn);
+        assert.ok(env.state.exportPdfBtn);
         assert.ok(env.state.findWidget);
         assert.ok(env.state.vscode);
     });
@@ -675,5 +676,270 @@ suite('EditorState', () => {
         assert.strictEqual(env.state.isRawWrapEnabled, false);
         env.state.isRawWrapEnabled = true;
         assert.strictEqual(env.state.isRawWrapEnabled, true);
+    });
+});
+
+suite('waitForRenderComplete（印刷前の描画待ち合わせ）', () => {
+    let env: EditorEnv;
+
+    setup(() => {
+        env = createEditorEnv();
+    });
+
+    /** すぐには解決しない Promise と、その解決関数を返す */
+    function deferred(): { promise: Promise<void>; resolve: () => void } {
+        let resolve!: () => void;
+        const promise = new Promise<void>(r => { resolve = r as () => void; });
+        return { promise, resolve };
+    }
+
+    test('待ち対象が無ければすぐ解決する', async () => {
+        await env.utils.waitForRenderComplete();
+        await env.utils.waitForRenderComplete({});
+    });
+
+    /** マイクロタスクを十分に流す（Promise.all→race→then のホップ分） */
+    async function flush(n = 30): Promise<void> {
+        for (let i = 0; i < n; i++) { await Promise.resolve(); }
+    }
+
+    test('Mermaid再描画・フォント・画像のどれか1つでも未完了なら解決しない', async () => {
+        // 3つのうち2つだけ解決させて「まだ待っている」ことを確認する。
+        // 1つ resolve しただけで通るような弱い検証だと、待ち漏れ（例: 進行中の
+        // Mermaid描画を待たない）を検出できない
+        const cases: Array<'mermaid' | 'fonts' | 'image'> = ['mermaid', 'fonts', 'image'];
+        for (const remaining of cases) {
+            const mermaid = deferred();
+            const fonts = deferred();
+            const img = env.document.createElement('img');
+            Object.defineProperty(img, 'complete', { value: false });
+
+            let done = false;
+            const p = env.utils.waitForRenderComplete({
+                renderMermaid: () => mermaid.promise,
+                fontsReady: fonts.promise,
+                images: [img],
+                timeoutMs: 10000
+            }).then(() => { done = true; });
+
+            // `remaining` 以外を全部解決させる
+            if (remaining !== 'mermaid') { mermaid.resolve(); }
+            if (remaining !== 'fonts') { fonts.resolve(); }
+            if (remaining !== 'image') { img.dispatchEvent(new env.window.Event('load')); }
+            await flush();
+            assert.strictEqual(done, false, `${remaining} を待たずに解決している`);
+
+            // 残りも解決させれば完了する
+            mermaid.resolve();
+            fonts.resolve();
+            img.dispatchEvent(new env.window.Event('load'));
+            await p;
+            assert.strictEqual(done, true, `${remaining} の解決後に完了しない`);
+        }
+    });
+
+    test('読み込み済みの画像は待たない', async () => {
+        const img = env.document.createElement('img');
+        Object.defineProperty(img, 'complete', { value: true });
+        // load を発火させなくても解決する
+        await env.utils.waitForRenderComplete({ images: [img], timeoutMs: 10000 });
+    });
+
+    test('画像の読み込みが error でも解決する（1枚の失敗で印刷を止めない）', async () => {
+        const img = env.document.createElement('img');
+        Object.defineProperty(img, 'complete', { value: false });
+        const p = env.utils.waitForRenderComplete({ images: [img], timeoutMs: 10000 });
+        img.dispatchEvent(new env.window.Event('error'));
+        await p;
+    });
+
+    test('待ち対象が reject しても reject せず解決する', async () => {
+        await env.utils.waitForRenderComplete({
+            renderMermaid: () => Promise.reject(new Error('render failed')),
+            fontsReady: Promise.reject(new Error('fonts failed')),
+            timeoutMs: 10000
+        });
+    });
+
+    test('renderMermaid が同期例外を投げても解決する', async () => {
+        await env.utils.waitForRenderComplete({
+            renderMermaid: () => { throw new Error('boom'); },
+            timeoutMs: 10000
+        });
+    });
+
+    test('timeoutMs が不正（NaN・0以下）なら既定値へ倒す', async () => {
+        // setTimeout(fn, NaN) は即時発火＝待ち合わせが丸ごと無効になる
+        for (const bad of [NaN, 0, -1, undefined]) {
+            let fired: number | null = null;
+            await env.utils.waitForRenderComplete({
+                fontsReady: new Promise<void>(() => { /* 解決しない */ }),
+                timeoutMs: bad,
+                setTimeoutFn: (fn: () => void, ms: number) => { fired = ms; fn(); return 0; }
+            });
+            assert.strictEqual(fired, 5000, `timeoutMs=${String(bad)} で既定値になっていない`);
+        }
+    });
+
+    test('待ち対象が先に終わったら上限タイマーを解除する', async () => {
+        let cleared: unknown = null;
+        await env.utils.waitForRenderComplete({
+            fontsReady: Promise.resolve(),
+            timeoutMs: 10000,
+            setTimeoutFn: () => 'timer-id',
+            clearTimeoutFn: (id: unknown) => { cleared = id; }
+        });
+        assert.strictEqual(cleared, 'timer-id', 'タイマーを解除していない');
+    });
+
+    test('待ち対象が解決しなくても上限時間で解決する', async () => {
+        const never = new Promise<void>(() => { /* 解決しない */ });
+        let fired: number | null = null;
+        await env.utils.waitForRenderComplete({
+            fontsReady: never,
+            timeoutMs: 1234,
+            // タイマーは注入して即時発火させる（テストを実時間で待たせない）
+            setTimeoutFn: (fn: () => void, ms: number) => { fired = ms; fn(); return 0; }
+        });
+        assert.strictEqual(fired, 1234, '指定した上限時間でタイマーを張っていない');
+    });
+});
+
+suite('debounce（入力のたびに走る重い処理をまとめる）', () => {
+    let env: EditorEnv;
+
+    setup(() => {
+        env = createEditorEnv();
+    });
+
+    /** 手動で進められる偽タイマー。指定された待ち時間も記録する */
+    function fakeTimers() {
+        let nextId = 1;
+        const scheduled = new Map<number, () => void>();
+        const delays: number[] = [];
+        return {
+            delays,
+            setTimeoutFn: (fn: () => void, ms: number) => {
+                const id = nextId++;
+                scheduled.set(id, fn);
+                delays.push(ms);
+                return id;
+            },
+            clearTimeoutFn: (id: number) => { scheduled.delete(id); },
+            /** 保留中のものを全て実行する */
+            run: () => {
+                const fns = Array.from(scheduled.values());
+                scheduled.clear();
+                fns.forEach(fn => fn());
+            },
+            get pending() { return scheduled.size; }
+        };
+    }
+
+    test('連続して呼んでも最後の1回だけ実行される', () => {
+        const timers = fakeTimers();
+        let calls = 0;
+        const debounced = env.utils.debounce(() => { calls++; }, 150, timers);
+
+        debounced();
+        debounced();
+        debounced();
+        assert.strictEqual(calls, 0, '待ち時間の前に実行されている');
+        assert.strictEqual(timers.pending, 1, 'タイマーが積み上がっている');
+
+        timers.run();
+        assert.strictEqual(calls, 1);
+    });
+
+    test('指定した待ち時間でタイマーを張る', () => {
+        // 待ち時間が渡っていない／別の値に化けてもデバウンスの体裁は保たれるため、
+        // 実際に何ミリ秒でスケジュールしたかを確認する
+        const timers = fakeTimers();
+        const debounced = env.utils.debounce(() => { /* no-op */ }, 150, timers);
+        debounced();
+        assert.deepStrictEqual(timers.delays, [150]);
+    });
+
+    test('waitMs が不正（NaN）でも 0 へ倒して動く', () => {
+        // setTimeout(fn, NaN) は即時発火してデバウンスが効かなくなる。
+        // 0 は「次のタスクへ回す」という正当な指定なので弾かない
+        const timers = fakeTimers();
+        const debounced = env.utils.debounce(() => { /* no-op */ }, NaN, timers);
+        debounced();
+        assert.deepStrictEqual(timers.delays, [0]);
+
+        const zero = fakeTimers();
+        env.utils.debounce(() => { /* no-op */ }, 0, zero)();
+        assert.deepStrictEqual(zero.delays, [0]);
+    });
+
+    test('cancel() の後でも再びスケジュールできる', () => {
+        // cancel が timerId を戻し忘れると、以降 clear されず
+        // デバウンスが効かなくなる／cancel が二度と効かなくなる
+        const timers = fakeTimers();
+        let calls = 0;
+        const debounced = env.utils.debounce(() => { calls++; }, 150, timers);
+
+        debounced();
+        debounced.cancel();
+        debounced();
+        debounced();
+        assert.strictEqual(timers.pending, 1, 'cancel後にタイマーが積み上がっている');
+        timers.run();
+        assert.strictEqual(calls, 1);
+
+        // 2度目の cancel も効く
+        debounced();
+        debounced.cancel();
+        timers.run();
+        assert.strictEqual(calls, 1, 'cancel後に実行されている');
+    });
+
+    test('最後の呼び出しの引数で実行される', () => {
+        const timers = fakeTimers();
+        const received: unknown[] = [];
+        const debounced = env.utils.debounce((...args: unknown[]) => {
+            received.push(...args);
+        }, 150, timers);
+
+        debounced('a');
+        debounced('b', 2);
+        timers.run();
+        assert.deepStrictEqual(received, ['b', 2]);
+    });
+
+    test('待ち時間が経過するたびに実行される（1回きりではない）', () => {
+        const timers = fakeTimers();
+        let calls = 0;
+        const debounced = env.utils.debounce(() => { calls++; }, 150, timers);
+
+        debounced();
+        timers.run();
+        assert.strictEqual(calls, 1);
+
+        debounced();
+        timers.run();
+        assert.strictEqual(calls, 2);
+    });
+
+    test('cancel() で保留中の実行を取り消せる', () => {
+        const timers = fakeTimers();
+        let calls = 0;
+        const debounced = env.utils.debounce(() => { calls++; }, 150, timers);
+
+        debounced();
+        assert.strictEqual(timers.pending, 1);
+        debounced.cancel();
+        assert.strictEqual(timers.pending, 0, 'タイマーが残っている');
+
+        timers.run();
+        assert.strictEqual(calls, 0, 'cancel 後に実行されている');
+    });
+
+    test('cancel() は保留が無くても安全に呼べる', () => {
+        const timers = fakeTimers();
+        const debounced = env.utils.debounce(() => { /* no-op */ }, 150, timers);
+        debounced.cancel();
+        debounced.cancel();
     });
 });

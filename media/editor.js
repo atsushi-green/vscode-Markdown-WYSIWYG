@@ -196,6 +196,68 @@
     }
 
     /**
+     * 印刷前に描画完了を待つ上限時間。これを超えたら待たずに印刷ダイアログを開く
+     * （図が欠けても「押しても何も起きない」よりは良い）。
+     */
+    const PRINT_RENDER_TIMEOUT_MS = 5000;
+
+    /**
+     * 印刷（PDFとして出力）を実行する。
+     *
+     * **Rawモード表示中はWYSIWYG表示へ戻してから印刷する。** Rawモードでは
+     * `#wysiwygEditorWrap` がインラインスタイルで `display:none` になっており、
+     * 印刷用スタイル（`@media print`）は `#rawEditor` の方を隠すため、
+     * そのまま印刷すると**白紙になる**。
+     *
+     * Mermaid図・数式（KaTeX）・ローカル画像は非同期に描画されるため、
+     * `utils.waitForRenderComplete` で完了を待ってから印刷ダイアログを開く
+     * （待たないと図や式が欠けたPDFになる。とくにRawモードから戻した直後は
+     * フル再描画が走る）。待ち合わせは失敗しても reject せず、上限時間で必ず
+     * 解決するので「押しても何も起きない」状態にはならない。
+     */
+    function exportPdf() {
+        const wasRawMode = state.isRawMode;
+        if (wasRawMode) {
+            toggleRawMode();
+            // 印刷が終わったら元のRaw表示へ戻す（編集中だったモードを勝手に変えない）。
+            // `afterprint` が発火しない環境ではWYSIWYG表示のまま残るが、
+            // 内容は失われないため実害は無い。
+            window.addEventListener('afterprint', () => {
+                if (!state.isRawMode) {
+                    toggleRawMode();
+                }
+            }, { once: true });
+        }
+        // Mermaid図・数式（KaTeXのWebフォント）・画像は遅れて描画されるため、
+        // 完了を待ってから印刷ダイアログを開く。待たないと図・式・画像が欠けた
+        // PDFになる（とくにRawモードから戻した直後はフル再描画が走る）。
+        // `waitForRenderComplete` は失敗しても reject せず、上限時間で必ず解決する。
+        utils.waitForRenderComplete({
+            renderMermaid: () => mermaidModule.render(),
+            fontsReady: (document.fonts && document.fonts.ready) || null,
+            images: state.editor.querySelectorAll('img'),
+            timeoutMs: PRINT_RENDER_TIMEOUT_MS
+        }).then(() => {
+            // 直前のDOM変更が反映されてから開く（レイアウト確定待ち）
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    window.print();
+                });
+            });
+        });
+    }
+
+    /**
+     * 印刷（PDFとして出力）ボタンの設定。
+     */
+    function setupExportPdf() {
+        if (!state.exportPdfBtn) {
+            return;
+        }
+        state.exportPdfBtn.addEventListener('click', exportPdf);
+    }
+
+    /**
      * 行折り返しトグルボタンの設定。
      */
     function setupRawWrapToggle() {
@@ -306,7 +368,13 @@
      */
     function showWysiwygLineGutter() {
         if (wysiwygEditorWrap) {
-            wysiwygEditorWrap.style.display = 'flex';
+            // `display:flex` を**インラインで書かない**。クラス `.wysiwyg-editor-wrap`
+            // が既に `display:flex` を持っており、インラインスタイルはカスケード上
+            // クラスより強いため、書き込むと印刷用スタイル
+            // （`@media print { .wysiwyg-editor-wrap { display:block } }`）に勝ってしまう。
+            // その結果「一度Rawへ切り替えて戻した後の印刷」で本文がフレックスアイテムの
+            // まま用紙へ出る（1/4で意図した用紙幅いっぱいのブロック配置が無効化される）。
+            wysiwygEditorWrap.style.display = '';
         }
         updateWysiwygLineGutter();
     }
@@ -343,6 +411,19 @@
         ed.addEventListener('scroll', scheduleHeadingBreadcrumbUpdate);
         updateHeadingBreadcrumb();
     }
+
+    /**
+     * 入力イベントからのパンくず更新をデバウンスする。
+     *
+     * `updateHeadingBreadcrumb` は見出しの数だけ `getBoundingClientRect` を呼ぶため、
+     * キー入力のたびに同期実行すると見出しの多い文書でタイピングが引っかかる。
+     * 同じ入力イベントで走る行番号ガター更新（`scheduleWysiwygGutterUpdate`）と
+     * 同じ150msでまとめる。
+     *
+     * スクロール由来の更新は下の rAF 間引き（`scheduleHeadingBreadcrumbUpdate`）の
+     * ままにする——スクロールは追従が遅れると体感で分かるため、150ms待たせない。
+     */
+    const debounceHeadingBreadcrumbUpdate = utils.debounce(updateHeadingBreadcrumb, 150);
 
     /**
      * スクロールイベントの間引き（rAF）。スクロール中に何度も呼ばれても
@@ -769,6 +850,7 @@
 
         // Rawモードの行折り返しトグルボタン
         setupRawWrapToggle();
+        setupExportPdf();
 
         // グローバルキーボードショートカット
         setupGlobalKeyboardShortcuts();
@@ -905,8 +987,9 @@
             // 行番号ガターを更新（変換コストが高いためデバウンス）
             scheduleWysiwygGutterUpdate();
 
-            // 見出しパンくずバーを更新（見出しの追加・削除・移動に追従）
-            updateHeadingBreadcrumb();
+            // 見出しパンくずバーを更新（見出しの追加・削除・移動に追従）。
+            // 入力のたびに同期実行すると重いためデバウンスする
+            debounceHeadingBreadcrumbUpdate();
 
             // 文書への書き戻し（変換コストが高いためデバウンス）
             if (editSyncTimeout) {
@@ -1111,6 +1194,10 @@
                     break;
                 case 'insertImagePath':
                     handleInsertImagePath(message);
+                    break;
+                case 'print':
+                    // コマンドパレットの「Markdown: PDFとして出力」から届く
+                    exportPdf();
                     break;
             }
         });

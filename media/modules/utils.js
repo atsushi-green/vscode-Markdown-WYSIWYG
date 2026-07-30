@@ -8,6 +8,129 @@ window.EditorUtils = (function() {
     const state = window.EditorState;
 
     /**
+     * 遅れて描画される要素の完了を待つ（印刷前の待ち合わせ用）。
+     *
+     * Mermaid図は `mermaid.render()` が非同期、数式（KaTeX）は描画自体は同期だが
+     * **Webフォントの読み込みが終わるまで字形が確定しない**、ローカル画像は
+     * webview URI へ差し替えたあと実際に読み込まれるまで空のままになる。
+     * これらを待たずに `window.print()` を呼ぶと、図・式・画像が欠けたPDFになる。
+     *
+     * **決して reject せず、必ず `timeoutMs` 以内に解決する**。印刷は
+     * 「多少崩れても実行される」ほうが「何も起きない」より良いため、
+     * 個々の待ち対象が失敗しても握りつぶして先へ進む。
+     *
+     * 依存はすべて引数で受け取る（呼び出し側が実物を渡し、テストは偽物を渡せる）。
+     * @param {Object} [deps]
+     * @param {function(): (Promise|undefined)} [deps.renderMermaid] Mermaid再描画（Promiseを返す）
+     * @param {Promise} [deps.fontsReady] `document.fonts.ready` 相当
+     * @param {ArrayLike<HTMLImageElement>} [deps.images] 読み込み待ちする画像
+     * @param {number} [deps.timeoutMs=5000] 全体の上限。超えたら待たずに解決する
+     * @param {function(function(), number): *} [deps.setTimeoutFn] タイマー（テスト用）
+     * @param {function(*): void} [deps.clearTimeoutFn] タイマー解除（テスト用）
+     * @returns {Promise<void>}
+     */
+    function waitForRenderComplete(deps) {
+        const d = deps || {};
+        // NaN や 0以下は「上限指定なし」とみなして既定値へ倒す
+        // （`setTimeout(fn, NaN)` は即時発火＝待ち合わせが丸ごと無効になるため）
+        const timeoutMs = Number.isFinite(d.timeoutMs) && d.timeoutMs > 0
+            ? d.timeoutMs
+            : 5000;
+        const setTimeoutFn = d.setTimeoutFn || setTimeout;
+        const clearTimeoutFn = d.clearTimeoutFn || clearTimeout;
+        const tasks = [];
+
+        if (typeof d.renderMermaid === 'function') {
+            // 同期例外もここで拾う（Promise化して以降の握りつぶしに乗せる）
+            tasks.push(new Promise(function(resolve) {
+                resolve(d.renderMermaid());
+            }));
+        }
+        if (d.fontsReady && typeof d.fontsReady.then === 'function') {
+            tasks.push(d.fontsReady);
+        }
+        if (d.images) {
+            Array.prototype.forEach.call(d.images, function(img) {
+                // 読み込み済み（complete）はそのまま。デコード前でも印刷までには間に合う
+                if (!img || img.complete) {
+                    return;
+                }
+                tasks.push(new Promise(function(resolve) {
+                    // error でも resolve する（1枚の失敗で印刷全体を止めない）
+                    img.addEventListener('load', resolve, { once: true });
+                    img.addEventListener('error', resolve, { once: true });
+                }));
+            });
+        }
+
+        const all = Promise.all(tasks.map(function(t) {
+            return Promise.resolve(t).catch(function() { /* 失敗しても先へ進む */ });
+        }));
+        let timerId = null;
+        const timeout = new Promise(function(resolve) {
+            timerId = setTimeoutFn(resolve, timeoutMs);
+        });
+        return Promise.race([all, timeout]).then(function() {
+            // 待ち対象が先に終わった場合、上限タイマーは不要なので片付ける
+            if (timerId !== null) {
+                clearTimeoutFn(timerId);
+            }
+        });
+    }
+
+    /**
+     * 関数をデバウンスする（最後の呼び出しから `waitMs` 経過してから1度だけ実行）。
+     *
+     * キー入力のたびに走る重い処理（見出しパンくずの再計算は見出し数分の
+     * `getBoundingClientRect` を伴う）を、入力が落ち着いてから1回にまとめるために使う。
+     *
+     * 返す関数は `cancel()` を持ち、保留中の実行を取り消せる（モード切替や破棄時に
+     * 遅れて発火するのを止めたい場合に使う）。パンくず更新の用途では
+     * `updateHeadingBreadcrumb` 自身が Raw モードを見て早期 return するため
+     * 現時点で呼び出し箇所は無いが、遅延実行を止めたい別の用途のために用意している。
+     *
+     * @param {function(...*): void} fn 実行したい関数
+     * @param {number} waitMs 待ち時間（ミリ秒）
+     * @param {Object} [timers] タイマー関数（テストから差し替えるための注入口）
+     * @param {function(function(), number): *} [timers.setTimeoutFn]
+     * @param {function(*): void} [timers.clearTimeoutFn]
+     * @returns {function(...*): void} デバウンスされた関数（`cancel` プロパティ付き）
+     */
+    function debounce(fn, waitMs, timers) {
+        const t = timers || {};
+        const setTimeoutFn = t.setTimeoutFn || setTimeout;
+        const clearTimeoutFn = t.clearTimeoutFn || clearTimeout;
+        // NaN などが来ると `setTimeout(fn, NaN)` が即時発火してデバウンスが効かなくなる。
+        // 0 は「次のタスクへ回す」という正当な指定なので許す（`waitForRenderComplete`
+        // が 0 を弾くのは、あちらでは 0 = 待ち合わせ無効を意味するため）。
+        const delay = Number.isFinite(waitMs) && waitMs >= 0 ? waitMs : 0;
+        // 注入された setTimeout が undefined/0 を返す場合も「保留中」を正しく扱えるよう
+        // 未スケジュール状態は undefined ではなく null で持ち、比較も `!= null` にする
+        let timerId = null;
+
+        function debounced() {
+            const args = Array.prototype.slice.call(arguments);
+            const self = this;
+            if (timerId != null) {
+                clearTimeoutFn(timerId);
+            }
+            timerId = setTimeoutFn(function () {
+                timerId = null;
+                fn.apply(self, args);
+            }, delay);
+        }
+
+        debounced.cancel = function () {
+            if (timerId != null) {
+                clearTimeoutFn(timerId);
+                timerId = null;
+            }
+        };
+
+        return debounced;
+    }
+
+    /**
      * 改行コードをLFへ正規化
      */
     function normalizeEol(text) {
@@ -513,6 +636,8 @@ window.EditorUtils = (function() {
 
     // 公開API
     return {
+        debounce: debounce,
+        waitForRenderComplete: waitForRenderComplete,
         normalizeEol: normalizeEol,
         countText: countText,
         countLines: countLines,

@@ -73,10 +73,19 @@ suite('拡張機能の統合テスト', () => {
             'markdown-wysiwyg-editor.openEditor',
             'markdown-wysiwyg-editor.openAsText',
             'markdown-wysiwyg-editor.toggleEditor',
-            'markdown-wysiwyg-editor.newMarkdownFile'
+            'markdown-wysiwyg-editor.newMarkdownFile',
+            'markdown-wysiwyg-editor.exportPdf'
         ]) {
             assert.ok(commands.includes(command), `コマンド未登録: ${command}`);
         }
+    });
+
+    test('exportPdf: WYSIWYGエディタが非アクティブでも例外を投げない', async () => {
+        // アクティブなWebviewパネルが無い場合は案内メッセージを出して終わる。
+        // 実行が例外で落ちないこと（＝コマンドとして常に安全に呼べること）を確認する
+        await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('markdown-wysiwyg-editor.exportPdf');
     });
 
     test('openEditor: MarkdownファイルをWYSIWYGエディタで開く', async () => {
