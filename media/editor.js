@@ -176,6 +176,22 @@
     }
 
     /**
+     * ツールバーの表示設定（`state.isToolbarVisible`）をDOMへ反映する。
+     *
+     * 表示/非表示は VS Code の設定 `markdownWysiwyg.showToolbar` が持ち（セッションを
+     * 跨いで保たれる）、拡張機能側から `setToolbarVisible` メッセージで届く。
+     * `.toolbar` へ直接インラインスタイルを書かず `<body>` のクラスで切り替えるのは、
+     * 印刷用スタイル（`@media print` はツールバーを常に隠す）と競合させないため。
+     */
+    function applyToolbarVisibility() {
+        document.body.classList.toggle('toolbar-hidden', !state.isToolbarVisible);
+        // パンくずバーの再計算は不要。`.heading-breadcrumb-bar` は通常フローの
+        // flex 子要素で位置はレイアウトが自動追従し、`updateHeadingBreadcrumb` も
+        // バーの位置を書き換えず `#editor` の矩形とスクロール量の**相対値**だけで
+        // 現在見出しを決めるため、ツールバーの高さ変化に依存しない。
+    }
+
+    /**
      * Rawモードの行折り返し設定（state.isRawWrapEnabled）を実際のDOM・ボタン表示へ反映する。
      * ONにすると`.raw-wrap-on`クラス経由で`#rawEditor`を`white-space: pre-wrap`へ切り替え
      * 長い行を折り返す。行番号ガターは「論理行1つ＝固定22px」の前提で作られており、
@@ -1131,6 +1147,10 @@
                     break;
                 case 'insertImagePath':
                     handleInsertImagePath(message);
+                    break;
+                case 'setToolbarVisible':
+                    state.isToolbarVisible = message.visible !== false;
+                    applyToolbarVisibility();
                     break;
             }
         });

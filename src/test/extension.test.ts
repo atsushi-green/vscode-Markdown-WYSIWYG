@@ -54,7 +54,8 @@ const REGISTERED_COMMANDS = [
     'markdown-wysiwyg-editor.openEditor',
     'markdown-wysiwyg-editor.openAsText',
     'markdown-wysiwyg-editor.toggleEditor',
-    'markdown-wysiwyg-editor.newMarkdownFile'
+    'markdown-wysiwyg-editor.newMarkdownFile',
+    'markdown-wysiwyg-editor.toggleToolbar'
 ];
 
 suite('拡張機能の統合テスト', () => {
@@ -97,6 +98,23 @@ suite('拡張機能の統合テスト', () => {
                 `package.json で宣言されているが登録されていない: ${command}`
             );
         }
+    });
+
+    test('設定 showToolbar の宣言とコード側の定数・既定値が一致している', () => {
+        // 設定キーは package.json（contributes.configuration）と markdownEditor.ts の
+        // 定数で二重管理になっており、片方をリネーム/タイプミスしても TypeScript は
+        // 検出できない（「設定UIには出るが効かない」状態になる）。
+        // 既定値も、Webview側の初期状態（state.isToolbarVisible = true）と揃っている
+        // 必要がある——ズレると設定を触っていない利用者の初期表示が食い違う
+        const pkg = vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON;
+        const props = pkg.contributes?.configuration?.properties ?? {};
+        const key = MarkdownEditorProvider.showToolbarSetting;
+        assert.ok(
+            Object.prototype.hasOwnProperty.call(props, key),
+            `package.json に設定 ${key} の宣言が無い`
+        );
+        assert.strictEqual(props[key].type, 'boolean');
+        assert.strictEqual(props[key].default, true, '既定値が Webview 側の初期状態と違う');
     });
 
     test('撤去した exportPdf コマンドが復活していない', async () => {

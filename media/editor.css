@@ -12,6 +12,21 @@ body {
     flex-direction: column;
 }
 
+/* ツールバーの非表示（設定 markdownWysiwyg.showToolbar）。
+   `.toolbar` へインラインスタイルを書かず body のクラスで切り替える——
+   インラインスタイルはカスケード上どのルールより強く、`showWysiwygLineGutter` が
+   `display:flex` をインラインで書いていたせいで印刷用スタイルが無効化された前例が
+   あるため、状態の切り替えはクラスで表現する方針にしている。 */
+body.toolbar-hidden .toolbar {
+    display: none;
+}
+
+/* 検索ウィジェットの上端はツールバーの高さ（48px）を見込んだ固定値なので、
+   ツールバーを隠したときは本文へ食い込まないよう詰める。 */
+body.toolbar-hidden .find-widget {
+    top: 0;
+}
+
 /* ツールバー */
 .toolbar {
     display: flex;

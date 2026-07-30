@@ -15,6 +15,16 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 
     public static readonly viewType = 'markdownWysiwyg.editor';
 
+    /** ツールバーの表示/非表示を保持する設定キー（`contributes.configuration` と対応） */
+    public static readonly showToolbarSetting = 'markdownWysiwyg.showToolbar';
+
+    /** 設定「ツールバーを表示する」の現在値（未設定なら既定の true） */
+    private static isToolbarVisible(): boolean {
+        return vscode.workspace
+            .getConfiguration()
+            .get<boolean>(MarkdownEditorProvider.showToolbarSetting, true);
+    }
+
     private static readonly scratchPad: Set<string> = new Set();
 
     constructor(
@@ -68,6 +78,21 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         // Webviewの初期HTML設定
         webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
 
+        // ツールバーの表示/非表示は VS Code の設定で持つ（セッションを跨いで保たれる）。
+        // Webview は設定APIを直接読めないため、初期値と変更をメッセージで渡す。
+        const postToolbarVisibility = () => {
+            webviewPanel.webview.postMessage({
+                type: 'setToolbarVisible',
+                visible: MarkdownEditorProvider.isToolbarVisible()
+            });
+        };
+        postToolbarVisibility();
+        const configSubscription = vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration(MarkdownEditorProvider.showToolbarSetting)) {
+                postToolbarVisibility();
+            }
+        });
+
         // Webview が送ってきた編集の seq を、その編集適用に起因するエコー `update`
         // にだけ反映するための保持枠。Webview 側はこの seq を使って「競合する古い
         // エコー」（タイプ中に送った古い編集のエコーが、より新しいローカル編集の後に
@@ -97,6 +122,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         // Webviewが閉じられたときのクリーンアップ
         webviewPanel.onDidDispose(() => {
             changeDocumentSubscription.dispose();
+            configSubscription.dispose();
         });
 
         // Webviewからのメッセージを受信

@@ -48,6 +48,9 @@ window.EditorState = (function() {
         // ONにすると`pre-wrap`で折り返すが、行番号ガターは論理行1つ=固定22px高さの
         // 前提で作られており折り返し時は視覚行とずれるため、ON中はガターを非表示にする。
         isRawWrapEnabled: false,
+        // ツールバーを表示するか（VS Codeの設定 markdownWysiwyg.showToolbar と同期）。
+        // 既定は true で、拡張機能側から setToolbarVisible メッセージで更新される。
+        isToolbarVisible: true,
         isEditingMermaid: false,
         isEditingTable: false,
 
@@ -195,6 +198,9 @@ window.EditorState = (function() {
 
         get isRawWrapEnabled() { return state.isRawWrapEnabled; },
         set isRawWrapEnabled(v) { state.isRawWrapEnabled = v; },
+
+        get isToolbarVisible() { return state.isToolbarVisible; },
+        set isToolbarVisible(v) { state.isToolbarVisible = v; },
 
         get isEditingMermaid() { return state.isEditingMermaid; },
         set isEditingMermaid(v) { state.isEditingMermaid = v; },

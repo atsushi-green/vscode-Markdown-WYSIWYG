@@ -671,6 +671,13 @@ suite('EditorState', () => {
         assert.strictEqual(env.state.editSeq, 1);
     });
 
+    test('isToolbarVisibleは初期値trueで、getter/setterで読み書きできる', () => {
+        // ツールバーは既定で表示。設定 markdownWysiwyg.showToolbar の既定値と揃える
+        assert.strictEqual(env.state.isToolbarVisible, true);
+        env.state.isToolbarVisible = false;
+        assert.strictEqual(env.state.isToolbarVisible, false);
+    });
+
     test('isRawWrapEnabledは初期値falseで、getter/setterで読み書きできる', () => {
         assert.strictEqual(env.state.isRawWrapEnabled, false);
         env.state.isRawWrapEnabled = true;
