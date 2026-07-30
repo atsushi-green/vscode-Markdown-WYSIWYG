@@ -134,7 +134,7 @@ suite('MermaidModule', () => {
     });
 });
 
-suite('render の直列化（印刷前の待ち合わせが効くこと）', () => {
+suite('render の直列化（描画完了の待ち合わせが効くこと）', () => {
     let env: EditorEnv;
 
     setup(() => {

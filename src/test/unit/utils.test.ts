@@ -645,7 +645,6 @@ suite('EditorState', () => {
         assert.ok(env.state.rawEditor);
         assert.ok(env.state.toggleBtn);
         assert.ok(env.state.toggleRawWrapBtn);
-        assert.ok(env.state.exportPdfBtn);
         assert.ok(env.state.findWidget);
         assert.ok(env.state.vscode);
     });

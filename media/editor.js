@@ -196,68 +196,6 @@
     }
 
     /**
-     * 印刷前に描画完了を待つ上限時間。これを超えたら待たずに印刷ダイアログを開く
-     * （図が欠けても「押しても何も起きない」よりは良い）。
-     */
-    const PRINT_RENDER_TIMEOUT_MS = 5000;
-
-    /**
-     * 印刷（PDFとして出力）を実行する。
-     *
-     * **Rawモード表示中はWYSIWYG表示へ戻してから印刷する。** Rawモードでは
-     * `#wysiwygEditorWrap` がインラインスタイルで `display:none` になっており、
-     * 印刷用スタイル（`@media print`）は `#rawEditor` の方を隠すため、
-     * そのまま印刷すると**白紙になる**。
-     *
-     * Mermaid図・数式（KaTeX）・ローカル画像は非同期に描画されるため、
-     * `utils.waitForRenderComplete` で完了を待ってから印刷ダイアログを開く
-     * （待たないと図や式が欠けたPDFになる。とくにRawモードから戻した直後は
-     * フル再描画が走る）。待ち合わせは失敗しても reject せず、上限時間で必ず
-     * 解決するので「押しても何も起きない」状態にはならない。
-     */
-    function exportPdf() {
-        const wasRawMode = state.isRawMode;
-        if (wasRawMode) {
-            toggleRawMode();
-            // 印刷が終わったら元のRaw表示へ戻す（編集中だったモードを勝手に変えない）。
-            // `afterprint` が発火しない環境ではWYSIWYG表示のまま残るが、
-            // 内容は失われないため実害は無い。
-            window.addEventListener('afterprint', () => {
-                if (!state.isRawMode) {
-                    toggleRawMode();
-                }
-            }, { once: true });
-        }
-        // Mermaid図・数式（KaTeXのWebフォント）・画像は遅れて描画されるため、
-        // 完了を待ってから印刷ダイアログを開く。待たないと図・式・画像が欠けた
-        // PDFになる（とくにRawモードから戻した直後はフル再描画が走る）。
-        // `waitForRenderComplete` は失敗しても reject せず、上限時間で必ず解決する。
-        utils.waitForRenderComplete({
-            renderMermaid: () => mermaidModule.render(),
-            fontsReady: (document.fonts && document.fonts.ready) || null,
-            images: state.editor.querySelectorAll('img'),
-            timeoutMs: PRINT_RENDER_TIMEOUT_MS
-        }).then(() => {
-            // 直前のDOM変更が反映されてから開く（レイアウト確定待ち）
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    window.print();
-                });
-            });
-        });
-    }
-
-    /**
-     * 印刷（PDFとして出力）ボタンの設定。
-     */
-    function setupExportPdf() {
-        if (!state.exportPdfBtn) {
-            return;
-        }
-        state.exportPdfBtn.addEventListener('click', exportPdf);
-    }
-
-    /**
      * 行折り返しトグルボタンの設定。
      */
     function setupRawWrapToggle() {
@@ -850,7 +788,6 @@
 
         // Rawモードの行折り返しトグルボタン
         setupRawWrapToggle();
-        setupExportPdf();
 
         // グローバルキーボードショートカット
         setupGlobalKeyboardShortcuts();
@@ -1194,10 +1131,6 @@
                     break;
                 case 'insertImagePath':
                     handleInsertImagePath(message);
-                    break;
-                case 'print':
-                    // コマンドパレットの「Markdown: PDFとして出力」から届く
-                    exportPdf();
                     break;
             }
         });

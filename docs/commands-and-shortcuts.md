@@ -26,7 +26,6 @@
 | 下線 | `Ctrl+U` | `Cmd+U` |
 | 取り消し線 | `Ctrl+Shift+X` | `Cmd+Shift+X` |
 | リンクの挿入・編集 | `Ctrl+K` | `Cmd+K` |
-| PDFとして出力（印刷） | ツールバー 🖨️ / コマンドパレット | 同左 |
 | 目次(TOC)を挿入 | `Ctrl+Shift+O` | `Cmd+Shift+O` |
 
 ### 表示切り替え

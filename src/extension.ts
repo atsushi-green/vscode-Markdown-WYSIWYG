@@ -72,20 +72,6 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	// コマンド: PDFとして出力（アクティブなWYSIWYGエディタの Webview で印刷ダイアログを開く）
-	context.subscriptions.push(
-		vscode.commands.registerCommand('markdown-wysiwyg-editor.exportPdf', () => {
-			// 印刷は Webview 側でしか実行できない（拡張機能ホストからは window.print が無い）ため、
-			// アクティブなパネルへメッセージを送って editor.js に実行させる
-			const sent = MarkdownEditorProvider.postToActivePanel({ type: 'print' });
-			if (!sent) {
-				vscode.window.showInformationMessage(
-					'WYSIWYGエディタをアクティブにしてからこのコマンドを実行してください。'
-				);
-			}
-		})
-	);
-
 	// コマンド: エディタ切り替え (WYSIWYG/テキスト)
 	context.subscriptions.push(
 		vscode.commands.registerCommand('markdown-wysiwyg-editor.toggleEditor', async () => {

@@ -17,35 +17,6 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 
     private static readonly scratchPad: Set<string> = new Set();
 
-    /**
-     * 現在開いている Webview パネル。コマンドパレットからの「PDFとして出力」で
-     * **アクティブなエディタの Webview** へ印刷を指示するために保持する
-     * （`resolveCustomTextEditor` はパネルごとに呼ばれ、破棄時に取り除く）。
-     */
-    private static readonly panels: Set<vscode.WebviewPanel> = new Set();
-
-    /**
-     * アクティブな WYSIWYG エディタの Webview へメッセージを送る。
-     * アクティブなパネルが無ければ何もせず false を返す（呼び出し側が案内を出す）。
-     */
-    public static postToActivePanel(message: unknown): boolean {
-        for (const panel of MarkdownEditorProvider.panels) {
-            if (panel.active) {
-                panel.webview.postMessage(message);
-                return true;
-            }
-        }
-        // コマンドパレット表示中などにフォーカスが外れて `active` が落ちることがある。
-        // 表示中のパネルがちょうど1枚だけならそれが対象で間違いないので送る
-        // （複数見えている場合はどれを指したのか決められないため案内に委ねる）。
-        const visible = Array.from(MarkdownEditorProvider.panels).filter(p => p.visible);
-        if (visible.length === 1) {
-            visible[0].webview.postMessage(message);
-            return true;
-        }
-        return false;
-    }
-
     constructor(
         private readonly context: vscode.ExtensionContext
     ) { }
@@ -123,12 +94,9 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             }
         });
 
-        MarkdownEditorProvider.panels.add(webviewPanel);
-
         // Webviewが閉じられたときのクリーンアップ
         webviewPanel.onDidDispose(() => {
             changeDocumentSubscription.dispose();
-            MarkdownEditorProvider.panels.delete(webviewPanel);
         });
 
         // Webviewからのメッセージを受信
@@ -286,9 +254,6 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                     <span class="toolbar-separator"></span>
                     <button class="toolbar-btn" data-command="toc" title="目次(TOC)を挿入 (Ctrl+Shift+O)">&#128209;</button>
                     <div class="toolbar-spacer"></div>
-                    <button class="toolbar-btn" id="exportPdf" title="印刷 / PDFとして出力（印刷ダイアログを開きます）">
-                        🖨️ PDF
-                    </button>
                     <button class="toolbar-btn toggle-btn" id="toggleRawWrap" title="Raw表示の行折り返し切替（ONにすると行番号は非表示になります）">
                         ↩️ 折り返し
                     </button>
