@@ -1388,6 +1388,24 @@
                 return;
             }
 
+            // Alt+Z でRawモードの行折り返しを切り替え。ツールバーを隠すと
+            // この操作だけ他に到達手段が無くなるため用意している（他のボタンは
+            // Markdown記法の入力か既存のショートカットで到達できる）。
+            //
+            // **Rawモード表示中だけ有効にする**。理由は2つ:
+            // (1) 折り返し設定はRaw表示にしか効かないので、WYSIWYG中に押しても
+            //     何も起きない。しかもツールバーを隠していればボタンの見た目も
+            //     変わらず、内部状態だけが黙って反転してしまう。
+            // (2) macOSでは Option+Z が本来 `Ω` を入力する。ここで無条件に
+            //     preventDefault すると WYSIWYG本文でも `Ω` が打てなくなるため、
+            //     効果のあるRawモードでだけ奪う。
+            if (state.isRawMode && commands.isRawWrapShortcut(e)) {
+                e.preventDefault();
+                state.isRawWrapEnabled = !state.isRawWrapEnabled;
+                applyRawWrapMode();
+                return;
+            }
+
             // Ctrl+F (Cmd+F) で検索ウィジェットを開く
             if (mod && e.key.toLowerCase() === 'f') {
                 e.preventDefault();

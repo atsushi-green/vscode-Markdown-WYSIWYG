@@ -27,6 +27,7 @@
 | 取り消し線 | `Ctrl+Shift+X` | `Cmd+Shift+X` |
 | リンクの挿入・編集 | `Ctrl+K` | `Cmd+K` |
 | ツールバーの表示/非表示 | コマンドパレット | 同左 |
+| Raw表示の行折り返し切替（**Raw表示中のみ**） | `Alt+Z` | `Option+Z` |
 | 目次(TOC)を挿入 | `Ctrl+Shift+O` | `Cmd+Shift+O` |
 
 ### 表示切り替え

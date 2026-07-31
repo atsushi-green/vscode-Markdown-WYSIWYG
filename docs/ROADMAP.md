@@ -19,12 +19,12 @@
 
 | 状態 | 不具合 | サイズ | メモ |
 |------|--------|--------|------|
+| todo | 検索オプションのショートカット `Alt+C`/`Alt+W`/`Alt+R` が macOS で効かない | S | `editor.js` の判定が `e.key === 'c'|'w'|'r'` なので、macOS の Option+C/W/R では `key` が `ç`/`∑`/`®` になり**発火しない**。それでいて `README.md` と `docs/commands-and-shortcuts.md` は `Opt+C` 等として公開しており、"効くと書いてあるのに効かない"状態。行折り返しトグル（`Alt+Z`）で採った `event.code` 基準（`KeyC`/`KeyW`/`KeyR`）へ揃えれば直る。**あわせて検討**: `code` 基準にすると macOS で Option+C 等が本来入力する文字（`ç` 等）を奪うため、検索ウィジェットが開いているときだけ有効にする等のガードが要る（`Alt+Z` は「Rawモード中だけ」で解決した）。`/local-review` B-1 由来（severity medium） |
 
 ## 優先度: 中
 
 | 状態 | 機能 | サイズ | メモ |
 |------|------|--------|------|
-| todo | ツールバーを隠しても操作に困らないよう、キーボード／コマンドの導線を揃える | S | **ツールバーの非表示が実装されたので現実の問題になった。** 調査の結果、ツールバーにしか到達手段が無い操作は `#toggleRawWrap`（Raw行折り返し）・H1/H2/H3・箇条書き/番号付き/引用・リンク挿入・コードブロックの各ボタン（B/I/U/S は `Ctrl+B` 等、Raw切替は `Ctrl+/`、目次は `Ctrl+Shift+O` があるので救われる）。**ツールバーを戻す導線もコマンドパレットだけ**で Webview 内には無い。キーバインドを足す／「/」コマンドメニューへ項目を足す／Webview内に小さな復帰トグルを置く、などを検討し、`docs/commands-and-shortcuts.md` の表も更新する。`/local-review` B-1 由来（severity medium） |
 | todo | 表のコピーを Teams / Slack / Excel へ綺麗に貼れるようにする（`text/html` の整形） | M | **利用者からの要望**。矩形範囲コピーは既に `text/plain`（TSV）と `text/html` の両方をクリップボードへ書いている（`table.js` の `writeToClipboard`）が、`buildHtmlTableFragment` が**セルの `innerHTML` をそのまま使う**ため貼り付け先で崩れる。具体的な混入物: (1) インライン数式の `<span class="math-inline" data-math="…" contenteditable="false">`（KaTeXの生成DOMごと入る／貼り付け先では意味を成さない）、(2) **画像の `src` が webview URI（`vscode-webview://…`）に解決済み**なので貼り付け先では表示できない（`data-original-src` に元の相対パスが残っているが、外部から見れば相対パスも解決できない）、(3) 検索中の `<span class="find-highlight">`・キャレット位置の `<span class="raw-markdown">` など**編集中だけ意味を持つ要素**、(4) 脚注参照の `<sup class="footnote-ref"><a href="#fn-…">`（リンク先が無効）。また `<table>` に罫線の指定が無いため Teams では枠線の無い表になり、ヘッダー行も `<thead>`/`<th>` ではなく全行が `<tbody>` に入る。**やること**: 貼り付け用にセル内容をサニタイズする純粋関数を用意し（数式は `data-math` の式テキストへ、`raw-markdown`/`find-highlight` は中身のテキストへ、`contenteditable`/`data-*` 属性は削除、画像は `file:` 絶対パスか data URI へ変換できなければ alt テキストへ）、`border`/`border-collapse` の最低限のインラインスタイルを付け、範囲が1行目を含む場合は `<thead>`+`<th>` にする。Mermaid図・ブロック数式はセル内に入らないので対象外。**貼り付け結果は実機確認が必須**（Teams・Slack・Excel それぞれ挙動が違う） |
 | todo | 表のコピーの `text/plain` を貼り付け先に応じて読みやすくする | S | 上の項目とセット。Slack のように `text/html` を捨てて `text/plain` を使う貼り付け先では、現在の TSV（`buildTsvFromMatrix`）はタブ幅が揃わず読みにくい塊になる。Excel は TSV をそのままセルへ展開できるので**TSVを捨てることはできない**——どちらを優先するかの判断が要る（例: TSVのままにして「Markdown表としてコピー」を別メニューに足す、あるいは列幅を揃えたMarkdown表にしてExcel側はHTML経由に任せる）。あわせて既存の todo「`buildTsvFromMatrix` がセル内のタブ・改行文字をエスケープしない」もこの作業でまとめて解消できる（セル内にタブ・改行があると貼り付け先で列・行がずれる）。**貼り付け結果は実機確認が必須** |
 
@@ -66,6 +66,8 @@
 | todo | 手書きのデバウンス実装を `utils.debounce` へ寄せる | S | `utils.debounce`（パンくず更新のデバウンス対応で新設）と同型の手書き実装が各所に残っている: `editor.js` の `scheduleWysiwygGutterUpdate`（150ms・パンくずと「同じ150ms」とコメントで対応づけているのに実装は別）・`editSyncTimeout`（2箇所）・脚注ツールチップ、`mermaid.js`・`table.js` にも1つずつ。`utils.debounce` へ寄せると挙動（cancel の有無・タイマー管理）が揃い、テスト済みの実装に一本化できる。`/local-review` B-1 由来（severity low） |
 | todo | Webview の HTML とテスト用フィクスチャの二重管理を検知できるようにする | S | ツールバーの項目を足し引きするたびに `src/markdownEditor.ts` の生成HTMLと `src/test/unit/helper.ts` のフィクスチャを手で揃えており、ズレても気付ける仕組みが無い（`print-css.test.ts` のような静的検証は `@media print` にしかない）。実際に 🖨️ ボタンの追加・撤去の両方で毎回2ファイルを手直ししている。`markdownEditor.ts` からツールバーのHTMLを取り出してフィクスチャと突き合わせる静的テスト、あるいはフィクスチャ生成の共通化を検討する。`/local-review` B-3 由来（severity low、既存の構造問題） |
 | todo | `toggleToolbar` コマンドを commandPalette の `when` 句で絞るか決める | S | `package.json` の `contributes.menus.commandPalette` は既存4コマンドのうち3つを `resourceLangId == markdown` で絞っているが、`markdown-wysiwyg-editor.toggleToolbar` は未登録なので常時パレットに出る。グローバル設定のトグルなので「どこからでも切り替えたい」とも読めるが、既存方針との一貫性としては要判断。**絞る場合は注意**: カスタムエディタがアクティブなときに `resourceLangId` が期待どおり効くか（`toggleEditor` が WYSIWYG 表示中に隠れないか）を実機で確認してから入れること。`/local-review` B-2 由来（severity low） |
+| todo | ツールバーを隠したときに戻す導線を Webview 内にも用意する | S | ツールバーの表示/非表示は設定とコマンドパレットからしか操作できず、隠した状態の Webview 内には戻す手掛かりが無い。「/」コマンドメニューへ項目を足す、エディタ右上に小さな復帰ハンドルを置く、などを検討する。**なおボタンの各操作自体は隠しても到達できる**ことは確認済み（見出し・リスト・引用・コードブロックは行頭のMarkdown記法がライブ変換され、太字等・リンク・目次・Raw切替・行折り返しはショートカットがある）。`/local-review` B-3 由来（severity low） |
+| todo | グローバルショートカットの判定を純粋関数へ揃える | S | `Alt+Z`（行折り返し）だけ判定を `commands.isRawWrapShortcut` として切り出しユニットテストを付けたが、他のショートカット（`Ctrl+/`・`Ctrl+F`・`Alt+C/W/R` 等）の判定は `editor.js` にインラインのままで基準が二重になっている。テスト可能性のために切り出す方針で揃えるか、`Alt+Z` を例外扱いとするかを決める。`/local-review` B-2 由来（severity low） |
 
 ## 完了 (done)
 

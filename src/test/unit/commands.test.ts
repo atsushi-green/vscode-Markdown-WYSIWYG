@@ -2791,3 +2791,65 @@ suite('CommandsModule', () => {
         });
     });
 });
+
+suite('isRawWrapShortcut（行折り返しトグルのショートカット判定）', () => {
+    let env: EditorEnv;
+
+    setup(() => {
+        env = createEditorEnv();
+    });
+
+    /** キーイベント相当のオブジェクトを作る（既定は Alt+Z） */
+    const ev = (over: Record<string, unknown> = {}) => ({
+        altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, code: 'KeyZ',
+        ...over
+    });
+
+    test('Alt+Z を受け付ける', () => {
+        assert.strictEqual(env.commands.isRawWrapShortcut(ev()), true);
+    });
+
+    test('macOS で key が Ω になっても code で判定するので反応する', () => {
+        // Option+Z の key は 'Ω'。key を見る実装だと macOS で動かない
+        assert.strictEqual(
+            env.commands.isRawWrapShortcut(ev({ key: 'Ω' })), true
+        );
+    });
+
+    test('Alt が無ければ反応しない', () => {
+        assert.strictEqual(env.commands.isRawWrapShortcut(ev({ altKey: false })), false);
+    });
+
+    test('他の修飾キーが同時に押されていれば反応しない', () => {
+        // 別のショートカットとの取り違えを防ぐ
+        for (const over of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
+            assert.strictEqual(
+                env.commands.isRawWrapShortcut(ev(over)), false,
+                `${JSON.stringify(over)} で反応している`
+            );
+        }
+    });
+
+    test('別のキーでは反応しない', () => {
+        assert.strictEqual(env.commands.isRawWrapShortcut(ev({ code: 'KeyX' })), false);
+    });
+
+    test('IME変換中（isComposing）は反応しない', () => {
+        // 日本語入力の変換操作を preventDefault で妨げないため
+        assert.strictEqual(
+            env.commands.isRawWrapShortcut(ev({ isComposing: true })), false
+        );
+    });
+
+    test('code が無いイベントでは反応しない', () => {
+        // 判定が event.code に依存していることを明示する
+        const noCode = ev();
+        delete (noCode as { code?: string }).code;
+        assert.strictEqual(env.commands.isRawWrapShortcut(noCode), false);
+    });
+
+    test('null / undefined でも例外を投げない', () => {
+        assert.strictEqual(env.commands.isRawWrapShortcut(null), false);
+        assert.strictEqual(env.commands.isRawWrapShortcut(undefined), false);
+    });
+});
