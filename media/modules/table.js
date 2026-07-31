@@ -702,28 +702,159 @@ window.TableModule = (function() {
         return matrix.map(row => row.join('\t')).join('\n');
     }
 
+    /** 貼り付け先で罫線が出るよう、最低限のインラインスタイルを付ける（Teams等はCSSを持たない） */
+    // 貼り付け先（Teams/Slack/Excel等）でもそのまま解決できる画像のsrc。
+    // ローカルファイル参照は webview URI へ解決済みで外からは見えないため対象外
+    const PASTEABLE_IMAGE_SRC = /^\s*(?:data|https?|file):/i;
+
+    const CLIPBOARD_TABLE_STYLE = 'border-collapse:collapse;';
+    const CLIPBOARD_CELL_STYLE = 'border:1px solid #999;padding:4px 8px;';
+
+    /**
+     * セルの内容を**貼り付け先で意味のあるHTML**へ整える（渡されたノードを直接書き換える
+     * ので、呼び出し側は必ずクローンを渡すこと）。
+     *
+     * エディタ内のセルには、そのまま外へ出すと壊れる／無意味なマークアップが含まれる:
+     * - インライン数式 `<span class="math-inline" data-math="…" contenteditable="false">`
+     *   （KaTeXの生成DOMごと入る）→ 元の `$式$` テキストへ戻す
+     * - キャレット位置の生Markdown表示 `.raw-markdown`・検索ハイライト `.find-highlight`
+     *   → **編集中だけ意味を持つ**ので中身のテキストだけ残す
+     * - 脚注参照 `<sup class="footnote-ref"><a href="#fn-…">` → リンク先が無効なので
+     *   `<sup>ラベル</sup>` だけにする
+     * - 画像はローカルファイル参照だと **webview URI（`vscode-webview://…`）に解決済み**で
+     *   貼り付け先からは表示できない（`data-original-src` の相対パスも外からは解決不能）
+     *   → alt テキストへ置き換える。逆に貼り付け先でもそのまま解決できるスキーム
+     *   （`data:`/`http:`/`https:`/`file:`）はそのまま残す
+     * - 文書内アンカー `<a href="#…">`（目次リンク等）→ 外では飛べないのでリンクを外す
+     * - `contenteditable`/`class`/`id`/`tabindex`/`data-*` は貼り付け先に不要なので落とす
+     *
+     * `.raw-markdown` については、キャレットのあるセルは `**素**` のような生記法が
+     * 展開表示されているため、そのままの文字列が貼り付け先へ行く。中身を消すよりは
+     * マシという割り切りで、装飾済みの形へ戻すことまではしていない。
+     *
+     * @param {Element} el クローン済みのセル要素（この関数が書き換える）
+     * @returns {Element} 同じ要素（呼び出しの繋げやすさのため返す）
+     */
+    function sanitizeCellForClipboard(el) {
+        if (!el) {
+            return el;
+        }
+        const doc = el.ownerDocument;
+
+        /** 要素を任意のノード列で置き換える */
+        const replaceWith = (node, replacement) => {
+            if (node.parentNode) {
+                node.parentNode.replaceChild(replacement, node);
+            }
+        };
+        /** 要素を外して中身だけ残す */
+        const unwrap = (node) => {
+            // 先に子を移してから置換するので、親を持たないノードに対して呼ぶと
+            // 中身が黙って消える。順序に依存しないよう先頭で弾く
+            if (!node.parentNode) {
+                return;
+            }
+            const frag = doc.createDocumentFragment();
+            while (node.firstChild) {
+                frag.appendChild(node.firstChild);
+            }
+            replaceWith(node, frag);
+        };
+
+        // 数式は元の `$式$`（ブロックは `$$式$$`）テキストへ戻す
+        // （data-math が生の式の唯一の正。KaTeXの生成DOMのtextContentは
+        // MathML注釈と視覚用HTMLが二重に取れてしまい使えない）
+        Array.from(el.querySelectorAll('.math-inline, .math-block')).forEach(node => {
+            const expr = node.getAttribute('data-math') || '';
+            const fence = node.classList.contains('math-block') ? '$$' : '$';
+            replaceWith(node, doc.createTextNode(expr ? fence + expr + fence : ''));
+        });
+
+        // 脚注参照はラベルだけの上付きにする（リンク先は外では無効）
+        Array.from(el.querySelectorAll('sup.footnote-ref')).forEach(node => {
+            const label = node.getAttribute('data-footnote-label') || node.textContent || '';
+            const sup = doc.createElement('sup');
+            sup.textContent = label;
+            replaceWith(node, sup);
+        });
+
+        // 編集中だけ意味を持つ装飾は中身のテキストだけ残す
+        Array.from(el.querySelectorAll('.raw-markdown, .find-highlight')).forEach(unwrap);
+
+        // 貼り付け先からも解決できる src はそのまま残し、解決できないもの
+        // （webview URI・未解決の相対パス）だけ alt テキストへ落とす。
+        // スキーム名は大文字小文字を区別しない
+        Array.from(el.querySelectorAll('img')).forEach(node => {
+            const src = node.getAttribute('src') || '';
+            if (PASTEABLE_IMAGE_SRC.test(src)) {
+                return;
+            }
+            const alt = node.getAttribute('alt') || '';
+            replaceWith(node, doc.createTextNode(alt));
+        });
+
+        // 文書内アンカーは外では飛べないのでリンクを外す（外部URLのリンクは残す）
+        Array.from(el.querySelectorAll('a[href^="#"]')).forEach(unwrap);
+
+        // 貼り付け先に不要な属性を落とす。`querySelectorAll('*')` は子孫しか返さないため、
+        // 渡された td/th 自身（`contenteditable`・`tabindex` 等が付いている）も明示的に含める
+        [el].concat(Array.from(el.querySelectorAll('*'))).forEach(node => {
+            Array.from(node.attributes).forEach(attr => {
+                const name = attr.name;
+                if (name === 'contenteditable' || name === 'class' || name === 'id' ||
+                    name === 'spellcheck' || name === 'tabindex' ||
+                    name.indexOf('data-') === 0) {
+                    node.removeAttribute(name);
+                }
+            });
+        });
+        return el;
+    }
+
     /**
      * テーブル全体、または矩形範囲に含まれるセルを`<table>`断片のHTML文字列として
-     * 組み立てる。セル内の装飾（`<strong>`・リンク等）を保つため`textContent`ではなく
-     * `innerHTML`をそのまま使う（エディタ内の`contenteditable`等の属性はセル自身の
-     * ものであり、ここでは新規に`<td>`/`<th>`タグを作って中身だけ包むため含まれない）。
+     * 組み立てる。セル内の装飾（`<strong>`・リンク等）は保ちつつ、
+     * `sanitizeCellForClipboard` で貼り付け先に不要・無効なマークアップを取り除く。
+     *
+     * ヘッダー行を含む場合は `<thead>` + `<th>` として出す（Excel等が見出しとして扱える）。
+     * 罫線が出るよう最低限のインラインスタイルも付ける（貼り付け先はこちらのCSSを持たない）。
      */
     function buildHtmlTableFragment(table, range) {
-        const rowsHtml = [];
+        const headRows = [];
+        const bodyRows = [];
         Array.from(table.rows).forEach((row, rowIndex) => {
             const cellsHtml = [];
+            let isHeaderRow = true;
             Array.from(row.cells).forEach((cell, colIndex) => {
                 if (range && !isCellInRange(rowIndex, colIndex, range)) {
                     return;
                 }
                 const tag = cell.tagName === 'TH' ? 'th' : 'td';
-                cellsHtml.push(`<${tag}>${cell.innerHTML}</${tag}>`);
+                if (tag !== 'th') {
+                    isHeaderRow = false;
+                }
+                const clone = sanitizeCellForClipboard(cell.cloneNode(true));
+                cellsHtml.push(
+                    `<${tag} style="${CLIPBOARD_CELL_STYLE}">${clone.innerHTML}</${tag}>`
+                );
             });
-            if (cellsHtml.length) {
-                rowsHtml.push(`<tr>${cellsHtml.join('')}</tr>`);
+            if (!cellsHtml.length) {
+                return;
+            }
+            const rowHtml = `<tr>${cellsHtml.join('')}</tr>`;
+            // `<th>` だけの行だけをヘッダーとして扱う（範囲が本文行から始まる場合は
+            // ヘッダー無し＝全行が tbody になる）
+            if (isHeaderRow && !bodyRows.length) {
+                headRows.push(rowHtml);
+            } else {
+                bodyRows.push(rowHtml);
             }
         });
-        return `<table><tbody>${rowsHtml.join('')}</tbody></table>`;
+        const thead = headRows.length ? `<thead>${headRows.join('')}</thead>` : '';
+        // 行が1つも無い場合も `<tbody></tbody>` は出す（変更前と同じ形を保つ）
+        const tbody = (bodyRows.length || !headRows.length)
+            ? `<tbody>${bodyRows.join('')}</tbody>` : '';
+        return `<table style="${CLIPBOARD_TABLE_STYLE}">${thead}${tbody}</table>`;
     }
 
     /**
@@ -1323,6 +1454,7 @@ window.TableModule = (function() {
         getCurrentCellRange: function () { return currentCellRange; },
         extractCellTextMatrix: extractCellTextMatrix,
         buildTsvFromMatrix: buildTsvFromMatrix,
+        sanitizeCellForClipboard: sanitizeCellForClipboard,
         buildHtmlTableFragment: buildHtmlTableFragment,
         computePasteTargets: computePasteTargets,
         writeMatrixIntoTable: writeMatrixIntoTable,

@@ -492,22 +492,200 @@ suite('TableModule', () => {
     });
 
     suite('buildHtmlTableFragment', () => {
-        test('rangeが無ければテーブル全体を<table>断片として組み立てる（ヘッダ行はth）', () => {
+        /** 貼り付け先で罫線が出るよう付けているインラインスタイル */
+        const CELL = ' style="border:1px solid #999;padding:4px 8px;"';
+        const TABLE_OPEN = '<table style="border-collapse:collapse;">';
+
+        test('rangeが無ければテーブル全体を組み立て、ヘッダ行はthead+thにする', () => {
+            // Excel等が見出しとして扱えるよう thead / th で出す
             const html = env.table.buildHtmlTableFragment(table, null);
             assert.strictEqual(
                 html,
-                '<table><tbody><tr><th>列A</th><th>列B</th></tr>' +
-                '<tr><td>a1</td><td>b1</td></tr><tr><td>a2</td><td>b2</td></tr></tbody></table>'
+                TABLE_OPEN +
+                `<thead><tr><th${CELL}>列A</th><th${CELL}>列B</th></tr></thead>` +
+                `<tbody><tr><td${CELL}>a1</td><td${CELL}>b1</td></tr>` +
+                `<tr><td${CELL}>a2</td><td${CELL}>b2</td></tr></tbody></table>`
             );
         });
 
-        test('rangeがあればその矩形範囲だけを組み立てる', () => {
+        test('rangeがあればその矩形範囲だけを組み立てる（本文行だけならtheadは出ない）', () => {
             const range = { minRow: 1, maxRow: 2, minCol: 0, maxCol: 0 };
             const html = env.table.buildHtmlTableFragment(table, range);
             assert.strictEqual(
                 html,
-                '<table><tbody><tr><td>a1</td></tr><tr><td>a2</td></tr></tbody></table>'
+                TABLE_OPEN +
+                `<tbody><tr><td${CELL}>a1</td></tr><tr><td${CELL}>a2</td></tr></tbody></table>`
             );
+            assert.ok(!html.includes('<thead>'), html);
+        });
+
+        test('貼り付け先で壊れるマークアップを取り除く', () => {
+            // エディタ内のセルには、そのまま外へ出すと無意味・無効になるものが混ざる
+            const t = env.document.createElement('table');
+            t.innerHTML =
+                '<tr><td contenteditable="true" class="table-cell" data-x="1">' +
+                // 数式（KaTeXの生成DOMごと入る）→ 元の式テキストへ
+                '<span class="math-inline" data-math="a_1" contenteditable="false">KaTeX</span>' +
+                // 検索ハイライト・キャレット位置の生Markdown表示 → 中身だけ残す
+                '<span class="find-highlight">見つかった</span>' +
+                '<span class="raw-markdown">**素**</span>' +
+                // 脚注参照 → リンク先が無効なのでラベルだけの上付きに
+                '<sup class="footnote-ref" data-footnote-label="1">' +
+                '<a href="#fn-1" id="fnref-1">1</a></sup>' +
+                // 文書内アンカー（目次リンク等）→ 外では飛べないのでリンクを外す
+                '<a href="#midashi">見出しへ</a>' +
+                // 外部リンクは残す
+                '<a href="https://example.com">外部</a>' +
+                '</td></tr>';
+            const cell = t.querySelector('td') as HTMLElement;
+            const clean = env.table.sanitizeCellForClipboard(cell.cloneNode(true));
+            const html = clean.innerHTML;
+
+            assert.ok(html.includes('$a_1$'), `数式が式テキストへ戻っていない: ${html}`);
+            assert.ok(!html.includes('math-inline'), html);
+            assert.ok(html.includes('見つかった') && !html.includes('find-highlight'), html);
+            assert.ok(html.includes('**素**') && !html.includes('raw-markdown'), html);
+            assert.ok(html.includes('<sup>1</sup>'), `脚注参照が残っている: ${html}`);
+            assert.ok(!html.includes('#fn-1'), html);
+            assert.ok(html.includes('見出しへ') && !html.includes('#midashi'), html);
+            assert.ok(html.includes('href="https://example.com"'), `外部リンクが消えた: ${html}`);
+            assert.ok(!html.includes('contenteditable'), html);
+            assert.ok(!html.includes('data-'), html);
+            assert.ok(!html.includes('class='), html);
+        });
+
+        test('画像は data: URI だけ残し、それ以外は alt テキストへ置き換える', () => {
+            // 表示中の src は webview URI（vscode-webview://…）に解決済みで、
+            // 貼り付け先では表示できない
+            const t = env.document.createElement('table');
+            t.innerHTML =
+                '<tr><td>' +
+                '<img src="vscode-webview://abc/img.png" alt="図の説明"' +
+                ' data-original-src="img.png">' +
+                '<img src="data:image/png;base64,AAA" alt="埋め込み">' +
+                '</td></tr>';
+            const cell = t.querySelector('td') as HTMLElement;
+            const html = (env.table.sanitizeCellForClipboard(cell.cloneNode(true))).innerHTML;
+
+            assert.ok(!html.includes('vscode-webview://'), `解決不能なsrcが残っている: ${html}`);
+            assert.ok(html.includes('図の説明'), `altテキストへ置き換わっていない: ${html}`);
+            assert.ok(html.includes('data:image/png;base64,AAA'), `data URIが消えた: ${html}`);
+        });
+
+        test('altが無い画像は取り除く（壊れた画像アイコンを残さない）', () => {
+            const t = env.document.createElement('table');
+            t.innerHTML = '<tr><td>前<img src="vscode-webview://abc/x.png">後</td></tr>';
+            const cell = t.querySelector('td') as HTMLElement;
+            const html = (env.table.sanitizeCellForClipboard(cell.cloneNode(true))).innerHTML;
+            assert.strictEqual(html, '前後');
+        });
+
+        test('元のセルは書き換えない（クローンを渡す前提）', () => {
+            const t = env.document.createElement('table');
+            t.innerHTML =
+                '<tr><td><span class="math-inline" data-math="x">K</span></td></tr>';
+            const cell = t.querySelector('td') as HTMLElement;
+            env.table.sanitizeCellForClipboard(cell.cloneNode(true));
+            assert.ok(cell.innerHTML.includes('math-inline'), '元のセルが壊れている');
+        });
+
+        test('null を渡しても例外を投げない', () => {
+            assert.strictEqual(env.table.sanitizeCellForClipboard(null), null);
+        });
+
+        test('貼り付け先でも解決できるsrc（http/https/file/data）の画像は残す', () => {
+            // 回帰テスト: 「data: 以外は全部altへ」にすると、変更前は画像として
+            // 貼り付けられていた `https://` 画像がテキストへ落ちてしまう
+            ['https://example.com/x.png', 'http://example.com/x.png',
+             'file:///tmp/x.png', 'DATA:image/png;base64,AAA'].forEach(src => {
+                const cell = env.document.createElement('td');
+                const img = env.document.createElement('img');
+                img.setAttribute('src', src);
+                img.setAttribute('alt', '図');
+                cell.appendChild(img);
+                env.table.sanitizeCellForClipboard(cell);
+                const kept = cell.querySelector('img');
+                assert.ok(kept, `画像が失われた: ${src}`);
+                assert.strictEqual(kept.getAttribute('src'), src);
+            });
+        });
+
+        test('ルート要素自身の編集用属性も落とす', () => {
+            const cell = env.document.createElement('td');
+            cell.setAttribute('contenteditable', 'true');
+            cell.setAttribute('tabindex', '0');
+            cell.setAttribute('class', 'table-cell');
+            cell.setAttribute('data-cell-index', '0');
+            cell.textContent = 'a';
+            env.table.sanitizeCellForClipboard(cell);
+            ['contenteditable', 'tabindex', 'class', 'data-cell-index'].forEach(name => {
+                assert.ok(!cell.hasAttribute(name), `${name} が残っている`);
+            });
+        });
+
+        test('子要素の tabindex も落とす', () => {
+            const cell = env.document.createElement('td');
+            cell.innerHTML = '<span tabindex="0">a</span>';
+            env.table.sanitizeCellForClipboard(cell);
+            assert.strictEqual(cell.innerHTML, '<span>a</span>');
+        });
+
+        test('ブロック数式は $$式$$ へ戻す', () => {
+            const cell = env.document.createElement('td');
+            cell.innerHTML = '<span class="math-block" data-math="a+b">KaTeX</span>';
+            env.table.sanitizeCellForClipboard(cell);
+            assert.strictEqual(cell.textContent, '$$a+b$$');
+        });
+
+        test('data-math を持たない数式は空へ潰す（KaTeXの生成DOMを漏らさない）', () => {
+            const cell = env.document.createElement('td');
+            cell.innerHTML = '<span class="math-inline">a1a_1</span>';
+            env.table.sanitizeCellForClipboard(cell);
+            assert.strictEqual(cell.textContent, '');
+        });
+
+        test('alt の無い解決不能な画像は削除する', () => {
+            const cell = env.document.createElement('td');
+            cell.innerHTML = '<img src="vscode-webview://abc/x.png">x';
+            env.table.sanitizeCellForClipboard(cell);
+            assert.strictEqual(cell.innerHTML, 'x');
+        });
+
+        test('範囲がヘッダー行を含む部分範囲でも thead を出す', () => {
+            const t = env.document.createElement('table');
+            t.innerHTML = '<tr><th>H1</th><th>H2</th></tr><tr><td>a</td><td>b</td></tr>';
+            const html = env.table.buildHtmlTableFragment(
+                t, { minRow: 0, maxRow: 1, minCol: 0, maxCol: 0 }
+            );
+            assert.ok(html.includes('<thead>'), html);
+            assert.ok(html.includes('>H1</th>'), html);
+            assert.ok(!html.includes('H2'), `範囲外の列が入っている: ${html}`);
+            assert.ok(html.includes('<tbody>'), html);
+            assert.ok(html.includes('>a</td>'), html);
+        });
+
+        test('行の無いテーブルでも tbody を持つ table を返す', () => {
+            const t = env.document.createElement('table');
+            const html = env.table.buildHtmlTableFragment(t, null);
+            assert.ok(html.includes('<tbody></tbody>'), html);
+        });
+
+        test('buildHtmlTableFragment がサニタイズを通している（結線の確認）', () => {
+            // サニタイズ関数を直接呼ぶテストだけだと、buildHtmlTableFragment から
+            // **呼び出しを外しても全テストが通ってしまう**。組み立て経由で確認する
+            const t = env.document.createElement('table');
+            t.innerHTML =
+                '<tr><td contenteditable="true">' +
+                '<span class="math-inline" data-math="a_1">KaTeX</span>' +
+                '<img src="vscode-webview://abc/x.png" alt="図">' +
+                '</td></tr>';
+            const html = env.table.buildHtmlTableFragment(t, null);
+
+            assert.ok(html.includes('$a_1$'), `数式が整形されていない: ${html}`);
+            assert.ok(!html.includes('math-inline'), html);
+            assert.ok(!html.includes('vscode-webview://'), `解決不能なsrcが残っている: ${html}`);
+            assert.ok(html.includes('図'), html);
+            assert.ok(!html.includes('contenteditable'), html);
         });
 
         test('セル内の装飾（innerHTML）をtextContentへ潰さず保つ', () => {
