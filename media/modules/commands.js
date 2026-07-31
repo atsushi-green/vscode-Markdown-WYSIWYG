@@ -2534,6 +2534,55 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * キーイベントが検索オプションのショートカット（Alt+C / Alt+W / Alt+R）か判定し、
+     * 対応するオプション名を返す純粋関数（該当しなければ null）。
+     *
+     * **`key` ではなく `code` で見る。** macOS で Option+C/W/R を押すと `key` は
+     * `ç`/`∑`/`®` になり、`key === 'c'` の判定では**まったく発火しない**
+     * （ドキュメントには `Opt+C` として載っているのに効かない状態だった）。
+     * `isRawWrapShortcut` と同じ理由・同じ方針。
+     *
+     * **キーの組み合わせは VS Code 本体に合わせてプラットフォームで変える**:
+     * macOS は `⌥⌘C`/`⌥⌘W`/`⌥⌘R`（Option+Command）、Windows/Linux は `Alt+C`/`W`/`R`。
+     * macOS で Option 単独にすると、`code` 基準の判定が `ç`/`∑`/`®` の入力を奪ってしまい
+     * **それらの文字を含む語を検索欄に打てなくなる**（検索ウィジェットが開いている間だけに
+     * 絞っても、開いたまま本文を編集する使い方では奪われ続ける）。Command を足せば
+     * 文字入力にならないのでこの問題が起きず、本体のキー割り当てとも揃う。
+     *
+     * Shift の同時押しとIME変換中は対象外。
+     *
+     * **呼び出し側は検索ウィジェットが開いているときだけ使うこと。**
+     * 閉じている間にオプションだけ切り替わってもユーザーには見えず、
+     * 内部状態が黙って変わるだけになるため。
+     * @param {{altKey?:boolean, ctrlKey?:boolean, metaKey?:boolean, shiftKey?:boolean,
+     *          code?:string, isComposing?:boolean}} event
+     * @param {boolean} [isMac] macOS かどうか（呼び出し側が判定して渡す）
+     * @returns {'caseSensitive'|'wholeWord'|'useRegex'|null}
+     */
+    function matchSearchOptionShortcut(event, isMac) {
+        if (!event || event.isComposing || event.shiftKey) {
+            return null;
+        }
+        if (event.altKey !== true) {
+            return null;
+        }
+        // macOSは Option+Command、それ以外は Option(Alt) 単独
+        if (isMac ? !event.metaKey || event.ctrlKey : event.metaKey || event.ctrlKey) {
+            return null;
+        }
+        switch (event.code) {
+            case 'KeyC':
+                return 'caseSensitive';
+            case 'KeyW':
+                return 'wholeWord';
+            case 'KeyR':
+                return 'useRegex';
+            default:
+                return null;
+        }
+    }
+
+    /**
      * インラインテキストを変換
      */
     function convertInlineText(text, footnoteLabels) {
@@ -2962,6 +3011,7 @@ window.CommandsModule = (function() {
         isSlashCommandTrigger: isSlashCommandTrigger,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
         isRawWrapShortcut: isRawWrapShortcut,
+        matchSearchOptionShortcut: matchSearchOptionShortcut,
         handleAutoBlock: handleAutoBlock,
         handleHorizontalRule: handleHorizontalRule,
         handleCodeFence: handleCodeFence,

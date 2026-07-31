@@ -43,9 +43,9 @@
 | 検索を開く | `Ctrl+F` | `Cmd+F` |
 | 次を検索 | `Enter` / `F3` / `Ctrl+G` | `Enter` / `F3` / `Cmd+G` |
 | 前を検索 | `Shift+Enter` / `Shift+F3` / `Shift+Ctrl+G` | `Shift+Enter` / `Shift+F3` / `Shift+Cmd+G` |
-| 大文字/小文字を区別 | `Alt+C` | `Opt+C` |
-| 単語単位で検索 | `Alt+W` | `Opt+W` |
-| 正規表現を使用 | `Alt+R` | `Opt+R` |
+| 大文字/小文字を区別（**検索を開いている間のみ**） | `Alt+C` | `Opt+Cmd+C` |
+| 単語単位で検索（**検索を開いている間のみ**） | `Alt+W` | `Opt+Cmd+W` |
+| 正規表現を使用（**検索を開いている間のみ**） | `Alt+R` | `Opt+Cmd+R` |
 | 現在のマッチを置換 | 置換欄で `Enter` / 「置換」ボタン | 同左 |
 | すべて置換 | 「全置換」ボタン | 同左 |
 | 検索を閉じる | `Escape` | `Escape` |

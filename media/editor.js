@@ -1374,6 +1374,30 @@
     }
 
     /**
+     * macOS で動いているか。検索オプションのショートカットを VS Code 本体に合わせて
+     * `⌥⌘C`（Mac）/ `Alt+C`（その他）へ切り替えるのに使う。
+     */
+    const IS_MAC = /Mac|iPhone|iPad|iPod/i.test(
+        (navigator.userAgentData && navigator.userAgentData.platform) ||
+        navigator.platform || navigator.userAgent || ''
+    );
+
+    /** 検索ウィジェットが開いているか */
+    function isFindWidgetOpen() {
+        return !!state.findWidget && state.findWidget.style.display !== 'none';
+    }
+
+    /**
+     * 検索オプション名 → 対応するトグルボタンの取得関数。
+     * `state` の参照は初期化後に確定するため、関数にして遅延評価する。
+     */
+    const SEARCH_OPTION_BUTTONS = {
+        caseSensitive: () => state.findOptionCase,
+        wholeWord: () => state.findOptionWord,
+        useRegex: () => state.findOptionRegex
+    };
+
+    /**
      * グローバルキーボードショートカットの設定
      */
     function setupGlobalKeyboardShortcuts() {
@@ -1414,30 +1438,21 @@
             }
 
             // Escape で検索ウィジェットを閉じる
-            if (e.key === 'Escape' && state.findWidget.style.display !== 'none') {
+            if (e.key === 'Escape' && isFindWidgetOpen()) {
                 e.preventDefault();
                 searchModule.close();
                 return;
             }
 
-            // Alt+C で大文字/小文字オプション
-            if (e.altKey && e.key === 'c') {
+            // 検索オプション（大文字小文字・単語単位・正規表現）の切り替え。
+            // キーは VS Code 本体に合わせて macOS は `⌥⌘C`/`⌥⌘W`/`⌥⌘R`、
+            // その他は `Alt+C`/`W`/`R`。**検索ウィジェットが開いているときだけ**
+            // 有効にする（閉じている間に切り替えてもユーザーには見えず、
+            // 内部状態が黙って変わるだけのため）。
+            const searchOption = commands.matchSearchOptionShortcut(e, IS_MAC);
+            if (searchOption && isFindWidgetOpen()) {
                 e.preventDefault();
-                searchModule.toggleOption('caseSensitive', state.findOptionCase);
-                return;
-            }
-
-            // Alt+W で単語単位オプション
-            if (e.altKey && e.key === 'w') {
-                e.preventDefault();
-                searchModule.toggleOption('wholeWord', state.findOptionWord);
-                return;
-            }
-
-            // Alt+R で正規表現オプション
-            if (e.altKey && e.key === 'r') {
-                e.preventDefault();
-                searchModule.toggleOption('useRegex', state.findOptionRegex);
+                searchModule.toggleOption(searchOption, SEARCH_OPTION_BUTTONS[searchOption]());
                 return;
             }
 

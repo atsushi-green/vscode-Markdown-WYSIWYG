@@ -19,7 +19,6 @@
 
 | 状態 | 不具合 | サイズ | メモ |
 |------|--------|--------|------|
-| todo | 検索オプションのショートカット `Alt+C`/`Alt+W`/`Alt+R` が macOS で効かない | S | `editor.js` の判定が `e.key === 'c'|'w'|'r'` なので、macOS の Option+C/W/R では `key` が `ç`/`∑`/`®` になり**発火しない**。それでいて `README.md` と `docs/commands-and-shortcuts.md` は `Opt+C` 等として公開しており、"効くと書いてあるのに効かない"状態。行折り返しトグル（`Alt+Z`）で採った `event.code` 基準（`KeyC`/`KeyW`/`KeyR`）へ揃えれば直る。**あわせて検討**: `code` 基準にすると macOS で Option+C 等が本来入力する文字（`ç` 等）を奪うため、検索ウィジェットが開いているときだけ有効にする等のガードが要る（`Alt+Z` は「Rawモード中だけ」で解決した）。`/local-review` B-1 由来（severity medium） |
 
 ## 優先度: 中
 
@@ -67,7 +66,8 @@
 | todo | Webview の HTML とテスト用フィクスチャの二重管理を検知できるようにする | S | ツールバーの項目を足し引きするたびに `src/markdownEditor.ts` の生成HTMLと `src/test/unit/helper.ts` のフィクスチャを手で揃えており、ズレても気付ける仕組みが無い（`print-css.test.ts` のような静的検証は `@media print` にしかない）。実際に 🖨️ ボタンの追加・撤去の両方で毎回2ファイルを手直ししている。`markdownEditor.ts` からツールバーのHTMLを取り出してフィクスチャと突き合わせる静的テスト、あるいはフィクスチャ生成の共通化を検討する。`/local-review` B-3 由来（severity low、既存の構造問題） |
 | todo | `toggleToolbar` コマンドを commandPalette の `when` 句で絞るか決める | S | `package.json` の `contributes.menus.commandPalette` は既存4コマンドのうち3つを `resourceLangId == markdown` で絞っているが、`markdown-wysiwyg-editor.toggleToolbar` は未登録なので常時パレットに出る。グローバル設定のトグルなので「どこからでも切り替えたい」とも読めるが、既存方針との一貫性としては要判断。**絞る場合は注意**: カスタムエディタがアクティブなときに `resourceLangId` が期待どおり効くか（`toggleEditor` が WYSIWYG 表示中に隠れないか）を実機で確認してから入れること。`/local-review` B-2 由来（severity low） |
 | todo | ツールバーを隠したときに戻す導線を Webview 内にも用意する | S | ツールバーの表示/非表示は設定とコマンドパレットからしか操作できず、隠した状態の Webview 内には戻す手掛かりが無い。「/」コマンドメニューへ項目を足す、エディタ右上に小さな復帰ハンドルを置く、などを検討する。**なおボタンの各操作自体は隠しても到達できる**ことは確認済み（見出し・リスト・引用・コードブロックは行頭のMarkdown記法がライブ変換され、太字等・リンク・目次・Raw切替・行折り返しはショートカットがある）。`/local-review` B-3 由来（severity low） |
-| todo | グローバルショートカットの判定を純粋関数へ揃える | S | `Alt+Z`（行折り返し）だけ判定を `commands.isRawWrapShortcut` として切り出しユニットテストを付けたが、他のショートカット（`Ctrl+/`・`Ctrl+F`・`Alt+C/W/R` 等）の判定は `editor.js` にインラインのままで基準が二重になっている。テスト可能性のために切り出す方針で揃えるか、`Alt+Z` を例外扱いとするかを決める。`/local-review` B-2 由来（severity low） |
+| todo | 残りのグローバルショートカット判定も純粋関数へ揃える | S | `Alt+Z`（行折り返し）と `Alt+C`/`W`/`R`（検索オプション）は `commands.isRawWrapShortcut` / `matchSearchOptionShortcut` として切り出しユニットテストを付けたが、`Ctrl+/`・`Ctrl+F`・`Escape`・`F3`/`Ctrl+G` の判定は `editor.js` にインラインのままで基準が二重。**とくに `mod && e.key.toLowerCase() === 'g'` のような `key` 依存が残っており、同じ macOS の落とし穴を踏む余地がある**（`Ctrl/Cmd+G` は修飾キーが文字を変えないため現状は無事）。`/local-review` B-2 由来（severity low） |
+| todo | 検索オプション名→ボタンの対応が3箇所に重複している | S | `editor.js` の `SEARCH_OPTION_BUTTONS`、`search.js` のクリックリスナー、`commands.js` の `code` switch に同じ対応が散っている。とくに `editor.js` 側の対応表は**どのテストにも守られておらず**、取り違えても検知されない（ハーネスが `media/modules/` しか読まないため）。`search.toggleOption(option)` が第2引数省略時に自分で `state.findOption*` を引くようにすれば `SEARCH_OPTION_BUTTONS` は不要になり、対応表が `media/modules/` 側＝テスト可能領域へ移る。あわせて `toggleOption` が `button.classList` を無ガードで触っている点も直せる。`/local-review` B-1・B-2 由来（severity low） |
 
 ## 完了 (done)
 

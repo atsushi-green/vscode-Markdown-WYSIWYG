@@ -2853,3 +2853,107 @@ suite('isRawWrapShortcut（行折り返しトグルのショートカット判�
         assert.strictEqual(env.commands.isRawWrapShortcut(undefined), false);
     });
 });
+
+suite('matchSearchOptionShortcut（検索オプションのショートカット判定）', () => {
+    let env: EditorEnv;
+
+    setup(() => {
+        env = createEditorEnv();
+    });
+
+    /** キーイベント相当のオブジェクトを作る（既定は Alt+C） */
+    const ev = (over: Record<string, unknown> = {}) => ({
+        altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, code: 'KeyC',
+        ...over
+    });
+
+    test('Windows/Linux: Alt+C / Alt+W / Alt+R をそれぞれのオプションへ対応づける', () => {
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ code: 'KeyC' }), false), 'caseSensitive'
+        );
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ code: 'KeyW' }), false), 'wholeWord'
+        );
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ code: 'KeyR' }), false), 'useRegex'
+        );
+    });
+
+    test('macOS: Option+Command の組み合わせで対応づける', () => {
+        // VS Code 本体の macOS 版と同じ ⌥⌘C / ⌥⌘W / ⌥⌘R に合わせる。
+        // Option 単独にすると `ç`/`∑`/`®` の入力を奪い、**それらの文字を含む語を
+        // 検索欄に打てなくなる**（Command を足せば文字入力にならない）
+        for (const [code, option] of [
+            ['KeyC', 'caseSensitive'], ['KeyW', 'wholeWord'], ['KeyR', 'useRegex']
+        ]) {
+            assert.strictEqual(
+                env.commands.matchSearchOptionShortcut(ev({ code, metaKey: true }), true),
+                option
+            );
+        }
+    });
+
+    test('key が ç / ∑ / ® になっても code で判定するので反応する', () => {
+        // 修正前は `e.key === \'c\'` 判定だったため macOS ではまったく発火せず、
+        // それでいてドキュメントには Opt+C として載っていた
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(
+                ev({ code: 'KeyC', key: 'ç', metaKey: true }), true
+            ),
+            'caseSensitive'
+        );
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ code: 'KeyW', key: '∑' }), false),
+            'wholeWord'
+        );
+    });
+
+    test('macOS で Command が無ければ null（文字入力を奪わない）', () => {
+        // Option+C は `ç` の入力なので、ここで奪ってはいけない
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ code: 'KeyC' }), true), null
+        );
+    });
+
+    test('Windows/Linux で Command が押されていれば null', () => {
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ metaKey: true }), false), null
+        );
+    });
+
+    test('Alt が無ければ null', () => {
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ altKey: false }), false), null
+        );
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ altKey: false, metaKey: true }), true),
+            null
+        );
+    });
+
+    test('Ctrl や Shift の同時押しは両プラットフォームで null', () => {
+        for (const isMac of [true, false]) {
+            const base = isMac ? { metaKey: true } : {};
+            for (const over of [{ ctrlKey: true }, { shiftKey: true }]) {
+                assert.strictEqual(
+                    env.commands.matchSearchOptionShortcut(ev({ ...base, ...over }), isMac), null,
+                    `isMac=${isMac} ${JSON.stringify(over)} で反応している`
+                );
+            }
+        }
+    });
+
+    test('対象外のキー・code 無し・IME変換中・null は null', () => {
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ code: 'KeyX' }), false), null
+        );
+        const noCode = ev();
+        delete (noCode as { code?: string }).code;
+        assert.strictEqual(env.commands.matchSearchOptionShortcut(noCode, false), null);
+        assert.strictEqual(
+            env.commands.matchSearchOptionShortcut(ev({ isComposing: true }), false), null
+        );
+        assert.strictEqual(env.commands.matchSearchOptionShortcut(null, false), null);
+        assert.strictEqual(env.commands.matchSearchOptionShortcut(undefined, false), null);
+    });
+});
