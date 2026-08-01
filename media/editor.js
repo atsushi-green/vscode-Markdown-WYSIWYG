@@ -176,6 +176,22 @@
     }
 
     /**
+     * ツールバーの表示設定（`state.isToolbarVisible`）をDOMへ反映する。
+     *
+     * 表示/非表示は VS Code の設定 `markdownWysiwyg.showToolbar` が持ち（セッションを
+     * 跨いで保たれる）、拡張機能側から `setToolbarVisible` メッセージで届く。
+     * `.toolbar` へ直接インラインスタイルを書かず `<body>` のクラスで切り替えるのは、
+     * 印刷用スタイル（`@media print` はツールバーを常に隠す）と競合させないため。
+     */
+    function applyToolbarVisibility() {
+        document.body.classList.toggle('toolbar-hidden', !state.isToolbarVisible);
+        // パンくずバーの再計算は不要。`.heading-breadcrumb-bar` は通常フローの
+        // flex 子要素で位置はレイアウトが自動追従し、`updateHeadingBreadcrumb` も
+        // バーの位置を書き換えず `#editor` の矩形とスクロール量の**相対値**だけで
+        // 現在見出しを決めるため、ツールバーの高さ変化に依存しない。
+    }
+
+    /**
      * Rawモードの行折り返し設定（state.isRawWrapEnabled）を実際のDOM・ボタン表示へ反映する。
      * ONにすると`.raw-wrap-on`クラス経由で`#rawEditor`を`white-space: pre-wrap`へ切り替え
      * 長い行を折り返す。行番号ガターは「論理行1つ＝固定22px」の前提で作られており、
@@ -193,68 +209,6 @@
         if (state.toggleRawWrapBtn) {
             state.toggleRawWrapBtn.classList.toggle('active', state.isRawWrapEnabled);
         }
-    }
-
-    /**
-     * 印刷前に描画完了を待つ上限時間。これを超えたら待たずに印刷ダイアログを開く
-     * （図が欠けても「押しても何も起きない」よりは良い）。
-     */
-    const PRINT_RENDER_TIMEOUT_MS = 5000;
-
-    /**
-     * 印刷（PDFとして出力）を実行する。
-     *
-     * **Rawモード表示中はWYSIWYG表示へ戻してから印刷する。** Rawモードでは
-     * `#wysiwygEditorWrap` がインラインスタイルで `display:none` になっており、
-     * 印刷用スタイル（`@media print`）は `#rawEditor` の方を隠すため、
-     * そのまま印刷すると**白紙になる**。
-     *
-     * Mermaid図・数式（KaTeX）・ローカル画像は非同期に描画されるため、
-     * `utils.waitForRenderComplete` で完了を待ってから印刷ダイアログを開く
-     * （待たないと図や式が欠けたPDFになる。とくにRawモードから戻した直後は
-     * フル再描画が走る）。待ち合わせは失敗しても reject せず、上限時間で必ず
-     * 解決するので「押しても何も起きない」状態にはならない。
-     */
-    function exportPdf() {
-        const wasRawMode = state.isRawMode;
-        if (wasRawMode) {
-            toggleRawMode();
-            // 印刷が終わったら元のRaw表示へ戻す（編集中だったモードを勝手に変えない）。
-            // `afterprint` が発火しない環境ではWYSIWYG表示のまま残るが、
-            // 内容は失われないため実害は無い。
-            window.addEventListener('afterprint', () => {
-                if (!state.isRawMode) {
-                    toggleRawMode();
-                }
-            }, { once: true });
-        }
-        // Mermaid図・数式（KaTeXのWebフォント）・画像は遅れて描画されるため、
-        // 完了を待ってから印刷ダイアログを開く。待たないと図・式・画像が欠けた
-        // PDFになる（とくにRawモードから戻した直後はフル再描画が走る）。
-        // `waitForRenderComplete` は失敗しても reject せず、上限時間で必ず解決する。
-        utils.waitForRenderComplete({
-            renderMermaid: () => mermaidModule.render(),
-            fontsReady: (document.fonts && document.fonts.ready) || null,
-            images: state.editor.querySelectorAll('img'),
-            timeoutMs: PRINT_RENDER_TIMEOUT_MS
-        }).then(() => {
-            // 直前のDOM変更が反映されてから開く（レイアウト確定待ち）
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    window.print();
-                });
-            });
-        });
-    }
-
-    /**
-     * 印刷（PDFとして出力）ボタンの設定。
-     */
-    function setupExportPdf() {
-        if (!state.exportPdfBtn) {
-            return;
-        }
-        state.exportPdfBtn.addEventListener('click', exportPdf);
     }
 
     /**
@@ -850,7 +804,6 @@
 
         // Rawモードの行折り返しトグルボタン
         setupRawWrapToggle();
-        setupExportPdf();
 
         // グローバルキーボードショートカット
         setupGlobalKeyboardShortcuts();
@@ -1195,9 +1148,9 @@
                 case 'insertImagePath':
                     handleInsertImagePath(message);
                     break;
-                case 'print':
-                    // コマンドパレットの「Markdown: PDFとして出力」から届く
-                    exportPdf();
+                case 'setToolbarVisible':
+                    state.isToolbarVisible = message.visible !== false;
+                    applyToolbarVisibility();
                     break;
             }
         });
@@ -1421,6 +1374,30 @@
     }
 
     /**
+     * macOS で動いているか。検索オプションのショートカットを VS Code 本体に合わせて
+     * `⌥⌘C`（Mac）/ `Alt+C`（その他）へ切り替えるのに使う。
+     */
+    const IS_MAC = /Mac|iPhone|iPad|iPod/i.test(
+        (navigator.userAgentData && navigator.userAgentData.platform) ||
+        navigator.platform || navigator.userAgent || ''
+    );
+
+    /** 検索ウィジェットが開いているか */
+    function isFindWidgetOpen() {
+        return !!state.findWidget && state.findWidget.style.display !== 'none';
+    }
+
+    /**
+     * 検索オプション名 → 対応するトグルボタンの取得関数。
+     * `state` の参照は初期化後に確定するため、関数にして遅延評価する。
+     */
+    const SEARCH_OPTION_BUTTONS = {
+        caseSensitive: () => state.findOptionCase,
+        wholeWord: () => state.findOptionWord,
+        useRegex: () => state.findOptionRegex
+    };
+
+    /**
      * グローバルキーボードショートカットの設定
      */
     function setupGlobalKeyboardShortcuts() {
@@ -1435,6 +1412,24 @@
                 return;
             }
 
+            // Alt+Z でRawモードの行折り返しを切り替え。ツールバーを隠すと
+            // この操作だけ他に到達手段が無くなるため用意している（他のボタンは
+            // Markdown記法の入力か既存のショートカットで到達できる）。
+            //
+            // **Rawモード表示中だけ有効にする**。理由は2つ:
+            // (1) 折り返し設定はRaw表示にしか効かないので、WYSIWYG中に押しても
+            //     何も起きない。しかもツールバーを隠していればボタンの見た目も
+            //     変わらず、内部状態だけが黙って反転してしまう。
+            // (2) macOSでは Option+Z が本来 `Ω` を入力する。ここで無条件に
+            //     preventDefault すると WYSIWYG本文でも `Ω` が打てなくなるため、
+            //     効果のあるRawモードでだけ奪う。
+            if (state.isRawMode && commands.isRawWrapShortcut(e)) {
+                e.preventDefault();
+                state.isRawWrapEnabled = !state.isRawWrapEnabled;
+                applyRawWrapMode();
+                return;
+            }
+
             // Ctrl+F (Cmd+F) で検索ウィジェットを開く
             if (mod && e.key.toLowerCase() === 'f') {
                 e.preventDefault();
@@ -1443,30 +1438,21 @@
             }
 
             // Escape で検索ウィジェットを閉じる
-            if (e.key === 'Escape' && state.findWidget.style.display !== 'none') {
+            if (e.key === 'Escape' && isFindWidgetOpen()) {
                 e.preventDefault();
                 searchModule.close();
                 return;
             }
 
-            // Alt+C で大文字/小文字オプション
-            if (e.altKey && e.key === 'c') {
+            // 検索オプション（大文字小文字・単語単位・正規表現）の切り替え。
+            // キーは VS Code 本体に合わせて macOS は `⌥⌘C`/`⌥⌘W`/`⌥⌘R`、
+            // その他は `Alt+C`/`W`/`R`。**検索ウィジェットが開いているときだけ**
+            // 有効にする（閉じている間に切り替えてもユーザーには見えず、
+            // 内部状態が黙って変わるだけのため）。
+            const searchOption = commands.matchSearchOptionShortcut(e, IS_MAC);
+            if (searchOption && isFindWidgetOpen()) {
                 e.preventDefault();
-                searchModule.toggleOption('caseSensitive', state.findOptionCase);
-                return;
-            }
-
-            // Alt+W で単語単位オプション
-            if (e.altKey && e.key === 'w') {
-                e.preventDefault();
-                searchModule.toggleOption('wholeWord', state.findOptionWord);
-                return;
-            }
-
-            // Alt+R で正規表現オプション
-            if (e.altKey && e.key === 'r') {
-                e.preventDefault();
-                searchModule.toggleOption('useRegex', state.findOptionRegex);
+                searchModule.toggleOption(searchOption, SEARCH_OPTION_BUTTONS[searchOption]());
                 return;
             }
 

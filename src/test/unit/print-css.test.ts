@@ -285,3 +285,40 @@ suite('印刷用スタイル（@media print）', () => {
         );
     });
 });
+
+suite('ツールバーの非表示（body.toolbar-hidden）', () => {
+    const css = fs.readFileSync(path.join(MEDIA_DIR, 'editor.css'), 'utf8');
+
+    test('body のクラスで .toolbar を隠すルールがある', () => {
+        // `.toolbar` へインラインスタイルを書くと、印刷用スタイル（@media print も
+        // .toolbar を隠す）とカスケードで competing する。body のクラスで切り替える
+        assert.ok(
+            /body\.toolbar-hidden\s+\.toolbar\s*\{[^}]*display:\s*none/.test(css),
+            'body.toolbar-hidden .toolbar の非表示ルールが無い'
+        );
+    });
+
+    test('印刷時のツールバー非表示ルールは残っている（回帰確認）', () => {
+        // 設定で表示していても印刷には出さない、という既存の挙動を壊さない。
+        // `@media print` ブロックの中だけを見る——ファイル末尾まで含めた部分文字列
+        // 一致だと、以降に `.toolbar-*` のような別セレクタがあるだけで通ってしまう
+        const start = css.indexOf('@media print');
+        assert.notStrictEqual(start, -1, '@media print ブロックが無い');
+        const open = css.indexOf('{', start);
+        let depth = 0;
+        let end = -1;
+        for (let i = open; i < css.length; i++) {
+            if (css[i] === '{') { depth++; }
+            if (css[i] === '}') {
+                depth--;
+                if (depth === 0) { end = i; break; }
+            }
+        }
+        assert.notStrictEqual(end, -1, '@media print ブロックが閉じていない');
+        const block = css.slice(open + 1, end);
+        assert.ok(
+            /(^|[^A-Za-z0-9_-])\.toolbar\s*[,{]/.test(block),
+            '@media print からツールバーの非表示が消えている'
+        );
+    });
+});

@@ -645,7 +645,6 @@ suite('EditorState', () => {
         assert.ok(env.state.rawEditor);
         assert.ok(env.state.toggleBtn);
         assert.ok(env.state.toggleRawWrapBtn);
-        assert.ok(env.state.exportPdfBtn);
         assert.ok(env.state.findWidget);
         assert.ok(env.state.vscode);
     });
@@ -670,6 +669,13 @@ suite('EditorState', () => {
         assert.strictEqual(env.state.editSeq, 0);
         env.state.editSeq = env.state.editSeq + 1;
         assert.strictEqual(env.state.editSeq, 1);
+    });
+
+    test('isToolbarVisibleは初期値trueで、getter/setterで読み書きできる', () => {
+        // ツールバーは既定で表示。設定 markdownWysiwyg.showToolbar の既定値と揃える
+        assert.strictEqual(env.state.isToolbarVisible, true);
+        env.state.isToolbarVisible = false;
+        assert.strictEqual(env.state.isToolbarVisible, false);
     });
 
     test('isRawWrapEnabledは初期値falseで、getter/setterで読み書きできる', () => {

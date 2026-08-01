@@ -52,11 +52,21 @@
         "category": "Markdown WYSIWYG"
       },
       {
-        "command": "markdown-wysiwyg-editor.exportPdf",
-        "title": "Markdown: PDFとして出力（印刷）",
+        "command": "markdown-wysiwyg-editor.toggleToolbar",
+        "title": "Markdown: ツールバーの表示/非表示を切り替え",
         "category": "Markdown WYSIWYG"
       }
     ],
+    "configuration": {
+      "title": "Markdown WYSIWYG Editor",
+      "properties": {
+        "markdownWysiwyg.showToolbar": {
+          "type": "boolean",
+          "default": true,
+          "description": "WYSIWYGエディタ上部のツールバーを表示します。オフにすると本文の表示領域が広がります（コマンド「Markdown: ツールバーの表示/非表示を切り替え」でも切り替えられます）。"
+        }
+      }
+    },
     "keybindings": [
       {
         "command": "markdown-wysiwyg-editor.toggleEditor",

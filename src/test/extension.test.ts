@@ -49,6 +49,15 @@ function createTempMarkdown(content: string): vscode.Uri {
     return vscode.Uri.file(filePath);
 }
 
+/** `extension.ts` が `registerCommand` しているコマンド（package.json の宣言と一致すべき） */
+const REGISTERED_COMMANDS = [
+    'markdown-wysiwyg-editor.openEditor',
+    'markdown-wysiwyg-editor.openAsText',
+    'markdown-wysiwyg-editor.toggleEditor',
+    'markdown-wysiwyg-editor.newMarkdownFile',
+    'markdown-wysiwyg-editor.toggleToolbar'
+];
+
 suite('拡張機能の統合テスト', () => {
 
     suiteTeardown(async () => {
@@ -69,23 +78,54 @@ suite('拡張機能の統合テスト', () => {
     test('すべてのコマンドが登録されている', async () => {
         await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
         const commands = await vscode.commands.getCommands(true);
-        for (const command of [
-            'markdown-wysiwyg-editor.openEditor',
-            'markdown-wysiwyg-editor.openAsText',
-            'markdown-wysiwyg-editor.toggleEditor',
-            'markdown-wysiwyg-editor.newMarkdownFile',
-            'markdown-wysiwyg-editor.exportPdf'
-        ]) {
+        for (const command of REGISTERED_COMMANDS) {
             assert.ok(commands.includes(command), `コマンド未登録: ${command}`);
         }
     });
 
-    test('exportPdf: WYSIWYGエディタが非アクティブでも例外を投げない', async () => {
-        // アクティブなWebviewパネルが無い場合は案内メッセージを出して終わる。
-        // 実行が例外で落ちないこと（＝コマンドとして常に安全に呼べること）を確認する
+    test('package.json の宣言と registerCommand が食い違っていない', () => {
+        // この2つは二重管理で、**宣言だけ残る**とコマンドパレットには出るのに
+        // 押すと `command not found` になる（＝今回直したのと同種の
+        // 「押しても何も起きない」不具合）。`getCommands` は登録済みのものしか
+        // 返さないためこのズレを検出できないので、宣言側を直接突き合わせる
+        const pkg = vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON;
+        const declared: string[] = (pkg.contributes?.commands ?? [])
+            .map((c: { command: string }) => c.command);
+        assert.ok(declared.length > 0, 'contributes.commands が読めていない');
+        for (const command of declared) {
+            assert.ok(
+                REGISTERED_COMMANDS.includes(command),
+                `package.json で宣言されているが登録されていない: ${command}`
+            );
+        }
+    });
+
+    test('設定 showToolbar の宣言とコード側の定数・既定値が一致している', () => {
+        // 設定キーは package.json（contributes.configuration）と markdownEditor.ts の
+        // 定数で二重管理になっており、片方をリネーム/タイプミスしても TypeScript は
+        // 検出できない（「設定UIには出るが効かない」状態になる）。
+        // 既定値も、Webview側の初期状態（state.isToolbarVisible = true）と揃っている
+        // 必要がある——ズレると設定を触っていない利用者の初期表示が食い違う
+        const pkg = vscode.extensions.getExtension(EXTENSION_ID)!.packageJSON;
+        const props = pkg.contributes?.configuration?.properties ?? {};
+        const key = MarkdownEditorProvider.showToolbarSetting;
+        assert.ok(
+            Object.prototype.hasOwnProperty.call(props, key),
+            `package.json に設定 ${key} の宣言が無い`
+        );
+        assert.strictEqual(props[key].type, 'boolean');
+        assert.strictEqual(props[key].default, true, '既定値が Webview 側の初期状態と違う');
+    });
+
+    test('撤去した exportPdf コマンドが復活していない', async () => {
+        // window.print() は Webview の sandbox でブロックされるため、この導線は撤去した。
+        // 宣言側は上のテストが、登録側はこのテストが見る
         await vscode.extensions.getExtension(EXTENSION_ID)!.activate();
-        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-        await vscode.commands.executeCommand('markdown-wysiwyg-editor.exportPdf');
+        const commands = await vscode.commands.getCommands(true);
+        assert.strictEqual(
+            commands.includes('markdown-wysiwyg-editor.exportPdf'), false,
+            'exportPdf コマンドが登録されている（撤去したはず）'
+        );
     });
 
     test('openEditor: MarkdownファイルをWYSIWYGエディタで開く', async () => {

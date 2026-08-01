@@ -26,7 +26,8 @@
 | 下線 | `Ctrl+U` | `Cmd+U` |
 | 取り消し線 | `Ctrl+Shift+X` | `Cmd+Shift+X` |
 | リンクの挿入・編集 | `Ctrl+K` | `Cmd+K` |
-| PDFとして出力（印刷） | ツールバー 🖨️ / コマンドパレット | 同左 |
+| ツールバーの表示/非表示 | コマンドパレット | 同左 |
+| Raw表示の行折り返し切替（**Raw表示中のみ**） | `Alt+Z` | `Option+Z` |
 | 目次(TOC)を挿入 | `Ctrl+Shift+O` | `Cmd+Shift+O` |
 
 ### 表示切り替え
@@ -42,9 +43,9 @@
 | 検索を開く | `Ctrl+F` | `Cmd+F` |
 | 次を検索 | `Enter` / `F3` / `Ctrl+G` | `Enter` / `F3` / `Cmd+G` |
 | 前を検索 | `Shift+Enter` / `Shift+F3` / `Shift+Ctrl+G` | `Shift+Enter` / `Shift+F3` / `Shift+Cmd+G` |
-| 大文字/小文字を区別 | `Alt+C` | `Opt+C` |
-| 単語単位で検索 | `Alt+W` | `Opt+W` |
-| 正規表現を使用 | `Alt+R` | `Opt+R` |
+| 大文字/小文字を区別（**検索を開いている間のみ**） | `Alt+C` | `Opt+Cmd+C` |
+| 単語単位で検索（**検索を開いている間のみ**） | `Alt+W` | `Opt+Cmd+W` |
+| 正規表現を使用（**検索を開いている間のみ**） | `Alt+R` | `Opt+Cmd+R` |
 | 現在のマッチを置換 | 置換欄で `Enter` / 「置換」ボタン | 同左 |
 | すべて置換 | 「全置換」ボタン | 同左 |
 | 検索を閉じる | `Escape` | `Escape` |

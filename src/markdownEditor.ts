@@ -15,36 +15,17 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 
     public static readonly viewType = 'markdownWysiwyg.editor';
 
-    private static readonly scratchPad: Set<string> = new Set();
+    /** ツールバーの表示/非表示を保持する設定キー（`contributes.configuration` と対応） */
+    public static readonly showToolbarSetting = 'markdownWysiwyg.showToolbar';
 
-    /**
-     * 現在開いている Webview パネル。コマンドパレットからの「PDFとして出力」で
-     * **アクティブなエディタの Webview** へ印刷を指示するために保持する
-     * （`resolveCustomTextEditor` はパネルごとに呼ばれ、破棄時に取り除く）。
-     */
-    private static readonly panels: Set<vscode.WebviewPanel> = new Set();
-
-    /**
-     * アクティブな WYSIWYG エディタの Webview へメッセージを送る。
-     * アクティブなパネルが無ければ何もせず false を返す（呼び出し側が案内を出す）。
-     */
-    public static postToActivePanel(message: unknown): boolean {
-        for (const panel of MarkdownEditorProvider.panels) {
-            if (panel.active) {
-                panel.webview.postMessage(message);
-                return true;
-            }
-        }
-        // コマンドパレット表示中などにフォーカスが外れて `active` が落ちることがある。
-        // 表示中のパネルがちょうど1枚だけならそれが対象で間違いないので送る
-        // （複数見えている場合はどれを指したのか決められないため案内に委ねる）。
-        const visible = Array.from(MarkdownEditorProvider.panels).filter(p => p.visible);
-        if (visible.length === 1) {
-            visible[0].webview.postMessage(message);
-            return true;
-        }
-        return false;
+    /** 設定「ツールバーを表示する」の現在値（未設定なら既定の true） */
+    private static isToolbarVisible(): boolean {
+        return vscode.workspace
+            .getConfiguration()
+            .get<boolean>(MarkdownEditorProvider.showToolbarSetting, true);
     }
+
+    private static readonly scratchPad: Set<string> = new Set();
 
     constructor(
         private readonly context: vscode.ExtensionContext
@@ -97,6 +78,21 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         // Webviewの初期HTML設定
         webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
 
+        // ツールバーの表示/非表示は VS Code の設定で持つ（セッションを跨いで保たれる）。
+        // Webview は設定APIを直接読めないため、初期値と変更をメッセージで渡す。
+        const postToolbarVisibility = () => {
+            webviewPanel.webview.postMessage({
+                type: 'setToolbarVisible',
+                visible: MarkdownEditorProvider.isToolbarVisible()
+            });
+        };
+        postToolbarVisibility();
+        const configSubscription = vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration(MarkdownEditorProvider.showToolbarSetting)) {
+                postToolbarVisibility();
+            }
+        });
+
         // Webview が送ってきた編集の seq を、その編集適用に起因するエコー `update`
         // にだけ反映するための保持枠。Webview 側はこの seq を使って「競合する古い
         // エコー」（タイプ中に送った古い編集のエコーが、より新しいローカル編集の後に
@@ -123,12 +119,10 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             }
         });
 
-        MarkdownEditorProvider.panels.add(webviewPanel);
-
         // Webviewが閉じられたときのクリーンアップ
         webviewPanel.onDidDispose(() => {
             changeDocumentSubscription.dispose();
-            MarkdownEditorProvider.panels.delete(webviewPanel);
+            configSubscription.dispose();
         });
 
         // Webviewからのメッセージを受信
@@ -286,9 +280,6 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
                     <span class="toolbar-separator"></span>
                     <button class="toolbar-btn" data-command="toc" title="目次(TOC)を挿入 (Ctrl+Shift+O)">&#128209;</button>
                     <div class="toolbar-spacer"></div>
-                    <button class="toolbar-btn" id="exportPdf" title="印刷 / PDFとして出力（印刷ダイアログを開きます）">
-                        🖨️ PDF
-                    </button>
                     <button class="toolbar-btn toggle-btn" id="toggleRawWrap" title="Raw表示の行折り返し切替（ONにすると行番号は非表示になります）">
                         ↩️ 折り返し
                     </button>

@@ -2501,6 +2501,88 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * キーイベントが「Rawモードの行折り返しトグル」のショートカットか判定する純粋関数。
+     *
+     * 割り当ては **Alt+Z**（VS Code 本体の「折り返しの切り替え」と同じキー）。
+     * ツールバーを隠すと（設定 `markdownWysiwyg.showToolbar`）この操作だけは
+     * 他に到達手段が無くなるため用意した——見出し・リスト・引用・コードブロックは
+     * 行頭のMarkdown記法を打てばライブ変換され、太字などは既存のショートカットがある。
+     *
+     * **`key` ではなく `code` で見る**。macOS で Option(Alt)+Z を押すと `key` は
+     * `'Ω'` になり、`key === 'z'` の判定では反応しない。`code` は物理キー基準なので
+     * 修飾キーの有無に影響されない。
+     *
+     * Ctrl/Cmd/Shift との同時押しは対象外にする（他のショートカットとの取り違えを防ぐ）。
+     * IME変換中（`isComposing`）も除外する——日本語入力の変換操作を妨げないため
+     * （このファイルの他のキーハンドラと同じ方針）。
+     *
+     * **macOSでは Option+Z が本来 `Ω` を入力する。** 呼び出し側はRawモード表示中だけ
+     * このショートカットを有効にしており（`editor.js`）、WYSIWYG本文では従来どおり
+     * `Ω` を入力できる。折り返し設定はRaw表示にしか効かないため、そこでだけ
+     * 奪う形にしている。
+     * @param {{altKey?:boolean, ctrlKey?:boolean, metaKey?:boolean, shiftKey?:boolean,
+     *          code?:string, isComposing?:boolean}} event
+     * @returns {boolean}
+     */
+    function isRawWrapShortcut(event) {
+        if (!event || event.isComposing) {
+            return false;
+        }
+        return event.altKey === true &&
+            !event.ctrlKey && !event.metaKey && !event.shiftKey &&
+            event.code === 'KeyZ';
+    }
+
+    /**
+     * キーイベントが検索オプションのショートカット（Alt+C / Alt+W / Alt+R）か判定し、
+     * 対応するオプション名を返す純粋関数（該当しなければ null）。
+     *
+     * **`key` ではなく `code` で見る。** macOS で Option+C/W/R を押すと `key` は
+     * `ç`/`∑`/`®` になり、`key === 'c'` の判定では**まったく発火しない**
+     * （ドキュメントには `Opt+C` として載っているのに効かない状態だった）。
+     * `isRawWrapShortcut` と同じ理由・同じ方針。
+     *
+     * **キーの組み合わせは VS Code 本体に合わせてプラットフォームで変える**:
+     * macOS は `⌥⌘C`/`⌥⌘W`/`⌥⌘R`（Option+Command）、Windows/Linux は `Alt+C`/`W`/`R`。
+     * macOS で Option 単独にすると、`code` 基準の判定が `ç`/`∑`/`®` の入力を奪ってしまい
+     * **それらの文字を含む語を検索欄に打てなくなる**（検索ウィジェットが開いている間だけに
+     * 絞っても、開いたまま本文を編集する使い方では奪われ続ける）。Command を足せば
+     * 文字入力にならないのでこの問題が起きず、本体のキー割り当てとも揃う。
+     *
+     * Shift の同時押しとIME変換中は対象外。
+     *
+     * **呼び出し側は検索ウィジェットが開いているときだけ使うこと。**
+     * 閉じている間にオプションだけ切り替わってもユーザーには見えず、
+     * 内部状態が黙って変わるだけになるため。
+     * @param {{altKey?:boolean, ctrlKey?:boolean, metaKey?:boolean, shiftKey?:boolean,
+     *          code?:string, isComposing?:boolean}} event
+     * @param {boolean} [isMac] macOS かどうか（呼び出し側が判定して渡す）
+     * @returns {'caseSensitive'|'wholeWord'|'useRegex'|null}
+     */
+    function matchSearchOptionShortcut(event, isMac) {
+        if (!event || event.isComposing || event.shiftKey) {
+            return null;
+        }
+        if (event.altKey !== true) {
+            return null;
+        }
+        // macOSは Option+Command、それ以外は Option(Alt) 単独
+        if (isMac ? !event.metaKey || event.ctrlKey : event.metaKey || event.ctrlKey) {
+            return null;
+        }
+        switch (event.code) {
+            case 'KeyC':
+                return 'caseSensitive';
+            case 'KeyW':
+                return 'wholeWord';
+            case 'KeyR':
+                return 'useRegex';
+            default:
+                return null;
+        }
+    }
+
+    /**
      * インラインテキストを変換
      */
     function convertInlineText(text, footnoteLabels) {
@@ -2928,6 +3010,8 @@ window.CommandsModule = (function() {
         buildBreadcrumbChain: buildBreadcrumbChain,
         isSlashCommandTrigger: isSlashCommandTrigger,
         handleInlineCodeExitRight: handleInlineCodeExitRight,
+        isRawWrapShortcut: isRawWrapShortcut,
+        matchSearchOptionShortcut: matchSearchOptionShortcut,
         handleAutoBlock: handleAutoBlock,
         handleHorizontalRule: handleHorizontalRule,
         handleCodeFence: handleCodeFence,

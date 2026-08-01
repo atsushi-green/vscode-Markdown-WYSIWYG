@@ -72,17 +72,28 @@ export function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	// コマンド: PDFとして出力（アクティブなWYSIWYGエディタの Webview で印刷ダイアログを開く）
+	// コマンド: ツールバーの表示/非表示を切り替え
 	context.subscriptions.push(
-		vscode.commands.registerCommand('markdown-wysiwyg-editor.exportPdf', () => {
-			// 印刷は Webview 側でしか実行できない（拡張機能ホストからは window.print が無い）ため、
-			// アクティブなパネルへメッセージを送って editor.js に実行させる
-			const sent = MarkdownEditorProvider.postToActivePanel({ type: 'print' });
-			if (!sent) {
-				vscode.window.showInformationMessage(
-					'WYSIWYGエディタをアクティブにしてからこのコマンドを実行してください。'
-				);
+		vscode.commands.registerCommand('markdown-wysiwyg-editor.toggleToolbar', async () => {
+			// 設定を反転させる。実際の反映は markdownEditor.ts が
+			// onDidChangeConfiguration を拾って Webview へ通知する。
+			const config = vscode.workspace.getConfiguration();
+			const key = MarkdownEditorProvider.showToolbarSetting;
+			const next = !config.get<boolean>(key, true);
+
+			// **読み取りと同じスコープへ書く。** `get()` が返すのは実効値
+			// （フォルダ > ワークスペース > ユーザー > 既定 の解決結果）なので、
+			// ワークスペースに値がある状態でユーザー設定だけ書き換えても実効値は
+			// 変わらず、**コマンドを押しても何も起きない**（それでいて成功したように
+			// 見える）。値が定義されているスコープを inspect で調べ、そこへ書き戻す。
+			const inspected = config.inspect<boolean>(key);
+			let target = vscode.ConfigurationTarget.Global;
+			if (inspected?.workspaceFolderValue !== undefined) {
+				target = vscode.ConfigurationTarget.WorkspaceFolder;
+			} else if (inspected?.workspaceValue !== undefined) {
+				target = vscode.ConfigurationTarget.Workspace;
 			}
+			await config.update(key, next, target);
 		})
 	);
 
