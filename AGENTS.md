@@ -207,7 +207,8 @@ npm run package
 このリポジトリは Claude Code のスキル `.claude/skills/evolve/SKILL.md` を使い、機能追加・バグ修正を半自動で少しずつ進めています。
 
 - **実行方法**: Claude Code で `/loop 6h /evolve` を起動する（＝**6時間ごとに `/evolve` を1周**実行）。`/loop` はセッションを開いている間だけ動くセッションローカルなループです。1周だけ回したい場合は `/evolve` を直接呼びます。
-- **1周の流れ**: ROADMAP から項目を1つ選ぶ → 実装 → テスト → **`/local-review`（サブエージェントによる客観レビュー）** → ドキュメント更新 → `evolve/NNN` ブランチへ commit/push → バックログ更新。**1周＝1コミット**、**main へは直接コミットしない**（人間がレビューして取り込む）。
+- **1周の流れ**: **GitHub の open issue を ROADMAP へ取り込む** → ROADMAP から項目を1つ選ぶ → 実装 → テスト → **`/local-review`（サブエージェントによる客観レビュー）** → ドキュメント更新 → `evolve/NNN` ブランチへ commit/push → バックログ更新 → **解決した issue をクローズ**。**1周＝1コミット**（issue 取り込みのみ例外的に別コミット）、**main へは直接コミットしない**（人間がレビューして取り込む）。
+- **GitHub issue 連携**: open issue はループが `docs/ROADMAP.md` に取り込みます。重複取り込みはメモ欄先頭の `[#12](issueのURL)` の番号で防ぐため、**ROADMAP / roadmap-done.md を手で編集するときも `#番号` を消さないでください**。`gh` コマンド（GitHub CLI）が未インストール・未認証の環境では、この工程はスキップされます。
 - **作業ブランチ**: `evolve/001`, `evolve/002` … の連番（3桁ゼロ埋め）。既存の `evolve/NNN` の最大値 +1 を、**最新の main から**切ります。常に main の直系の子孫になるため `git merge --ff-only` で取り込めます。
 - 詳しい運用（成果物の確認・取り込み・巻き戻し、設計意図）は [docs/dev-loop.md](./docs/dev-loop.md) を参照。
 

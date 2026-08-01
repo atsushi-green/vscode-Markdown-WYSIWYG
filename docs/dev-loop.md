@@ -5,15 +5,25 @@
 ## 何が起きるのか
 
 - `/evolve` スキル1回の実行 = **開発サイクル1周**です。1周で次を行います:
-  1. `docs/ROADMAP.md`（機能バックログ）から項目を1つ選ぶ
-  2. 実装する
-  3. テストする（`check-types` / `lint` / `test:unit` / `compile`、必要なら統合テスト）
-  4. **`/local-review` でサブエージェントによる客観レビューを行い、正当な指摘を修正する**
-  5. ドキュメントを更新する
-  6. `evolve/NNN` ブランチに commit / push する
-  7. バックログ（`ROADMAP.md` / `roadmap-done.md`）を更新する
+  1. **GitHub の open issue を `docs/ROADMAP.md` に取り込む**（未取り込みのものだけ）
+  2. `docs/ROADMAP.md`（機能バックログ）から項目を1つ選ぶ
+  3. 実装する
+  4. テストする（`check-types` / `lint` / `test:unit` / `compile`、必要なら統合テスト）
+  5. **`/local-review` でサブエージェントによる客観レビューを行い、正当な指摘を修正する**
+  6. ドキュメントを更新する
+  7. `evolve/NNN` ブランチに commit / push する
+  8. バックログ（`ROADMAP.md` / `roadmap-done.md`）を更新し、**解決した issue をクローズする**
 - **1周＝1コミット**を原則とし、後から個別に `git revert` できるチェックポイントになります。
 - **main には直接コミット・プッシュしません。** 作業は必ず `evolve/NNN` ブランチで行い、main への取り込みは人間がレビューしてから行います。
+
+## GitHub issue との連携
+
+バグ報告や要望を GitHub の issue で受け取り、ループがそれをバックログとして拾えるようにしています。
+
+- **取り込み**: サイクルの最初に `gh issue list --state open` で open issue を取得し、まだ ROADMAP に無いものを `todo` として `docs/ROADMAP.md` に追加します。この取り込みだけで1コミット（`docs: GitHub issue #N を ROADMAP に取り込み`）を作ってから実装に入るので、途中で失敗しても取り込み結果は残ります。
+- **重複防止**: ROADMAP の各行のメモ欄の先頭に `[#12](https://github.com/…/issues/12)` というリンクを書き、**その URL の `/issues/N` 部分**で「取り込み済みかどうか」を判定します（メモには `#000` のような色指定も混ざるため、素の `#番号` では誤判定します）。完了して `docs/roadmap-done.md` へ移すときもこの表記を残すため、閉じた issue が再オープンされても項目が二重にできません。**手で ROADMAP を編集するときは、この `#番号` を消さないでください。**
+- **クローズ**: その issue を解決したサイクルで、push が成功した後に `gh issue close` で閉じます。コメントには対応コミットのハッシュ・作業ブランチ名・「main には未取り込みで、人間のレビュー後に取り込まれる」ことを書きます。見送り（`blocked`）や部分対応の場合は閉じず、コメントだけ残します。
+- **前提**: [GitHub CLI](https://cli.github.com/)（`gh`）がインストールされ、認証済み（`gh auth status` が通る）である必要があります。**未インストールの環境ではこの工程はスキップされ**、その旨がサイクル終了時の報告に出ます（ループ自体は止まりません）。導入は `brew install gh && gh auth login` です。
 
 ## 作業ブランチの命名（連番 `evolve/NNN`）
 
