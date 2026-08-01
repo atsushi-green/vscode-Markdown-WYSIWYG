@@ -202,6 +202,8 @@ npm run package
 
 - **表コピーの貼り付け品質（`text/html` の整形）**: `writeToClipboard` は `text/plain`（TSV）と `text/html` の両方を書くが、`buildHtmlTableFragment` がセルの `innerHTML` をそのまま使っていたため貼り付け先で崩れていた。`sanitizeCellForClipboard(clonedCell)`（`table.js`・**クローンを渡す前提で破壊的に書き換える**）で整える: インライン数式 `.math-inline` は `data-math` から `$式$` テキストへ／脚注参照 `sup.footnote-ref` はラベルだけの `<sup>` へ（リンク先 `#fn-…` は外で無効）／`.raw-markdown`・`.find-highlight` は**編集中だけ意味を持つ**ので中身のテキストだけ残す／画像は `src` が webview URI に解決済みで貼り付け先から見えないため `data:` URI 以外は alt テキストへ（alt が無ければ削除）／文書内アンカー `a[href^="#"]` はリンクを外す／`contenteditable`・`class`・`id`・`data-*` を削除。あわせて `<thead>`+`<th>`（範囲がヘッダー行から始まる場合）と、罫線が出る最低限のインラインスタイルを付ける（貼り付け先はこちらのCSSを持たない）。**テストは `buildHtmlTableFragment` 経由でも確認する**——サニタイズ関数を直接叩くテストだけだと、組み立て側から呼び出しを外しても全テストが通ってしまうため
 
+- **WYSIWYG本文のコピー／カット（選択範囲の生Markdown化）**: `editor.js` の `setupClipboardEvents` が `document` の `copy`/`cut` を拾い、`commands.getSelectedMarkdown(range)` が返した文字列を `text/plain` へ書く（`null` なら既定動作に委ねる）。レンダリング後のテキストをそのままコピーすると表・数式・Mermaidが潰れるため、選択が交差したトップレベルブロックだけをクリーンクローン（`markdown.getCleanEditorClone`）から取り出し `htmlToMarkdown` で直列化する。**ブロック単位で直列化する副作用として「ブロックの一部だけを選んだのにブロック全体が返る」問題があり、例外を2つ設けている**: (1) 単一テーブルセル内に収まる選択は `null`（セルのテキストコピーに委ねる）、(2) **単一コードブロックの本文（`pre > code`）内に収まる選択は、選択したぶんのコード文字列だけを返す**（issue #20。`range.toString()` からキャレット用のゼロ幅文字を除去する＝📋 コピーボタンと同じ後始末をするため `null` を返して既定動作に委ねてはいない）。どちらの例外も「選択がその島をまたぐ／外へ出る」場合は成立せず、従来どおりブロック全体が記法付きで直列化される
+
 ## 自動開発ループ（`/evolve` × `/loop`）
 
 このリポジトリは Claude Code のスキル `.claude/skills/evolve/SKILL.md` を使い、機能追加・バグ修正を半自動で少しずつ進めています。

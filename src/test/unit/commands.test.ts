@@ -2449,6 +2449,83 @@ suite('CommandsModule', () => {
             assert.strictEqual(env.commands.getSelectedMarkdown(range), null);
         });
 
+        test('コードブロック本文の部分選択は選択したぶんのコード文字列だけを返す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml(
+                '```js\nconst a = 1;\nconst b = 2;\n```'
+            );
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            const text = code.firstChild as Text;
+            const range = env.document.createRange();
+            // 1行目の `const a = 1;` だけを選択したマウス操作相当
+            range.setStart(text, 0);
+            range.setEnd(text, 'const a = 1;'.length);
+
+            const md = env.commands.getSelectedMarkdown(range);
+            assert.strictEqual(md, 'const a = 1;');
+            assert.ok(!md.includes('```'), 'フェンスが混入している: ' + md);
+            assert.ok(!md.includes('const b = 2;'), '選択外の行が混入している: ' + md);
+        });
+
+        test('本文を末尾まで選ぶとフェンス由来の末尾改行が落ちる（📋ボタンと同じ結果）', () => {
+            // markdownToHtml はコード本文を必ず `\n` で終わらせる
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\ncode\n```');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            assert.ok(code.textContent!.endsWith('\n'), '前提: 実DOMの本文は改行で終わる');
+            const range = env.document.createRange();
+            range.selectNodeContents(code);
+
+            assert.strictEqual(env.commands.getSelectedMarkdown(range), 'code');
+        });
+
+        test('本文の途中までの選択に含まれる改行は落とさない', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\nfirst\nsecond\n```');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            const text = code.firstChild as Text;
+            const range = env.document.createRange();
+            // 1行目を改行ごと選択（＝行まるごとのコピー）
+            range.setStart(text, 0);
+            range.setEnd(text, 'first\n'.length);
+
+            assert.strictEqual(env.commands.getSelectedMarkdown(range), 'first\n');
+        });
+
+        test('コードブロック本文の選択に含まれるゼロ幅文字は除去される', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\ncode\n```');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            // 空のコードブロック作成時に入るキャレット用ゼロ幅文字を再現する
+            const text = code.firstChild as Text;
+            text.data = env.state.ZERO_WIDTH + text.data;
+            const range = env.document.createRange();
+            range.selectNodeContents(code);
+
+            assert.strictEqual(env.commands.getSelectedMarkdown(range), 'code');
+        });
+
+        test('ゼロ幅文字だけの選択は null（空文字でクリップボードを潰さない）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\n\n```');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            // 空のコードブロックにキャレットを置いた状態を再現する
+            code.textContent = env.state.ZERO_WIDTH;
+            const range = env.document.createRange();
+            range.selectNodeContents(code);
+
+            assert.strictEqual(env.commands.getSelectedMarkdown(range), null);
+        });
+
+        test('コードブロックをまたぐ選択はフェンス付きの生Markdownを返す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('前の段落\n\n```js\nconst a = 1;\n```');
+            const p = env.editor.querySelector('p') as HTMLElement;
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            const codeText = code.firstChild as Text;
+            const range = env.document.createRange();
+            range.setStart(p.firstChild as Node, 0);
+            range.setEnd(codeText, 'const a'.length);
+
+            const md = env.commands.getSelectedMarkdown(range);
+            assert.ok(md && md.includes('```'), 'フェンスが失われている: ' + md);
+            assert.ok(md.includes('const a = 1;'), 'コード本文が失われている: ' + md);
+        });
+
         test('Mermaidレンダリング済み（隠しpre＋container）でも生Markdownを返す', () => {
             // mermaid.js の render() が作る実DOMを再現する
             // （隠し pre.mermaid-source ＋ contenteditable=false の .mermaid-container）

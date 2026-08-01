@@ -2755,6 +2755,28 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * コードブロック本文（`pre > code`）に収まる選択を、クリップボードへ載せる文字列にする。
+     * `copyCodeBlock`（📋ボタン）と同じ後始末をする:
+     *   - キャレット用のゼロ幅文字を除去する
+     *   - 選択が本文の末尾まで届いているときだけ、フェンス由来の末尾改行を1つ落とす
+     *     （`markdownToHtml` はコード本文を必ず `\n` で終わらせるため。途中までの選択に
+     *     含まれる改行は利用者が選んだものなので落とさない）
+     * 残る文字が無ければ null を返して既定のコピーへ委ねる（空文字を返すと呼び出し側が
+     * 「Markdown化した」とみなしてクリップボードを空で上書きしてしまうため）。
+     */
+    function extractSelectedCodeText(range, codeBody) {
+        const bodyRange = document.createRange();
+        bodyRange.selectNodeContents(codeBody);
+        const reachesEnd = range.compareBoundaryPoints(range.END_TO_END, bodyRange) >= 0;
+
+        let text = range.toString().replace(new RegExp(state.ZERO_WIDTH, 'g'), '');
+        if (reachesEnd) {
+            text = text.replace(/\n$/, '');
+        }
+        return text === '' ? null : text;
+    }
+
+    /**
      * 段落・見出しなど「本文だけの単一ブロック」か判定する。
      * これらの部分選択は素のテキストコピー（既定動作）に委ねてよい
      * （リスト・引用・テーブル・コード・数式・Mermaid は記法が失われるため生Markdown化する）。
@@ -2773,6 +2795,12 @@ window.CommandsModule = (function() {
      * 対応する（`computeEditorLineMap` と同じ不変条件）。選択が交差したブロックだけを
      * クリーンクローン側から取り出し、読込／保存と同じ `htmlToMarkdown` で直列化する。
      *
+     * ただし選択が単一コードブロックの本文内に収まる場合は、**Markdownではなく
+     * 選択したぶんのコード文字列そのもの**を返す（コードの一部を選んでコピーしたのに
+     * ブロック全体が貼り付けられてしまうのを避けるため）。本文を端から端まで選んだ場合も
+     * この経路になりフェンス・言語指定は付かない——📋コピーボタンと同じ「コードだけ欲しい」
+     * 挙動に揃えている。フェンス付きが欲しい場合はブロックの外を含めて選択する。
+     *
      * 生Markdown化しない（＝既定のコピーに委ねる）場合は null を返す:
      *   - エディタ内に選択が無い／交差ブロックが無い
      *   - 交差ブロックが本文だけの単一ブロック（段落／見出し）の部分選択
@@ -2789,6 +2817,14 @@ window.CommandsModule = (function() {
         });
         if (cell) {
             return null;
+        }
+        // 単一コードブロックの本文内に収まる選択は、選択したぶんだけのコード文字列を返す
+        // （ブロック全体をフェンス付きで直列化するのはコードブロックをまたぐ選択のとき）
+        const codeBody = utils.findAncestor(range.commonAncestorContainer, function (el) {
+            return el.tagName === 'CODE' && !!el.parentElement && el.parentElement.tagName === 'PRE';
+        });
+        if (codeBody) {
+            return extractSelectedCodeText(range, codeBody);
         }
         const liveBlocks = Array.prototype.slice.call(state.editor.children).filter(function (el) {
             return !(el.classList && el.classList.contains('mermaid-source'));
