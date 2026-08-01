@@ -2664,6 +2664,111 @@ suite('CommandsModule', () => {
             assert.ok(h1!.textContent!.includes('見出しA'), h1!.textContent!);
         });
 
+        test('コードブロック内への貼り付けはMarkdown解釈せずコード本文へ入る', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```python\nx = 1\n```');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            const text = code.firstChild as Text;
+            setCaret(text, 'x = 1\n'.length); // 2行目の先頭
+
+            // Markdown記法と衝突する文字を含むコード片
+            const handled = env.commands.handleMarkdownPaste('# コメント\n- item\n    indented');
+            assert.strictEqual(handled, true);
+
+            // 見出し・リストへ変換されていない＝ブロックの外へ出ていない
+            assert.strictEqual(env.editor.children.length, 1, env.editor.innerHTML);
+            assert.strictEqual(env.editor.querySelectorAll('h1, ul').length, 0, env.editor.innerHTML);
+            assert.ok(code.textContent!.includes('# コメント'), code.textContent!);
+            assert.ok(code.textContent!.includes('- item'), code.textContent!);
+        });
+
+        test('コードブロックへ貼り付けた改行が往復で保たれる', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\n```');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            setCaret(code.firstChild as Text, 0);
+
+            env.commands.handleMarkdownPaste('first\r\nsecond\r\nthird');
+
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            // CRLF は正規化され、3行がコードブロックの中に残る
+            assert.strictEqual(out, '```\nfirst\nsecond\nthird\n```');
+        });
+
+        test('コードブロック内の選択範囲は貼り付けで置き換わる', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\nold\n```');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            const text = code.firstChild as Text;
+            const range = env.document.createRange();
+            range.setStart(text, 0);
+            range.setEnd(text, 'old'.length);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('new'), true);
+            assert.strictEqual(code.textContent, 'new\n');
+        });
+
+        test('貼り付け後のキャレットは挿入したテキストの末尾にある', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\nab\n```');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            setCaret(code.firstChild as Text, 1); // 「a」と「b」の間
+
+            env.commands.handleMarkdownPaste('XY');
+
+            const sel = env.window.getSelection();
+            assert.strictEqual(sel.isCollapsed, true);
+            assert.strictEqual(sel.anchorNode.textContent, 'XY');
+            assert.strictEqual(sel.anchorOffset, 'XY'.length);
+            assert.strictEqual(code.textContent, 'aXYb\n');
+        });
+
+        test('キャレットがpre自身にあってもコード本文へ入る（コードブロックの外へ出ない）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\n```');
+            const pre = env.editor.querySelector('pre') as HTMLElement;
+            const code = pre.querySelector('code') as HTMLElement;
+            setCaret(pre, 0); // 空ブロックのクリック直後などに起こる状態
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('# コメント\n- item'), true);
+            assert.strictEqual(env.editor.querySelectorAll('h1, ul').length, 0, env.editor.innerHTML);
+            assert.ok(code.textContent!.includes('# コメント'), env.editor.innerHTML);
+            // PRE 直下（<code> の外）へ裸のテキストが入っていない
+            assert.strictEqual(
+                Array.from(pre.childNodes).filter(n => n.nodeType === 3 && n.textContent!.trim()).length,
+                0, env.editor.innerHTML);
+        });
+
+        test('コードブロックの外までまたぐ選択はMarkdown経路のまま（エディタ直下に裸のテキストを入れない）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\ncode\n```\n\n後続の段落');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            const p = env.editor.querySelector('p') as HTMLElement;
+            const range = env.document.createRange();
+            range.setStart(code.firstChild as Text, 2);           // コード本文の途中から
+            range.setEnd(p.firstChild as Text, 3);                // ブロックの外で終わる
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            env.commands.handleMarkdownPaste('# 見出し\n\n本文');
+
+            // エディタ直下に裸のテキストノードが生えていない（全てブロック要素の中）
+            const bareText = Array.from(env.editor.childNodes)
+                .filter(n => n.nodeType === 3 && n.textContent!.trim());
+            assert.deepStrictEqual(bareText.map(n => n.textContent), [], env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('h1'), '見出しへ変換されていない: ' + env.editor.innerHTML);
+        });
+
+        test('インラインコード内への貼り付けは従来どおりMarkdown経路', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('`inline` を含む段落');
+            const inline = env.editor.querySelector('p code') as HTMLElement;
+            assert.ok(inline, 'インラインコードが生成されていない');
+            setCaret(inline.firstChild as Text, 2);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('# 見出し\n\n本文'), true);
+            assert.ok(env.editor.querySelector('h1'), '見出しへ変換されていない: ' + env.editor.innerHTML);
+        });
+
         test('貼り付け後の内容が生Markdownとして往復する', () => {
             env.editor.innerHTML = '<p><br></p>';
             setCaret(env.editor.querySelector('p') as HTMLElement, 0);

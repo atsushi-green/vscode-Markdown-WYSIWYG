@@ -2860,6 +2860,74 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * ノードが属するコードブロック本文（`pre > code`）を返す。無ければ null。
+     * キャレットが `<pre>` 自身（空ブロックのクリック直後などに起こる）にある場合は
+     * その子の `<code>` を返す——利用者から見ればコードブロックの中だから。
+     * front matter 本文（`pre.frontmatter-body`）は `<code>` を持たないため null になる。
+     */
+    function resolveCodeBlockBody(node) {
+        const el = utils.findAncestor(node, function (candidate) {
+            return candidate.tagName === 'CODE' || candidate.tagName === 'PRE';
+        });
+        if (!el) {
+            return null;
+        }
+        if (el.tagName === 'CODE') {
+            // インラインコード（`<p>` 内の `<code>`）は対象外
+            return el.parentElement && el.parentElement.tagName === 'PRE' ? el : null;
+        }
+        return el.querySelector(':scope > code');
+    }
+
+    /**
+     * 貼り付け先が単一のコードブロック本文に収まっていればその `<code>` を返す。
+     * **選択の両端を見る**——始端だけで判定すると、コードブロックの途中から始まって
+     * ブロックの外で終わる選択のとき、`deleteContents` がキャレットを共通祖先
+     * （＝`#editor` の直下・PRE の直後）へ寄せるため、テキストがコード本文ではなく
+     * エディタ直下へ裸で挿入されてしまう。またぐ選択は通常のMarkdown経路へ渡す。
+     */
+    function findPasteTargetCodeBody(range) {
+        const start = resolveCodeBlockBody(range.startContainer);
+        if (!start) {
+            return null;
+        }
+        return resolveCodeBlockBody(range.endContainer) === start ? start : null;
+    }
+
+    /**
+     * コードブロック本文へのテキスト貼り付け（`handleMarkdownPaste` から呼ぶ）。
+     * 選択範囲を置き換えてテキストノードをそのまま差し込み、キャレットを末尾へ置く。
+     *
+     * 既定の貼り付け（`false` を返して委ねる）にしないのは、contenteditable の既定挿入が
+     * 改行を `<div>`／`<br>` の**要素境界**として入れることがあり、`htmlToMarkdown` が
+     * PRE/CODE を `textContent` で読む（要素境界は改行にならない）ため
+     * **貼り付けた改行が保存で失われうる**ため。テキストノードで入れれば `\n` がそのまま残る。
+     *
+     * 常に true を返す（呼び出し側が preventDefault と input イベント発火を行う）。
+     */
+    function pasteIntoCodeBlock(range, codeBody, text) {
+        // キャレットが `<pre>` 自身にあるときは本文の末尾へ寄せてから挿入する
+        // （そのまま insertNode すると `<code>` の外＝PRE 直下へ入ってしまう）
+        if (!codeBody.contains(range.startContainer)) {
+            range.selectNodeContents(codeBody);
+            range.collapse(false);
+        }
+        range.deleteContents();
+        const inserted = document.createTextNode(text);
+        range.insertNode(inserted);
+
+        const caret = document.createRange();
+        caret.setStart(inserted, inserted.length);
+        caret.collapse(true);
+        const selection = window.getSelection();
+        if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(caret);
+        }
+        return true;
+    }
+
+    /**
      * クリップボードのMarkdownテキストをブロック要素へ変換してキャレット位置に挿入する。
      * 貼り付けを既定動作（プレーンテキスト挿入）に任せるとブロック記法（見出し・リスト・
      * コードフェンス・テーブル・ブロック数式・Mermaid）が再読み込みまで描画されないため、
@@ -2871,6 +2939,11 @@ window.CommandsModule = (function() {
      *     `applyInlineFormatting` で十分なため
      * 取り込んだ場合は true を返す（呼び出し側で preventDefault し、
      * テーブル描画と input イベント発火＝残りのパイプラインを行う）。
+     *
+     * **キャレットがコードブロック本文内にある場合は Markdown として解釈しない**
+     * （`pasteIntoCodeBlock` がテキストのまま差し込んで true を返す）。コードは
+     * Markdown記法と衝突する文字（`# `・`- `・4スペースインデント・`|`）を普通に含むため、
+     * 再解釈するとコード片が見出しやリストになってコードブロックの外へ出てしまう。
      *
      * 挿入位置:
      *   - キャレットが段落内: 段落をキャレット位置で前半/後半に分割し、間へ挿入
@@ -2888,6 +2961,12 @@ window.CommandsModule = (function() {
         const range = selection.getRangeAt(0);
         if (!state.editor.contains(range.startContainer)) {
             return false;
+        }
+
+        // コードブロック本文への貼り付けは Markdown として解釈しない
+        const codeBody = findPasteTargetCodeBody(range);
+        if (codeBody) {
+            return pasteIntoCodeBlock(range, codeBody, utils.normalizeEol(text));
         }
 
         // 実パーサーで判定する（ブロック判定の正規表現を重複させない）。

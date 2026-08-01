@@ -20,7 +20,9 @@
 
 | 状態 | 不具合 | サイズ | メモ |
 |------|--------|--------|------|
-| todo | コードブロック内への貼り付けが `handleMarkdownPaste` で複数ブロックへ再解釈され、コードブロックの外に出る | S | `commands.js` の `handleMarkdownPaste` はキャレットがどのブロックにいても貼り付けテキストを `markdownToHtml` で再解釈し、段落以外のブロック内なら**そのトップレベルブロックの直後**へ挿入する。そのためコードブロック内へ `# comment`（Python/Shell のコメント）・`- item`・4スペースインデント行・`\|` を含む行などを貼ると、見出し・リスト・別のコードブロックとして解釈されコードブロックの外へ出てしまう。既存の挙動だが、issue #20 の修正でコードブロックのコピーが「フェンス無しの生コード」になったため**踏む頻度と壊れ方が悪化した**。キャレットが `pre > code` 内なら `handleMarkdownPaste` を `false` にして既定のプレーンテキスト挿入へ委ねるのが素直。`/local-review` B-1 由来（severity medium） |
+| todo | `serializePre` がフェンス長を調整せず、本文に ` ``` ` を含むコードブロックの往復が壊れる | S | `markdown.js` の `serializePre` は本文の内容にかかわらず常にバッククォート3個で囲むため、コード本文中に ` ``` ` を含む行があるとそこでフェンスが途中終了し、往復でMarkdownが壊れる。CommonMark どおり**本文中の最長バッククォート連続数 +1** でフェンスを作れば直る。既存の直列化側の問題だが、コードブロックへの貼り付けをMarkdown解釈しないようにしたことで「` ``` ` を含むテキストをコードブロックへ貼る」操作が普通に通るようになり**到達しやすくなった**。`/local-review` B-1 由来（severity medium） |
+| todo | YAML front matter 本文への貼り付けが Markdown として再解釈され外へ出る | S | `pre.frontmatter-body` は編集可能な `<pre>` だが `<code>` 子を持たないため、コードブロック向けの貼り付けガード（`resolveCodeBlockBody`）に当たらない。`- key: value` を含む YAML を貼るとリストへ変換され front matter の外へ出る（コードブロックで直したのと同種の症状）。`resolveCodeBlockBody` の対象に front matter 本文を含めるか、専用の分岐を足す。`/local-review` B-2 由来（severity low） |
+| todo | ハイライト済みコードブロックへ追記した部分に色が付かない／初回ハイライトでキャレットが飛びうる | S | (1) `applySyntaxHighlighting` は `force=false` のため `hljs` クラス付きのブロックを再ハイライトせず、貼り付け・タイピングで足した部分だけ無着色のまま残る（既存挙動）。(2) 逆に**まだハイライトされていないブロック**（空ブロック等は `codeText.trim()` が空でスキップされる）へ貼り付けると、直後の input で初めて `highlightCodeBlock` が走り `block.innerHTML = result.value` でDOMを作り直すため、`pasteIntoCodeBlock` が置いたキャレットが失われる可能性がある（`editor.js` の復元は `didFormat` が true のときだけ）。実機確認が要る。`/local-review` B-3・C-1 由来（severity low／medium・確信度中） |
 
 ## 優先度: 中
 

@@ -204,6 +204,8 @@ npm run package
 
 - **WYSIWYG本文のコピー／カット（選択範囲の生Markdown化）**: `editor.js` の `setupClipboardEvents` が `document` の `copy`/`cut` を拾い、`commands.getSelectedMarkdown(range)` が返した文字列を `text/plain` へ書く（`null` なら既定動作に委ねる）。レンダリング後のテキストをそのままコピーすると表・数式・Mermaidが潰れるため、選択が交差したトップレベルブロックだけをクリーンクローン（`markdown.getCleanEditorClone`）から取り出し `htmlToMarkdown` で直列化する。**ブロック単位で直列化する副作用として「ブロックの一部だけを選んだのにブロック全体が返る」問題があり、例外を2つ設けている**: (1) 単一テーブルセル内に収まる選択は `null`（セルのテキストコピーに委ねる）、(2) **単一コードブロックの本文（`pre > code`）内に収まる選択は、選択したぶんのコード文字列だけを返す**（issue #20。`range.toString()` からキャレット用のゼロ幅文字を除去する＝📋 コピーボタンと同じ後始末をするため `null` を返して既定動作に委ねてはいない）。どちらの例外も「選択がその島をまたぐ／外へ出る」場合は成立せず、従来どおりブロック全体が記法付きで直列化される
 
+- **コードブロック本文への貼り付け**: `commands.handleMarkdownPaste` は貼り付けテキストを `markdownToHtml` で再解釈してブロックを挿入するが、**キャレットがコードブロック本文にある場合だけは解釈せずテキストのまま差し込む**（`findPasteTargetCodeBody` → `pasteIntoCodeBlock`）。コードは Markdown記法と衝突する文字（`# `・`- `・4スペースインデント・`|`）を普通に含むため、再解釈するとコード片が見出しやリストになって**コードブロックの外へ出る**。既定の貼り付けへ委ねない（`false` を返さない）のは、contenteditable の既定挿入が改行を `<div>`/`<br>` の**要素境界**として入れることがあり、`serializePre` が PRE/CODE を `textContent` で読む＝要素境界は改行にならないため**貼り付けた改行が保存で失われうる**から。テキストノードで入れれば `\n` がそのまま残る。**判定は選択の両端を見る**——始端だけで判定すると、コードブロックの途中から始まってブロックの外で終わる選択のとき `deleteContents` がキャレットを共通祖先（`#editor` 直下・PRE の直後）へ寄せるため、`insertNode` がコード本文ではなく**エディタ直下へ裸のテキストを挿入**してしまう（`/local-review` A-1 で検出・回帰テスト有り）。キャレットが `<pre>` 自身にある場合（空ブロックのクリック直後など）は子の `<code>` の末尾へ寄せてから挿入する。front matter 本文（`pre.frontmatter-body`）は `<code>` を持たないためこの保護の対象外（ROADMAPに残置）
+
 ## 自動開発ループ（`/evolve` × `/loop`）
 
 このリポジトリは Claude Code のスキル `.claude/skills/evolve/SKILL.md` を使い、機能追加・バグ修正を半自動で少しずつ進めています。
