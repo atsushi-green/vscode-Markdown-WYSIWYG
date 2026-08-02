@@ -338,10 +338,23 @@ window.MarkdownModule = (function() {
     }
 
     /**
-     * コードフェンス行の判定
+     * コードフェンス行の判定。
+     * 返り値の [1] はフェンス文字列（バッククォート3個以上）、[2] は言語指定。
+     * 3個固定にしないのは、本文に ``` を含むコードブロックを
+     * `serializePre` が4個以上のフェンスで囲む（`fenceLengthFor`）ため。
      */
     function matchFence(line) {
-        return /^```(\S*)\s*$/.exec(line);
+        return /^(`{3,})(\S*)\s*$/.exec(line);
+    }
+
+    /**
+     * 閉じフェンス行の判定。CommonMark どおり、開きフェンス以上の長さの
+     * バッククォートだけで構成された行を閉じとみなす（言語指定は付かない）。
+     * これにより ``` を含む本文が4個フェンスの内側で閉じずに済む。
+     */
+    function isClosingFence(line, openLength) {
+        const match = /^(`{3,})\s*$/.exec(line);
+        return !!match && match[1].length >= openLength;
     }
 
     // 脚注定義行（`[^label]: 本文`）の判定。ラベルはid/href属性にそのまま使うため
@@ -413,7 +426,10 @@ window.MarkdownModule = (function() {
         // 1st pass: コードフェンス/ブロック数式の中かどうかを行ごとに判定しつつ、
         // 定義行らしき行を仮判定する（まだ確定しない＝参照の有無を見てから決める）。
         const entries = [];
-        let inFence = false;
+        // 開いているコードフェンスの長さ（0 ＝ フェンスの外）。単なる真偽のトグルにすると、
+        // 本文に ``` を含む4個フェンスのブロック（`fenceLengthFor` が出力する）で
+        // 内側の ``` を閉じと誤認し、以降の内外判定がすべて反転する
+        let fenceLength = 0;
         let inMathBlock = false;
 
         lines.forEach(function (line, index) {
@@ -421,17 +437,29 @@ window.MarkdownModule = (function() {
                 entries.push({ line: line, def: null, scannable: false });
                 return;
             }
-            if (!inMathBlock && matchFence(line)) {
-                inFence = !inFence;
-                entries.push({ line: line, def: null, scannable: false });
-                return;
+            if (!inMathBlock) {
+                if (fenceLength === 0) {
+                    const fence = matchFence(line);
+                    if (fence) {
+                        fenceLength = fence[1].length;
+                        entries.push({ line: line, def: null, scannable: false });
+                        return;
+                    }
+                } else {
+                    // 開きフェンス以上の長さの行だけが閉じる（内側の短い ``` は本文）
+                    if (isClosingFence(line, fenceLength)) {
+                        fenceLength = 0;
+                    }
+                    entries.push({ line: line, def: null, scannable: false });
+                    return;
+                }
             }
-            if (!inFence && /^\$\$\s*$/.test(line)) {
+            if (fenceLength === 0 && /^\$\$\s*$/.test(line)) {
                 inMathBlock = !inMathBlock;
                 entries.push({ line: line, def: null, scannable: false });
                 return;
             }
-            if (inFence || inMathBlock) {
+            if (inMathBlock) {
                 entries.push({ line: line, def: null, scannable: false });
                 return;
             }
@@ -945,10 +973,11 @@ window.MarkdownModule = (function() {
             // --- コードブロック ---
             const fence = matchFence(line);
             if (fence) {
-                const language = (fence[1] || '').trim();
+                const openLength = fence[1].length;
+                const language = (fence[2] || '').trim();
                 const codeLines = [];
                 i++;
-                while (i < lines.length && !/^```\s*$/.test(lines[i])) {
+                while (i < lines.length && !isClosingFence(lines[i], openLength)) {
                     codeLines.push(lines[i]);
                     i++;
                 }
@@ -1321,6 +1350,28 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * コード本文を囲むのに安全なバッククォートの数を返す。
+     * 本文自体が ``` を含む場合（Markdownの書き方を説明するコード片など）、
+     * 3個固定で囲むとそこでフェンスが閉じてしまい往復が壊れるため、
+     * **閉じフェンスになり得る行の最長バッククォート連続数 +1**（最低3）で囲む。
+     *
+     * 数えるのは「バッククォートだけの行」に限る（先頭スペースはCommonMarkが
+     * 許す3個まで見る）——`isClosingFence` と同じ条件。行中の ``` （`const md = "```";`
+     * など）はどのCommonMark実装でもフェンスを閉じないので、数えると
+     * 無意味にフェンスが伸びて差分ノイズになるだけ。
+     */
+    function fenceLengthFor(body) {
+        let longest = 0;
+        body.split('\n').forEach(function (line) {
+            const match = /^ {0,3}(`+)\s*$/.exec(line);
+            if (match) {
+                longest = Math.max(longest, match[1].length);
+            }
+        });
+        return Math.max(3, longest + 1);
+    }
+
+    /**
      * pre要素をコードフェンスへ直列化
      */
     function serializePre(pre) {
@@ -1338,7 +1389,8 @@ window.MarkdownModule = (function() {
         if (!body.endsWith('\n')) {
             body += '\n';
         }
-        return `\`\`\`${language}\n${body}\`\`\`\n\n`;
+        const fence = '`'.repeat(fenceLengthFor(body));
+        return `${fence}${language}\n${body}${fence}\n\n`;
     }
 
     /**

@@ -1630,6 +1630,68 @@ suite('MarkdownModule', () => {
             assert.strictEqual(md, '```python\nprint(1)\n```\n');
         });
 
+        test('本文に ``` を含むコードブロックは4個フェンスで囲む', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<pre><code data-lang="markdown">```js\nconst a = 1;\n```\n</code></pre>'
+            );
+            assert.strictEqual(md, '````markdown\n```js\nconst a = 1;\n```\n````\n');
+        });
+
+        test('閉じフェンスになり得る行の最長連続数に合わせてフェンスを伸ばす', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<pre><code>a\n`````\nb\n</code></pre>'
+            );
+            assert.strictEqual(md, '``````\na\n`````\nb\n``````\n');
+        });
+
+        test('行中のバッククォートではフェンスを伸ばさない（閉じフェンスになり得ない）', () => {
+            const md = env.markdown.htmlToMarkdown(
+                '<pre><code>const s = `template`;\nconst md = "```";\n</code></pre>'
+            );
+            assert.strictEqual(md, '```\nconst s = `template`;\nconst md = "```";\n```\n');
+        });
+
+        test('4個フェンスのコードブロックを往復しても内容が保たれる', () => {
+            const src = '````markdown\n# 見出しの例\n\n```js\nconst a = 1;\n```\n````';
+            const html = env.markdown.markdownToHtml(src);
+            // 途中の ``` で閉じず、1つのコードブロックとして読める
+            env.editor.innerHTML = html;
+            assert.strictEqual(env.editor.querySelectorAll('pre').length, 1, html);
+            const back = env.markdown.htmlToMarkdown(html).replace(/\s+$/, '');
+            assert.strictEqual(back, src);
+        });
+
+        test('4個フェンス内の脚注定義行はコードブロックに残る（外へ持ち出されない）', () => {
+            const src = '本文 [^1] です\n\n````markdown\n```\n[^1]: 中身\n````';
+            const html = env.markdown.markdownToHtml(src);
+            env.editor.innerHTML = html;
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            assert.ok(code!.textContent!.includes('[^1]: 中身'),
+                '脚注定義行がコードブロックから抜き出されている: ' + html);
+            const back = env.markdown.htmlToMarkdown(html).replace(/\s+$/, '');
+            assert.strictEqual(back, src);
+        });
+
+        test('4個フェンスのコードブロックより後ろの脚注定義が機能する', () => {
+            const src = '本文 [^1] です\n\n````markdown\nx\n```\n````\n\n[^1]: 本物の定義';
+            const html = env.markdown.markdownToHtml(src);
+            env.editor.innerHTML = html;
+            // フェンスを抜けた後の定義行が脚注として認識されている
+            assert.ok(env.editor.querySelector('section.footnotes'),
+                '脚注セクションが作られていない: ' + html);
+            assert.ok(env.editor.querySelector('sup.footnote-ref'),
+                '参照がリンク化されていない: ' + html);
+        });
+
+        test('開きより短い閉じフェンスでは閉じない', () => {
+            const src = '````\n```\nまだ中\n````';
+            const html = env.markdown.markdownToHtml(src);
+            env.editor.innerHTML = html;
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            assert.ok(code, html);
+            assert.strictEqual(code.textContent, '```\nまだ中\n');
+        });
+
         test('highlight.jsの装飾スパンが入ったコードブロックもテキストとして剥がす', () => {
             const md = env.markdown.htmlToMarkdown(
                 '<pre><code data-lang="python"><span class="hljs-keyword">def</span> f():\n</code></pre>'

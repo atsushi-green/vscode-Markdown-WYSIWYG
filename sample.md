@@ -88,6 +88,14 @@ function greet(name) {
 }
 ```
 
+コードブロックの中に ``` を書きたいときは、外側のフェンスを4個以上にします（保存時も自動でこの形が保たれます）:
+
+````markdown
+```js
+const a = 1;
+```
+````
+
 JavaScript/TypeScript/JSON/YAML/Go/Rust などもハイライトされます（別名 `ts` / `yml` / `golang` / `rs` も可）。
 
 ```typescript
