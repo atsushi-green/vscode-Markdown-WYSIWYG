@@ -20,7 +20,8 @@
 
 | 状態 | 不具合 | サイズ | メモ |
 |------|--------|--------|------|
-| todo | front matter 本文に `---` を含むテキストを貼ると往復が壊れる | S | `markdown.js` の front matter 直列化は本文をエスケープせず `---\n<本文>\n---` で囲むため、本文に `---` 行が含まれると再パース時に front matter が早期終了し、残りが本文（先行行があると setext H2）になる。タイプでも起きる既存の穴だが、「front matter ブロックを丸ごとコピーして貼る」＝区切り線込みのテキストが現実的なので、逐語貼り付け対応で到達しやすくなった（可変長フェンス対応と同じ構図）。`/local-review` B-2 由来（severity medium、既存） |
+| todo | front matter 本文へ**タイプ**で `---` 行を作ると無警告で文書が壊れる | S | 貼り付け経路には `pasteVerbatimText` のガード（`hasFrontMatterTerminatorLine`）を入れたが、front matter 本文は contenteditable なので直接タイプ・IME確定・ドラッグ&ドロップ・undo/redo でも `---` 行を作れてしまい、その場合は無警告で保存時に front matter が早期終了する。本質的な不変条件は直列化側にあるので、`serializeBlockElement` の frontmatter 分岐で終端行を検出して警告する（あるいは安全側へ倒す）方が網羅的。`/local-review` B-1 由来（severity medium） |
+| todo | 行末に空白のある `--- ` が後から `---` へ変わると front matter が壊れる | S | `parseFrontMatter` は完全一致（`line === '---'`）で終端を探すため `--- `（行末空白）は終端にならず、貼り付けガードも同じ基準で通す。判定を合わせている点は正しいが、VS Code の `files.trimTrailingWhitespace` や外部フォーマッタが後から空白を落とすと `---` になり、その時点で文書が壊れる。既知の穴として記録。`/local-review` B-2 由来（severity low） |
 | todo | 生Markdown展開中のブロック数式（`div.raw-markdown.raw-math-block`）への貼り付けが Markdown 再解釈される | S | `rawMarkdownText` で生テキストのまま直列化され `utils.shouldSkipInline` でインライン再変換からも除外される＝コードブロック・front matter と同じ「逐語ブロック」だが、DIV のため `resolveVerbatimBody` の `CODE`/`PRE` 述語に当たらず、`$$` 編集中のブロックへ貼ると従来どおりブロックの外へ出る。述語に `.raw-markdown` 系を加えるか検討する（`docblock` には対象外である旨を明記済み）。`/local-review` B-1 由来（severity medium、既存） |
 | todo | ハイライト済みコードブロックへ追記した部分に色が付かない／初回ハイライトでキャレットが飛びうる | S | (1) `applySyntaxHighlighting` は `force=false` のため `hljs` クラス付きのブロックを再ハイライトせず、貼り付け・タイピングで足した部分だけ無着色のまま残る（既存挙動）。(2) 逆に**まだハイライトされていないブロック**（空ブロック等は `codeText.trim()` が空でスキップされる）へ貼り付けると、直後の input で初めて `highlightCodeBlock` が走り `block.innerHTML = result.value` でDOMを作り直すため、`pasteIntoCodeBlock` が置いたキャレットが失われる可能性がある（`editor.js` の復元は `didFormat` が true のときだけ）。実機確認が要る。`/local-review` B-3・C-1 由来（severity low／medium・確信度中） |
 

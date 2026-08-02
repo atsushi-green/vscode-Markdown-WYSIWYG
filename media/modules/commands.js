@@ -2905,9 +2905,30 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * 逐語ブロック本文へ `text` を貼り付けたときに本文がどうなるかを、DOMを変更せずに返す。
+     * 選択範囲は置き換えられるため、`range` の始端より前と終端より後のテキストで挟む。
+     */
+    function previewTextAfterPaste(range, body, text) {
+        const head = document.createRange();
+        head.selectNodeContents(body);
+        head.setEnd(range.startContainer, range.startOffset);
+
+        const tail = document.createRange();
+        tail.selectNodeContents(body);
+        tail.setStart(range.endContainer, range.endOffset);
+
+        return head.toString() + text + tail.toString();
+    }
+
+    /**
      * 逐語ブロック本文（コードブロック・front matter）へのテキスト貼り付け
      * （`handleMarkdownPaste` から呼ぶ）。選択範囲を置き換えてテキストノードを
      * そのまま差し込み、キャレットを末尾へ置く。
+     *
+     * ただし **front matter へ `---` だけの行を含むテキストを貼る場合は挿入せず中止する**
+     * （その行は保存時に front matter の終端として解釈され、以降が本文へこぼれて
+     * 文書が壊れるため。front matter にエスケープ手段は無い）。既定の貼り付けにも
+     * 委ねない＝`true` を返して `preventDefault` させ、文書を変更しないまま知らせる。
      *
      * 既定の貼り付け（`false` を返して委ねる）にしないのは、contenteditable の既定挿入が
      * 改行を `<div>`／`<br>` の**要素境界**として入れることがあり、`htmlToMarkdown` が
@@ -2922,6 +2943,19 @@ window.CommandsModule = (function() {
         if (!body.contains(range.startContainer)) {
             range.selectNodeContents(body);
             range.collapse(false);
+        }
+
+        // front matter には `---` だけの行を入れられない（囲みがそのまま区切りで
+        // エスケープ手段が無いため、保存すると front matter がそこで閉じて残りが
+        // 本文へこぼれる＝文書が壊れる）。黙って壊すより、貼り付けを中止して知らせる。
+        // **判定は貼り付けテキスト単体ではなく「挿入後の本文」で行う**——単体で見ると、
+        // 既存行と連結して `---` 行になるケース（`--` の行末へ `-` を貼る等）を見逃し、
+        // 逆に連結すると単独行にならないケース（`range: a` の行末へ `---` を貼る等）を
+        // 無用に弾いてしまう
+        if (body.classList && body.classList.contains('frontmatter-body') &&
+            markdown.hasFrontMatterTerminatorLine(previewTextAfterPaste(range, body, text))) {
+            utils.showToast('⚠️ front matter に `---` だけの行は入れられません（貼り付けを中止しました）。front matter の外へ貼るか、行頭の `---` を書き換えてください');
+            return true;
         }
         range.deleteContents();
         const inserted = document.createTextNode(text);

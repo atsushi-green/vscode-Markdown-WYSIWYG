@@ -641,6 +641,22 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * front matter を終端させてしまう行（単独の `---`）をテキストが含むか。
+     * front matter の本文は `---` で囲むだけでエスケープ手段が無いため、本文に
+     * この行が入ると保存時に front matter がそこで閉じ、残りが本文へこぼれる
+     * （＝往復が壊れる）。**`parseFrontMatter` と同じく「行がちょうど `---`」だけを見る**
+     * ——前後に空白がある行やインデントされた `---` はこのパーサーでは終端にならない
+     * （YAMLのブロックスカラー中のインデントされた `---` を誤って弾かないため）。
+     * @param {string} text
+     * @returns {boolean}
+     */
+    function hasFrontMatterTerminatorLine(text) {
+        return String(text || '').split('\n').some(function (line) {
+            return line === '---';
+        });
+    }
+
+    /**
      * front matterの生YAMLテキストから折りたたみ表示用のHTMLを組み立てる。
      * YAMLはMarkdownのインライン記法（強調等）を持たないためconvertInlineは通さず、
      * escapeHtmlのみ適用する。既定は折りたたみ状態（editor.css側で`.frontmatter-body`を
@@ -2138,6 +2154,7 @@ window.MarkdownModule = (function() {
         buildDefListHtml: buildDefListHtml,
         // YAML front matter の折りたたみ表示
         parseFrontMatter: parseFrontMatter,
+        hasFrontMatterTerminatorLine: hasFrontMatterTerminatorLine,
         buildFrontMatterHtml: buildFrontMatterHtml
     };
 })();

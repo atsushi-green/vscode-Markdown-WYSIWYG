@@ -1515,6 +1515,32 @@ suite('MarkdownModule', () => {
             });
         });
 
+        suite('hasFrontMatterTerminatorLine', () => {
+            test('単独の---行を検出する', () => {
+                assert.strictEqual(env.markdown.hasFrontMatterTerminatorLine('a: 1\n---\nb'), true);
+                assert.strictEqual(env.markdown.hasFrontMatterTerminatorLine('---'), true);
+            });
+
+            test('parseFrontMatterが終端としない書き方は検出しない', () => {
+                // parseFrontMatter は `lines[k] === '---'` の完全一致で終端を探す
+                [
+                    'a: 1\n  ---\nb',   // インデント（YAMLブロックスカラーの中身）
+                    'a: 1\n--- \nb',    // 行末に空白
+                    'range: a---b',     // 行中
+                    'a: 1\n----\nb',    // 4本
+                    ''
+                ].forEach(text => {
+                    assert.strictEqual(env.markdown.hasFrontMatterTerminatorLine(text), false,
+                        JSON.stringify(text));
+                });
+            });
+
+            test('nullやundefinedでも落ちない', () => {
+                assert.strictEqual(env.markdown.hasFrontMatterTerminatorLine(null), false);
+                assert.strictEqual(env.markdown.hasFrontMatterTerminatorLine(undefined), false);
+            });
+        });
+
         suite('parseFrontMatter', () => {
             test('---で始まり---で閉じる区間を読み取る', () => {
                 const result = env.markdown.parseFrontMatter(['---', 'a: 1', 'b: 2', '---', '本文']);

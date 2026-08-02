@@ -2825,6 +2825,89 @@ suite('CommandsModule', () => {
             assert.strictEqual(out, '---\n\nfirst: 1title: 例\n---\n\n本文');
         });
 
+        test('front matterへ`---`だけの行を含むテキストを貼ると中止して知らせる', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            const before = env.editor.innerHTML;
+            setCaret(body.firstChild as Text, (body.firstChild as Text).data.length);
+
+            // 既定の貼り付けにも委ねない（true＝preventDefaultさせる）
+            assert.strictEqual(env.commands.handleMarkdownPaste('\nnext: 1\n---\nあふれる本文'), true);
+            assert.strictEqual(env.editor.innerHTML, before, '文書が変更されている');
+            const toasts = Array.from(env.document.querySelectorAll('.mermaid-toast'));
+            assert.ok(toasts.some(t => t.textContent!.includes('---')),
+                'トーストで知らせていない: ' + toasts.map(t => t.textContent).join(' / '));
+        });
+
+        test('front matterへ貼るテキストの`---`が単独行でなければ通し、往復でも本文に留まる', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            setCaret(body.firstChild as Text, (body.firstChild as Text).data.length);
+
+            // インデントされた `---`（YAMLブロックスカラー中）と行中の `---` は終端にならない
+            assert.strictEqual(env.commands.handleMarkdownPaste('\nnote: |\n  ---\nrange: a---b'), true);
+            assert.ok(body.textContent!.includes('  ---'), body.textContent!);
+
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(out, '---\ntitle: 例\nnote: |\n  ---\nrange: a---b\n---\n\n本文');
+
+            // 保存結果を読み直しても front matter の内側に留まっている（＝往復が保たれる）
+            const reparsed = env.markdown.parseFrontMatter(out.split('\n'));
+            assert.strictEqual(reparsed.raw, 'title: 例\nnote: |\n  ---\nrange: a---b');
+        });
+
+        test('既存行と連結して`---`行になる貼り付けも中止する', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n--\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            const before = env.editor.innerHTML;
+            const text = body.firstChild as Text;
+            // 「--」の行末（貼り付けテキスト単体は `-` なので、text だけ見ると素通りする）
+            setCaret(text, text.data.length);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('-'), true);
+            assert.strictEqual(env.editor.innerHTML, before, '文書が変更されている');
+        });
+
+        test('連結すると単独行にならない`---`の貼り付けは中止しない', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\nrange: a\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            const text = body.firstChild as Text;
+            // 「range: a」の行末へ `---` を貼る → 結果は `range: a---` で終端にならない
+            setCaret(text, text.data.length);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('---'), true);
+            assert.strictEqual(body.textContent, 'range: a---');
+        });
+
+        test('選択範囲を置き換える貼り付けでは、消える側のテキストを判定に含めない', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n--\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            const text = body.firstChild as Text;
+            // 末尾の「--」を選択して `-` で置き換える → 結果は `-` の行なので中止不要
+            // （消える側の `--` を判定に含めてしまうと `---` 行と誤認して弾く）
+            assert.ok(text.data.endsWith('\n--'), '前提: 本文は `--` の行で終わる');
+            const range = env.document.createRange();
+            range.setStart(text, text.data.length - 2);
+            range.setEnd(text, text.data.length);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('-'), true);
+            assert.strictEqual(body.textContent, 'title: 例\n-');
+        });
+
+        test('コードブロックへは`---`だけの行を含むテキストも貼れる（front matter限定のガード）', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('```\nx\n```');
+            const code = env.editor.querySelector('pre code') as HTMLElement;
+            setCaret(code.firstChild as Text, 0);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('---\n'), true);
+            assert.ok(code.textContent!.includes('---'), code.textContent!);
+        });
+
         test('front matter本文の外までまたぐ選択はMarkdown経路のまま', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n---\n\n本文');
             const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
