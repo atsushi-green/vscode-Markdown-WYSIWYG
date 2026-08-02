@@ -2759,6 +2759,86 @@ suite('CommandsModule', () => {
             assert.ok(env.editor.querySelector('h1'), '見出しへ変換されていない: ' + env.editor.innerHTML);
         });
 
+        test('front matter本文への貼り付けはMarkdown解釈せず本文へ入る', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            assert.ok(body, 'front matter本文が生成されていない');
+            const text = body.firstChild as Text;
+            setCaret(text, text.data.length);
+
+            // YAMLはリスト記法（`- item`）と衝突する
+            const handled = env.commands.handleMarkdownPaste('\ntags:\n  - a\n  - b');
+            assert.strictEqual(handled, true);
+            assert.strictEqual(env.editor.querySelectorAll('ul').length, 0, env.editor.innerHTML);
+            assert.ok(body.textContent!.includes('- a'), body.textContent!);
+
+            // 往復してもYAMLがfront matterの中に残る
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(out, '---\ntitle: 例\ntags:\n  - a\n  - b\n---\n\n本文');
+        });
+
+        test('空のfront matter（本文がテキストノードを持たない）へもYAMLがそのまま入る', () => {
+            // `---\n---` の本文は <pre> 直後のLFがパーサーに食われテキストノードが無い＝
+            // クリックしたキャレットは必ず PRE 要素上に載る
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            assert.strictEqual(body.firstChild, null, '前提: 空front matterの本文は空');
+            setCaret(body, 0);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('title: 例\ntags:\n  - a'), true);
+            assert.strictEqual(env.editor.querySelectorAll('ul').length, 0, env.editor.innerHTML);
+
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(out, '---\ntitle: 例\ntags:\n  - a\n---\n\n本文');
+        });
+
+        test('front matter本文の先頭へ改行始まりのテキストを貼ると先頭の空行が1つ落ちる（既知の欠落・ROADMAP項目）', () => {
+            // 貼り付け自体は正しくテキストのまま入るが、保存（クリーンHTML→再パース）で
+            // `<pre>` 開始タグ直後のLFがHTMLパーサーに食われる既存の欠落を踏む。
+            // **貼り付け経路に固有ではない**（`---\n\nfirst: 1\n---` を読み込んで
+            // そのまま保存するだけでも同じ1行が落ちる）ため、修正はROADMAPの
+            // 「front matter本文の先頭空行が保存で落ちる」項目で行う。
+            // 直ったらこのテストは赤くなるので、そのとき期待値を修正すること。
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            setCaret(body.firstChild as Text, 0);
+
+            env.commands.handleMarkdownPaste('\nfirst: 1');
+
+            // 貼り付け直後のDOM上は改行が入っている
+            assert.strictEqual(body.textContent, '\nfirst: 1title: 例');
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(out, '---\nfirst: 1title: 例\n---\n\n本文');
+        });
+
+        test('front matter本文の外までまたぐ選択はMarkdown経路のまま', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            const p = env.editor.querySelector('p') as HTMLElement;
+            const range = env.document.createRange();
+            range.setStart(body.firstChild as Text, 2);
+            range.setEnd(p.firstChild as Text, 1);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            env.commands.handleMarkdownPaste('# 見出し\n\n段落');
+
+            const bareText = Array.from(env.editor.childNodes)
+                .filter(n => n.nodeType === 3 && n.textContent!.trim());
+            assert.deepStrictEqual(bareText.map(n => n.textContent), [], env.editor.innerHTML);
+            // Markdown経路が実際に走っている（早期returnで何も起きていないのではない）
+            assert.ok(env.editor.querySelector('h1'), '見出しへ変換されていない: ' + env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('.frontmatter-body'),
+                'front matterが失われている: ' + env.editor.innerHTML);
+        });
+
         test('インラインコード内への貼り付けは従来どおりMarkdown経路', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml('`inline` を含む段落');
             const inline = env.editor.querySelector('p code') as HTMLElement;

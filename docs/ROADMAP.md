@@ -20,7 +20,9 @@
 
 | 状態 | 不具合 | サイズ | メモ |
 |------|--------|--------|------|
-| todo | YAML front matter 本文への貼り付けが Markdown として再解釈され外へ出る | S | `pre.frontmatter-body` は編集可能な `<pre>` だが `<code>` 子を持たないため、コードブロック向けの貼り付けガード（`resolveCodeBlockBody`）に当たらない。`- key: value` を含む YAML を貼るとリストへ変換され front matter の外へ出る（コードブロックで直したのと同種の症状）。`resolveCodeBlockBody` の対象に front matter 本文を含めるか、専用の分岐を足す。`/local-review` B-2 由来（severity low） |
+| todo | front matter 本文の先頭空行が保存で1行落ちる | S | `buildFrontMatterHtml` は `<pre>` 開始タグ直後のLFがHTMLパーサーに食われる仕様に備えてダミーの改行を1つ足しているが、**保存経路（`getCleanEditorClone` のクローン→`innerHTML`→`htmlToMarkdown` の再パース）ではこのダミーが足されない**ため、本文が改行で始まる front matter は保存のたびに先頭の空行を1つ失う。貼り付け経路に固有ではなく `---\n\nfirst: 1\n---` を読み込んでそのまま保存するだけで再現する（実測で確認済み・`commands.test.ts` に現状の挙動を記録したテスト有り）。クローン側でも `.frontmatter-body` の本文が改行始まりならダミーLFを補うのが素直。`/local-review` C-1 由来（severity medium、既存） |
+| todo | front matter 本文に `---` を含むテキストを貼ると往復が壊れる | S | `markdown.js` の front matter 直列化は本文をエスケープせず `---\n<本文>\n---` で囲むため、本文に `---` 行が含まれると再パース時に front matter が早期終了し、残りが本文（先行行があると setext H2）になる。タイプでも起きる既存の穴だが、「front matter ブロックを丸ごとコピーして貼る」＝区切り線込みのテキストが現実的なので、逐語貼り付け対応で到達しやすくなった（可変長フェンス対応と同じ構図）。`/local-review` B-2 由来（severity medium、既存） |
+| todo | 生Markdown展開中のブロック数式（`div.raw-markdown.raw-math-block`）への貼り付けが Markdown 再解釈される | S | `rawMarkdownText` で生テキストのまま直列化され `utils.shouldSkipInline` でインライン再変換からも除外される＝コードブロック・front matter と同じ「逐語ブロック」だが、DIV のため `resolveVerbatimBody` の `CODE`/`PRE` 述語に当たらず、`$$` 編集中のブロックへ貼ると従来どおりブロックの外へ出る。述語に `.raw-markdown` 系を加えるか検討する（`docblock` には対象外である旨を明記済み）。`/local-review` B-1 由来（severity medium、既存） |
 | todo | ハイライト済みコードブロックへ追記した部分に色が付かない／初回ハイライトでキャレットが飛びうる | S | (1) `applySyntaxHighlighting` は `force=false` のため `hljs` クラス付きのブロックを再ハイライトせず、貼り付け・タイピングで足した部分だけ無着色のまま残る（既存挙動）。(2) 逆に**まだハイライトされていないブロック**（空ブロック等は `codeText.trim()` が空でスキップされる）へ貼り付けると、直後の input で初めて `highlightCodeBlock` が走り `block.innerHTML = result.value` でDOMを作り直すため、`pasteIntoCodeBlock` が置いたキャレットが失われる可能性がある（`editor.js` の復元は `didFormat` が true のときだけ）。実機確認が要る。`/local-review` B-3・C-1 由来（severity low／medium・確信度中） |
 
 ## 優先度: 中

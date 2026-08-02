@@ -2860,12 +2860,20 @@ window.CommandsModule = (function() {
     }
 
     /**
-     * ノードが属するコードブロック本文（`pre > code`）を返す。無ければ null。
-     * キャレットが `<pre>` 自身（空ブロックのクリック直後などに起こる）にある場合は
-     * その子の `<code>` を返す——利用者から見ればコードブロックの中だから。
-     * front matter 本文（`pre.frontmatter-body`）は `<code>` を持たないため null になる。
+     * ノードが属する「逐語ブロック」の本文要素を返す。無ければ null。
+     * 逐語ブロック＝中身がMarkdownとして解釈されず、直列化も `textContent` で行う編集領域。
+     * ここで見るのは `<pre>` 系の2種類だけ:
+     *   - コードブロック本文（`pre > code`）→ `<code>` を返す
+     *   - YAML front matter 本文（`pre.frontmatter-body`。`<code>` を持たない）→ `<pre>` 自身を返す
+     * キャレットが `<pre>` 自身（空ブロックのクリック直後などに起こる）にある場合、
+     * コードブロックでは子の `<code>` を返す——利用者から見ればコードブロックの中だから。
+     * **front matter では本文要素＝`<pre>` 自身なので、`pasteVerbatimText` の
+     * `!body.contains(startContainer)` は常に false になり寄せ直しの分岐を通らない**
+     * （`Node.contains` は自身に true。両者で依存している性質が違う点に注意）。
+     * インラインコード（`<p>` 内の `<code>`）は対象外。生Markdown展開中のブロック数式
+     * （`div.raw-markdown.raw-math-block`）も同じ性質を持つが DIV のため対象外（ROADMAPに残置）。
      */
-    function resolveCodeBlockBody(node) {
+    function resolveVerbatimBody(node) {
         const el = utils.findAncestor(node, function (candidate) {
             return candidate.tagName === 'CODE' || candidate.tagName === 'PRE';
         });
@@ -2873,43 +2881,46 @@ window.CommandsModule = (function() {
             return null;
         }
         if (el.tagName === 'CODE') {
-            // インラインコード（`<p>` 内の `<code>`）は対象外
             return el.parentElement && el.parentElement.tagName === 'PRE' ? el : null;
+        }
+        if (el.classList && el.classList.contains('frontmatter-body')) {
+            return el;
         }
         return el.querySelector(':scope > code');
     }
 
     /**
-     * 貼り付け先が単一のコードブロック本文に収まっていればその `<code>` を返す。
-     * **選択の両端を見る**——始端だけで判定すると、コードブロックの途中から始まって
+     * 貼り付け先が単一の逐語ブロック本文に収まっていればその要素を返す。
+     * **選択の両端を見る**——始端だけで判定すると、ブロックの途中から始まって
      * ブロックの外で終わる選択のとき、`deleteContents` がキャレットを共通祖先
-     * （＝`#editor` の直下・PRE の直後）へ寄せるため、テキストがコード本文ではなく
+     * （＝`#editor` の直下・ブロックの直後）へ寄せるため、テキストが本文ではなく
      * エディタ直下へ裸で挿入されてしまう。またぐ選択は通常のMarkdown経路へ渡す。
      */
-    function findPasteTargetCodeBody(range) {
-        const start = resolveCodeBlockBody(range.startContainer);
+    function findVerbatimPasteTarget(range) {
+        const start = resolveVerbatimBody(range.startContainer);
         if (!start) {
             return null;
         }
-        return resolveCodeBlockBody(range.endContainer) === start ? start : null;
+        return resolveVerbatimBody(range.endContainer) === start ? start : null;
     }
 
     /**
-     * コードブロック本文へのテキスト貼り付け（`handleMarkdownPaste` から呼ぶ）。
-     * 選択範囲を置き換えてテキストノードをそのまま差し込み、キャレットを末尾へ置く。
+     * 逐語ブロック本文（コードブロック・front matter）へのテキスト貼り付け
+     * （`handleMarkdownPaste` から呼ぶ）。選択範囲を置き換えてテキストノードを
+     * そのまま差し込み、キャレットを末尾へ置く。
      *
      * 既定の貼り付け（`false` を返して委ねる）にしないのは、contenteditable の既定挿入が
      * 改行を `<div>`／`<br>` の**要素境界**として入れることがあり、`htmlToMarkdown` が
-     * PRE/CODE を `textContent` で読む（要素境界は改行にならない）ため
+     * これらの本文を `textContent` で読む（要素境界は改行にならない）ため
      * **貼り付けた改行が保存で失われうる**ため。テキストノードで入れれば `\n` がそのまま残る。
      *
      * 常に true を返す（呼び出し側が preventDefault と input イベント発火を行う）。
      */
-    function pasteIntoCodeBlock(range, codeBody, text) {
+    function pasteVerbatimText(range, body, text) {
         // キャレットが `<pre>` 自身にあるときは本文の末尾へ寄せてから挿入する
         // （そのまま insertNode すると `<code>` の外＝PRE 直下へ入ってしまう）
-        if (!codeBody.contains(range.startContainer)) {
-            range.selectNodeContents(codeBody);
+        if (!body.contains(range.startContainer)) {
+            range.selectNodeContents(body);
             range.collapse(false);
         }
         range.deleteContents();
@@ -2940,10 +2951,10 @@ window.CommandsModule = (function() {
      * 取り込んだ場合は true を返す（呼び出し側で preventDefault し、
      * テーブル描画と input イベント発火＝残りのパイプラインを行う）。
      *
-     * **キャレットがコードブロック本文内にある場合は Markdown として解釈しない**
-     * （`pasteIntoCodeBlock` がテキストのまま差し込んで true を返す）。コードは
-     * Markdown記法と衝突する文字（`# `・`- `・4スペースインデント・`|`）を普通に含むため、
-     * 再解釈するとコード片が見出しやリストになってコードブロックの外へ出てしまう。
+     * **キャレットが逐語ブロック（コードブロック本文・YAML front matter 本文）にある場合は
+     * Markdown として解釈しない**（`pasteVerbatimText` がテキストのまま差し込んで true を返す）。
+     * どちらも Markdown記法と衝突する文字（`# `・`- `・4スペースインデント・`|`）を普通に含むため、
+     * 再解釈するとコード片やYAMLが見出し・リストになってブロックの外へ出てしまう。
      *
      * 挿入位置:
      *   - キャレットが段落内: 段落をキャレット位置で前半/後半に分割し、間へ挿入
@@ -2963,10 +2974,10 @@ window.CommandsModule = (function() {
             return false;
         }
 
-        // コードブロック本文への貼り付けは Markdown として解釈しない
-        const codeBody = findPasteTargetCodeBody(range);
-        if (codeBody) {
-            return pasteIntoCodeBlock(range, codeBody, utils.normalizeEol(text));
+        // 逐語ブロック（コードブロック・front matter）への貼り付けは Markdown として解釈しない
+        const verbatimBody = findVerbatimPasteTarget(range);
+        if (verbatimBody) {
+            return pasteVerbatimText(range, verbatimBody, utils.normalizeEol(text));
         }
 
         // 実パーサーで判定する（ブロック判定の正規表現を重複させない）。
