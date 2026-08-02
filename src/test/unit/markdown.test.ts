@@ -2196,6 +2196,68 @@ suite('MarkdownModule', () => {
             assert.strictEqual(rt, original);
         });
 
+        test('エディタDOMからの保存経路でもfront matter本文の先頭空行が保たれる', () => {
+            // 読込時のダミー改行は `<pre>` のパースで既に食われているため、保存経路
+            // （クローン→innerHTML→再パース）でも足し直さないと1行ずつ削れていく
+            const original = '---\n\ntitle: 先頭が空行\n---\n\n本文\n';
+            env.editor.innerHTML = env.markdown.markdownToHtml(original);
+
+            const out = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+            assert.strictEqual(out, original);
+        });
+
+        test('保存を繰り返してもfront matter本文の先頭空行が増減しない', () => {
+            const original = '---\n\ntitle: 先頭が空行\n---\n\n本文\n';
+            let current = original;
+            for (let i = 0; i < 3; i++) {
+                env.editor.innerHTML = env.markdown.markdownToHtml(current);
+                current = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+                assert.strictEqual(current, original, `${i + 1}回目の保存でずれた`);
+            }
+        });
+
+        test('本文が改行で始まらないfront matterも保存経路で変わらない', () => {
+            const original = '---\ntitle: 通常\n---\n\n本文\n';
+            env.editor.innerHTML = env.markdown.markdownToHtml(original);
+
+            const out = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+            assert.strictEqual(out, original);
+        });
+
+        test('先頭の空行が2行以上でも保存経路で保たれる', () => {
+            const original = '---\n\n\ntitle: 空行2つ\n---\n\n本文\n';
+            env.editor.innerHTML = env.markdown.markdownToHtml(original);
+
+            const out = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+            assert.strictEqual(out, original);
+        });
+
+        test('front matter本文の生テキストは<pre>のテキストではなく属性から復元する', () => {
+            // `<pre>` 先頭のLFはパース側（1つ食う）とシリアライズ側（1つ足す・Chromiumのみ）で
+            // 扱いが違い、エンジンごとに増減する。属性を正にすることでその差から切り離す
+            const original = '---\n\ntitle: 先頭が空行\n---\n\n本文\n';
+            env.editor.innerHTML = env.markdown.markdownToHtml(original);
+            const clone = env.markdown.getCleanEditorClone(env.editor);
+            const body = clone.querySelector('.frontmatter-body') as HTMLElement;
+
+            assert.strictEqual(body.getAttribute('data-frontmatter-raw'), '\ntitle: 先頭が空行');
+
+            // 属性が正＝<pre>のテキスト側が（エンジン差で）欠けていても復元できる
+            body.textContent = 'title: 先頭が空行';
+            const out = env.markdown.htmlToMarkdown(clone.innerHTML);
+            assert.strictEqual(out, original);
+        });
+
+        test('computeEditorLineMap: 先頭が空行のfront matterでも後続ブロックの行番号がずれない', () => {
+            // `---`(1) 空行(2) `title:`(3) `---`(4) 空行(5) `本文`(6)
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\n\ntitle: x\n---\n\n本文\n');
+            const map = env.markdown.computeEditorLineMap(env.editor);
+            const paragraph = map.find((m: any) => m.block.tagName === 'P');
+
+            assert.ok(paragraph, '段落が対応づけられていない');
+            assert.strictEqual(paragraph.line, 6);
+        });
+
         test('用語と定義行の間に脚注定義行が挟まっても、無関係な行同士が定義リストとして誤結合されない（/local-review指摘対応）', () => {
             // 脚注定義行（[^1]: ...）は本文パース前にcontentLinesから除去されるため、
             // 除去後に前後の行が直接隣接し、scanDefListTermsが無関係な「用語」と

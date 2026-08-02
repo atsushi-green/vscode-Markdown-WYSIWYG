@@ -2449,6 +2449,21 @@ suite('CommandsModule', () => {
             assert.strictEqual(env.commands.getSelectedMarkdown(range), null);
         });
 
+        test('先頭が空行のfront matterを含む部分選択でもその空行が保たれる', () => {
+            // 部分選択の経路だけはクリーンブロックを別containerへ移してから
+            // innerHTML を取る＝クローンを組み直す唯一の経路
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\n\ntitle: x\n---\n\n本文\n\n次');
+            const fm = env.editor.querySelector('.frontmatter') as HTMLElement;
+            const p = env.editor.querySelector('p') as HTMLElement;
+            const range = env.document.createRange();
+            range.setStartBefore(fm);
+            range.setEndAfter(p);
+
+            const md = env.commands.getSelectedMarkdown(range);
+            assert.ok(md, '生Markdown化されていない');
+            assert.ok(md.startsWith('---\n\ntitle: x\n---'), JSON.stringify(md));
+        });
+
         test('コードブロック本文の部分選択は選択したぶんのコード文字列だけを返す', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml(
                 '```js\nconst a = 1;\nconst b = 2;\n```'
@@ -2796,25 +2811,18 @@ suite('CommandsModule', () => {
             assert.strictEqual(out, '---\ntitle: 例\ntags:\n  - a\n---\n\n本文');
         });
 
-        test('front matter本文の先頭へ改行始まりのテキストを貼ると先頭の空行が1つ落ちる（既知の欠落・ROADMAP項目）', () => {
-            // 貼り付け自体は正しくテキストのまま入るが、保存（クリーンHTML→再パース）で
-            // `<pre>` 開始タグ直後のLFがHTMLパーサーに食われる既存の欠落を踏む。
-            // **貼り付け経路に固有ではない**（`---\n\nfirst: 1\n---` を読み込んで
-            // そのまま保存するだけでも同じ1行が落ちる）ため、修正はROADMAPの
-            // 「front matter本文の先頭空行が保存で落ちる」項目で行う。
-            // 直ったらこのテストは赤くなるので、そのとき期待値を修正すること。
+        test('front matter本文の先頭へ改行始まりのテキストを貼っても先頭の空行が保たれる', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n---\n\n本文');
             const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
             setCaret(body.firstChild as Text, 0);
 
             env.commands.handleMarkdownPaste('\nfirst: 1');
 
-            // 貼り付け直後のDOM上は改行が入っている
             assert.strictEqual(body.textContent, '\nfirst: 1title: 例');
             const out = env.markdown
                 .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
                 .replace(/\s+$/, '');
-            assert.strictEqual(out, '---\nfirst: 1title: 例\n---\n\n本文');
+            assert.strictEqual(out, '---\n\nfirst: 1title: 例\n---\n\n本文');
         });
 
         test('front matter本文の外までまたぐ選択はMarkdown経路のまま', () => {

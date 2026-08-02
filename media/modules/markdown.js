@@ -656,6 +656,11 @@ window.MarkdownModule = (function() {
      * として受け入れる（実害の乏しい稀なケースであり、静的属性によるデータ消失リスクの
      * 方が明確に深刻なため）。
      */
+    // front matter 本文の生テキストを直列化へ運ぶ属性。`getCleanEditorClone` が
+    // 直列化の直前にライブDOMから写し、`serializeBlockElement` の frontmatter 分岐が
+    // これを最優先で読む（`<pre>` 先頭LFのエンジン差を避けるため。詳細は両者のコメント）。
+    const FRONTMATTER_RAW_ATTR = 'data-frontmatter-raw';
+
     function buildFrontMatterHtml(raw) {
         // HTML仕様上、<pre>開始タグ直後の最初のLFトークンはパース時に無視される
         // （<textarea>も同様）。rawの先頭行が空行の場合にこの1文字が失われるのを
@@ -1662,7 +1667,16 @@ window.MarkdownModule = (function() {
                 // 入力内容を誤って捨てるデータ消失リスクがあるため見送った）。
                 if (el.classList && el.classList.contains('frontmatter')) {
                     const body = el.querySelector('.frontmatter-body');
-                    const raw = body ? stripZeroWidth(body.textContent || '') : '';
+                    // `data-frontmatter-raw` があればそれが正（`getCleanEditorClone` が
+                    // 直列化直前にライブDOMから写したもの）。`<pre>` 先頭のLFはパース側と
+                    // シリアライズ側の実装差でエンジンごとに増減するため、textContent
+                    // 頼りだと先頭の空行が保存のたびにずれる
+                    const rawSource = body
+                        ? (body.hasAttribute(FRONTMATTER_RAW_ATTR)
+                            ? body.getAttribute(FRONTMATTER_RAW_ATTR)
+                            : (body.textContent || ''))
+                        : '';
+                    const raw = stripZeroWidth(rawSource);
                     return raw ? ('---\n' + raw + '\n---\n\n') : '---\n---\n\n';
                 }
                 // ブロック子要素を含む場合はコンテナとして再帰
@@ -1889,6 +1903,11 @@ window.MarkdownModule = (function() {
      * トップレベルの子要素数は、Mermaid（隠し `pre.mermaid-source` を残し
      * `.mermaid-container` を削除）とテーブル（`.table-container` を `table` へ
      * アンラップ）を経ても「表示中のライブ要素列」と1対1で対応する。
+     *
+     * **戻り値は `innerHTML`／`outerHTML` で文字列化して `htmlToMarkdown` へ渡す前提の
+     * 中間表現**——front matter 本文だけは `data-frontmatter-raw` 属性が正の値を持ち、
+     * クローンの `textContent` をそのまま読むと `<pre>` 先頭LFのエンジン差を踏む
+     * （末尾の該当箇所のコメント参照）。新しい利用者を足すときはこの前提に注意。
      */
     function getCleanEditorClone(editorEl) {
         const source = editorEl || state.editor;
@@ -1958,6 +1977,22 @@ window.MarkdownModule = (function() {
             if (table) {
                 container.replaceWith(table);
             }
+        });
+
+        // YAML front matter: 本文の生テキストを属性へ控える（直列化の唯一の正となる）。
+        // このクローンの利用者はいずれも `innerHTML`／`outerHTML` を経由してHTMLを
+        // **文字列化→再パース**する（`getCleanHtmlFromEditor`・`computeEditorLineMap`・
+        // `getSelectedMarkdown`）が、`<pre>` 先頭のLFの扱いは**エンジンによって違う**:
+        //   - パース側: 開始タグ直後のLFを1つ食う（HTML仕様・どのエンジンも同じ）
+        //   - シリアライズ側: 先頭が改行始まりのテキストノードならLFを1つ足す
+        //     （HTML仕様のfragment serialization。**Chromiumは実装、jsdom/parse5は未実装**）
+        // そのため素朴に往復させると、jsdom では先頭の空行が1行**落ち**、Chromium で
+        // ダミーのLFを足す実装にすると逆に1行**増える**（保存のたびに増殖する）。
+        // 生テキストを属性で運べばこの差の影響を受けない。**直列化のたびにライブDOMの
+        // textContentから写す**ので、読込時に属性へ焼き込む案（編集で陳腐化しユーザーの
+        // 入力を捨てるリスクがあるとして見送られた）とは別物。
+        clone.querySelectorAll('pre.frontmatter-body').forEach(pre => {
+            pre.setAttribute(FRONTMATTER_RAW_ATTR, pre.textContent || '');
         });
 
         return clone;
