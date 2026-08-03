@@ -2930,6 +2930,139 @@ suite('CommandsModule', () => {
                 'front matterが失われている: ' + env.editor.innerHTML);
         });
 
+        test('生Markdown展開中のブロック数式への貼り付けはMarkdown解釈せず式へ入る', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('$$\na = 1\n$$');
+            const mathBlock = env.editor.querySelector('.math-block') as HTMLElement;
+            const raw = env.commands.expandMathToRaw(mathBlock);
+            assert.ok(raw.classList.contains('raw-math-block'), '展開されていない');
+            // `$$\na = 1\n$$` の `a = 1` の直後（閉じ `$$` の手前）
+            const text = raw.firstChild as Text;
+            setCaret(text, text.data.length - 3);
+
+            // 数式にはMarkdown記法と衝突する文字（`-`始まり・`_`）が普通に出てくる
+            const handled = env.commands.handleMarkdownPaste('\n- b_1 = 2');
+            assert.strictEqual(handled, true);
+            assert.strictEqual(env.editor.querySelectorAll('ul').length, 0, env.editor.innerHTML);
+            assert.strictEqual(env.editor.children.length, 1, env.editor.innerHTML);
+            assert.strictEqual(raw.textContent, '$$\na = 1\n- b_1 = 2\n$$');
+        });
+
+        test('ブロック数式へ貼り付けた改行が往復で保たれる', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('$$\na = 1\n$$');
+            const raw = env.commands.expandMathToRaw(env.editor.querySelector('.math-block'));
+            const text = raw.firstChild as Text;
+            setCaret(text, text.data.length - 3);
+
+            env.commands.handleMarkdownPaste('\nb = 2\nc = 3');
+
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(out, '$$\na = 1\nb = 2\nc = 3\n$$');
+        });
+
+        test('ブロック数式へ`$$`だけの行を含むテキストを貼ると中止して知らせる', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('$$\na = 1\n$$');
+            const raw = env.commands.expandMathToRaw(env.editor.querySelector('.math-block'));
+            const before = raw.textContent;
+            const text = raw.firstChild as Text;
+            setCaret(text, text.data.length - 3);
+
+            // 入ると保存時に数式がそこで閉じ、残りが段落へこぼれて空の数式が残る
+            assert.strictEqual(env.commands.handleMarkdownPaste('\n$$\nfoo'), true);
+            assert.strictEqual(raw.textContent, before, '本文が変更されている');
+            const toasts = Array.from(env.document.querySelectorAll('.mermaid-toast'));
+            assert.ok(toasts.some(t => t.textContent!.includes('$$')),
+                'トーストで知らせていない: ' + toasts.map(t => t.textContent).join(' / '));
+        });
+
+        test('ブロック数式の`$$`が単独行でなければ貼り付けを通す', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('$$\na = 1\n$$');
+            const raw = env.commands.expandMathToRaw(env.editor.querySelector('.math-block'));
+            const text = raw.firstChild as Text;
+            setCaret(text, text.data.length - 3);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('\nb = \\$$x$'), true);
+            assert.ok(raw.textContent!.includes('b = \\$$x$'), raw.textContent!);
+        });
+
+        test('ブロック数式の外までまたぐ選択はMarkdown経路のまま', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('$$\na = 1\n$$\n\n後続の段落');
+            const raw = env.commands.expandMathToRaw(env.editor.querySelector('.math-block'));
+            const p = env.editor.querySelector('p') as HTMLElement;
+            const range = env.document.createRange();
+            range.setStart(raw.firstChild as Text, 3);
+            range.setEnd(p.firstChild as Text, 2);
+            const sel = env.window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+
+            env.commands.handleMarkdownPaste('# 見出し\n\n段落');
+
+            // エディタ直下に裸のテキストノードが生えていない
+            const bareText = Array.from(env.editor.childNodes)
+                .filter(n => n.nodeType === 3 && n.textContent!.trim());
+            assert.deepStrictEqual(bareText.map(n => n.textContent), [], env.editor.innerHTML);
+            assert.ok(env.editor.querySelector('h1'), '見出しへ変換されていない: ' + env.editor.innerHTML);
+        });
+
+        test('キャレットが生数式ブロック自身にあってもブロック内へ入る', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('$$\na = 1\n$$');
+            const raw = env.commands.expandMathToRaw(env.editor.querySelector('.math-block'));
+            // 中身を消すと子ノードが無くなり、キャレットは DIV 自身に載る
+            raw.textContent = '';
+            setCaret(raw, 0);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('$$\n- a_1\n$$'), true);
+            assert.strictEqual(env.editor.querySelectorAll('ul').length, 0, env.editor.innerHTML);
+            assert.strictEqual(raw.textContent, '$$\n- a_1\n$$');
+        });
+
+        test('貼り付け後にcollapseして再レンダリングしても内容が保たれる', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('$$\na = 1\n$$');
+            const raw = env.commands.expandMathToRaw(env.editor.querySelector('.math-block'));
+            const text = raw.firstChild as Text;
+            setCaret(text, text.data.length - 3);
+
+            env.commands.handleMarkdownPaste('\nb = 2');
+
+            // 実際の利用はキャレット離脱でcollapse→保存の順に進む
+            const p = env.document.createElement('p');
+            p.textContent = '別の段落';
+            env.editor.appendChild(p);
+            setCaret(p.firstChild as Text, 0);
+            env.commands.syncRawMarkdownToCaret();
+
+            const mathBlock = env.editor.querySelector('.math-block') as HTMLElement;
+            assert.ok(mathBlock, 'レンダリング表示へ戻っていない: ' + env.editor.innerHTML);
+            assert.strictEqual(mathBlock.getAttribute('data-math'), 'a = 1\nb = 2');
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(out, '$$\na = 1\nb = 2\n$$\n\n別の段落');
+        });
+
+        test('生Markdown展開中のインライン数式への貼り付けは従来どおりMarkdown経路', () => {
+            // インラインは改行を持てないため逐語貼り付けの対象外
+            env.editor.innerHTML = env.markdown.markdownToHtml('本文 $a$ です');
+            const inlineMath = env.editor.querySelector('.math-inline') as HTMLElement;
+            const raw = env.commands.expandMathToRaw(inlineMath);
+            assert.ok(!raw.classList.contains('raw-math-block'), '前提: インラインはblockではない');
+            setCaret(raw.firstChild as Text, 1);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('# 見出し\n\n段落'), true);
+            assert.ok(env.editor.querySelector('h1'), '見出しへ変換されていない: ' + env.editor.innerHTML);
+
+            // 既知の欠落（ROADMAP「生Markdown展開中のインライン記法の途中へブロックMarkdownを
+            // 貼ると記法が分断される」）: Markdown経路は段落をキャレット位置で分割するため、
+            // 展開中の `$a$` が `$` と `a$` に割れる。逐語経路の対象外にした判断とは独立した
+            // 既存の問題なので、ここでは現状を記録する（直ったら赤くなる）
+            const out = env.markdown
+                .htmlToMarkdown(env.markdown.getCleanHtmlFromEditor())
+                .replace(/\s+$/, '');
+            assert.strictEqual(out, '本文 $\n\n# 見出し\n\n段落\n\na$ です');
+        });
+
         test('インラインコード内への貼り付けは従来どおりMarkdown経路', () => {
             env.editor.innerHTML = env.markdown.markdownToHtml('`inline` を含む段落');
             const inline = env.editor.querySelector('p code') as HTMLElement;

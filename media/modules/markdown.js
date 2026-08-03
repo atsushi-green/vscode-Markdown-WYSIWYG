@@ -657,6 +657,37 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * ブロック数式の生Markdown（`$$\n式\n$$`）の**式の内側**に、数式を途中で閉じてしまう
+     * `$$` 行が含まれるか。front matter の `---` と同じくエスケープ手段が無いため、
+     * 内側に入ると保存時にそこで数式が閉じ、残りが段落へこぼれて末尾に空の数式が残る。
+     * 開き・閉じの `$$` 行そのものは数えない（それらは記法の一部）。
+     * 判定は読込側のスキャン（`/^\$\$\s*$/`）と同じ基準にする。
+     * @param {string} rawBlockText `raw-math-block` の生テキスト全体
+     * @returns {boolean}
+     */
+    function hasStrayMathBlockTerminator(rawBlockText) {
+        const lines = String(rawBlockText || '').split('\n');
+        const isTerminator = function (line) {
+            return /^\$\$\s*$/.test(line);
+        };
+        let start = 0;
+        let end = lines.length - 1;
+        // 開き（`$$` 単独行）はパーサーが行頭空白を許すため `\s*` 込みで見る
+        if (/^\s*\$\$\s*$/.test(lines[start] || '')) {
+            start++;
+        }
+        if (end >= start && /^\s*\$\$\s*$/.test(lines[end] || '')) {
+            end--;
+        }
+        for (let i = start; i <= end; i++) {
+            if (isTerminator(lines[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * front matterの生YAMLテキストから折りたたみ表示用のHTMLを組み立てる。
      * YAMLはMarkdownのインライン記法（強調等）を持たないためconvertInlineは通さず、
      * escapeHtmlのみ適用する。既定は折りたたみ状態（editor.css側で`.frontmatter-body`を
@@ -2155,6 +2186,7 @@ window.MarkdownModule = (function() {
         // YAML front matter の折りたたみ表示
         parseFrontMatter: parseFrontMatter,
         hasFrontMatterTerminatorLine: hasFrontMatterTerminatorLine,
+        hasStrayMathBlockTerminator: hasStrayMathBlockTerminator,
         buildFrontMatterHtml: buildFrontMatterHtml
     };
 })();

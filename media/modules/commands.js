@@ -2861,24 +2861,38 @@ window.CommandsModule = (function() {
 
     /**
      * ノードが属する「逐語ブロック」の本文要素を返す。無ければ null。
-     * 逐語ブロック＝中身がMarkdownとして解釈されず、直列化も `textContent` で行う編集領域。
-     * ここで見るのは `<pre>` 系の2種類だけ:
+     * 逐語ブロック＝中身がMarkdownとして解釈されず、直列化も生テキストで行う編集領域:
      *   - コードブロック本文（`pre > code`）→ `<code>` を返す
      *   - YAML front matter 本文（`pre.frontmatter-body`。`<code>` を持たない）→ `<pre>` 自身を返す
+     *   - 生Markdown展開中のブロック数式（`div.raw-markdown.raw-math-block`）→ その DIV を返す
+     *     （`markdown.rawMarkdownText` が生テキストのまま直列化し、`utils.shouldSkipInline` が
+     *     インライン再変換も抑止する＝上2つと同じ性質。CSSも `white-space: pre-wrap` で
+     *     改行をそのまま見せる）
      * キャレットが `<pre>` 自身（空ブロックのクリック直後などに起こる）にある場合、
      * コードブロックでは子の `<code>` を返す——利用者から見ればコードブロックの中だから。
-     * **front matter では本文要素＝`<pre>` 自身なので、`pasteVerbatimText` の
+     * **front matter と生数式ブロックでは本文要素＝その要素自身なので、`pasteVerbatimText` の
      * `!body.contains(startContainer)` は常に false になり寄せ直しの分岐を通らない**
-     * （`Node.contains` は自身に true。両者で依存している性質が違う点に注意）。
-     * インラインコード（`<p>` 内の `<code>`）は対象外。生Markdown展開中のブロック数式
-     * （`div.raw-markdown.raw-math-block`）も同じ性質を持つが DIV のため対象外（ROADMAPに残置）。
+     * （`Node.contains` は自身に true。コードブロックとは依存している性質が違う点に注意）。
+     * インラインコード（`<p>` 内の `<code>`）は対象外。生Markdown展開中の**インライン**装飾
+     * （`span.raw-markdown`）も対象外——インラインは折り返し表示で改行を持てないため、
+     * 複数行テキストを差し込むと表示と直列化が食い違う。
      */
     function resolveVerbatimBody(node) {
+        const isRawMathBlock = function (el) {
+            // `raw-math-block` は `expandMathToRaw` が `raw-markdown` と同時にしか付けないが、
+            // 「生Markdown展開中のブロック」という不変条件を判定側にも明示しておく
+            return el.classList.contains(RAW_MATH_BLOCK_CLASS) &&
+                el.classList.contains(RAW_MARKDOWN_CLASS);
+        };
         const el = utils.findAncestor(node, function (candidate) {
-            return candidate.tagName === 'CODE' || candidate.tagName === 'PRE';
+            return candidate.tagName === 'CODE' || candidate.tagName === 'PRE' ||
+                isRawMathBlock(candidate);
         });
         if (!el) {
             return null;
+        }
+        if (isRawMathBlock(el)) {
+            return el;
         }
         if (el.tagName === 'CODE') {
             return el.parentElement && el.parentElement.tagName === 'PRE' ? el : null;
@@ -2902,6 +2916,32 @@ window.CommandsModule = (function() {
             return null;
         }
         return resolveVerbatimBody(range.endContainer) === start ? start : null;
+    }
+
+    /**
+     * 逐語ブロックのうち「囲み記法を壊す行」を入れられないものについて、
+     * その検出関数とトースト文言を返す（対象外なら null）。
+     * front matter（`---`）とブロック数式（`$$`）は囲みがそのまま区切りで、
+     * 本文側にエスケープ手段が無いという同型のハザードを持つ。
+     * コードブロックはフェンス長を伸ばせる（`fenceLengthFor`）ので対象外。
+     */
+    function terminatorGuardFor(body) {
+        if (!body.classList) {
+            return null;
+        }
+        if (body.classList.contains('frontmatter-body')) {
+            return {
+                detect: markdown.hasFrontMatterTerminatorLine,
+                message: '⚠️ front matter に `---` だけの行は入れられません（貼り付けを中止しました）。front matter の外へ貼るか、行頭の `---` を書き換えてください'
+            };
+        }
+        if (body.classList.contains(RAW_MATH_BLOCK_CLASS)) {
+            return {
+                detect: markdown.hasStrayMathBlockTerminator,
+                message: '⚠️ ブロック数式の中に `$$` だけの行は入れられません（貼り付けを中止しました）。数式の外へ貼るか、`$$` を書き換えてください'
+            };
+        }
+        return null;
     }
 
     /**
@@ -2945,16 +2985,16 @@ window.CommandsModule = (function() {
             range.collapse(false);
         }
 
-        // front matter には `---` だけの行を入れられない（囲みがそのまま区切りで
-        // エスケープ手段が無いため、保存すると front matter がそこで閉じて残りが
-        // 本文へこぼれる＝文書が壊れる）。黙って壊すより、貼り付けを中止して知らせる。
+        // 囲み記法（front matter の `---`・ブロック数式の `$$`）には**エスケープ手段が無い**
+        // ため、本文にその行が入ると保存時にそこで閉じ、残りが外へこぼれて文書が壊れる。
+        // 黙って壊すより、貼り付けを中止して知らせる。
         // **判定は貼り付けテキスト単体ではなく「挿入後の本文」で行う**——単体で見ると、
-        // 既存行と連結して `---` 行になるケース（`--` の行末へ `-` を貼る等）を見逃し、
+        // 既存行と連結して終端行になるケース（`--` の行末へ `-` を貼る等）を見逃し、
         // 逆に連結すると単独行にならないケース（`range: a` の行末へ `---` を貼る等）を
         // 無用に弾いてしまう
-        if (body.classList && body.classList.contains('frontmatter-body') &&
-            markdown.hasFrontMatterTerminatorLine(previewTextAfterPaste(range, body, text))) {
-            utils.showToast('⚠️ front matter に `---` だけの行は入れられません（貼り付けを中止しました）。front matter の外へ貼るか、行頭の `---` を書き換えてください');
+        const guard = terminatorGuardFor(body);
+        if (guard && guard.detect(previewTextAfterPaste(range, body, text))) {
+            utils.showToast(guard.message);
             return true;
         }
         range.deleteContents();

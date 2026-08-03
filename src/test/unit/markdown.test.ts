@@ -1541,6 +1541,38 @@ suite('MarkdownModule', () => {
             });
         });
 
+        suite('hasStrayMathBlockTerminator', () => {
+            test('式の内側の`$$`単独行を検出する', () => {
+                assert.strictEqual(
+                    env.markdown.hasStrayMathBlockTerminator('$$\na = 1\n$$\nfoo\n$$'), true);
+                assert.strictEqual(
+                    env.markdown.hasStrayMathBlockTerminator('$$\n$$\n$$'), true);
+            });
+
+            test('開き・閉じの`$$`行そのものは数えない', () => {
+                assert.strictEqual(
+                    env.markdown.hasStrayMathBlockTerminator('$$\na = 1\n$$'), false);
+                assert.strictEqual(env.markdown.hasStrayMathBlockTerminator('$$\n$$'), false);
+            });
+
+            test('単独行でない`$$`は検出しない', () => {
+                [
+                    '$$\na = \\$$x$\n$$',   // 行中
+                    '$$\n  $$\n$$',         // インデント（読込側の閉じ判定は行頭固定）
+                    '$$\na = 1\n$$$\n$$',   // 3つ
+                    ''
+                ].forEach(text => {
+                    assert.strictEqual(env.markdown.hasStrayMathBlockTerminator(text), false,
+                        JSON.stringify(text));
+                });
+            });
+
+            test('nullやundefinedでも落ちない', () => {
+                assert.strictEqual(env.markdown.hasStrayMathBlockTerminator(null), false);
+                assert.strictEqual(env.markdown.hasStrayMathBlockTerminator(undefined), false);
+            });
+        });
+
         suite('parseFrontMatter', () => {
             test('---で始まり---で閉じる区間を読み取る', () => {
                 const result = env.markdown.parseFrontMatter(['---', 'a: 1', 'b: 2', '---', '本文']);
