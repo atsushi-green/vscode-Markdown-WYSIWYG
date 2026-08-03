@@ -717,6 +717,17 @@ body.vscode-dark #editor strong {
     font-size: 0.9em;
 }
 
+/* front matter 本文に単独の `---` 行がある（＝保存するとそこで front matter が
+   終わってしまう）ことの警告。編集中だけ意味を持つ表示なので印刷では隠す。 */
+#editor .frontmatter-warning {
+    margin-left: 8px;
+    color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+#editor .frontmatter.frontmatter-invalid {
+    border-color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
 #editor .frontmatter-toggle-icon {
     display: inline-block;
     transition: transform 0.1s ease;
@@ -1588,6 +1599,7 @@ table:not(.table-rendered) {
     .code-lang-selector,
     .mermaid-toolbar,
     .mermaid-source-panel,
+    .frontmatter-warning,
     .footnote-tooltip {
         display: none !important;
     }

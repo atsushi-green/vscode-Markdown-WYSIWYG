@@ -1514,6 +1514,84 @@ suite('CommandsModule', () => {
         });
     });
 
+    suite('updateFrontMatterWarning（front matterを壊す行の警告）', () => {
+        /** front matter 本文を直接書き換える（タイプ・IME確定・D&D 相当） */
+        function typeIntoBody(markdownSrc: string, newBodyText: string): HTMLElement {
+            env.editor.innerHTML = env.markdown.markdownToHtml(markdownSrc);
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            body.textContent = newBodyText;
+            return body;
+        }
+
+        test('本文に単独の`---`行ができたら警告を出す', () => {
+            typeIntoBody('---\ntitle: 例\n---\n\n本文', 'title: 例\n---\nmore: y');
+
+            assert.strictEqual(env.commands.updateFrontMatterWarning(), true);
+            const container = env.editor.querySelector('.frontmatter') as HTMLElement;
+            assert.ok(container.classList.contains('frontmatter-invalid'), container.className);
+            const warning = container.querySelector('.frontmatter-header .frontmatter-warning');
+            assert.ok(warning, '警告要素が無い: ' + container.innerHTML);
+            assert.strictEqual(warning!.getAttribute('contenteditable'), 'false');
+        });
+
+        test('行が直ったら警告を取り下げる', () => {
+            const body = typeIntoBody('---\ntitle: 例\n---\n\n本文', 'title: 例\n---\nmore: y');
+            env.commands.updateFrontMatterWarning();
+
+            body.textContent = 'title: 例\nmore: y';
+            assert.strictEqual(env.commands.updateFrontMatterWarning(), false);
+            const container = env.editor.querySelector('.frontmatter') as HTMLElement;
+            assert.ok(!container.classList.contains('frontmatter-invalid'), container.className);
+            assert.strictEqual(container.querySelector('.frontmatter-warning'), null);
+        });
+
+        test('繰り返し呼んでも警告要素が重複しない', () => {
+            typeIntoBody('---\ntitle: 例\n---\n\n本文', 'title: 例\n---\nmore: y');
+            env.commands.updateFrontMatterWarning();
+            env.commands.updateFrontMatterWarning();
+            env.commands.updateFrontMatterWarning();
+
+            assert.strictEqual(env.editor.querySelectorAll('.frontmatter-warning').length, 1);
+        });
+
+        test('警告表示は保存内容に影響しない', () => {
+            typeIntoBody('---\ntitle: 例\n---\n\n本文', 'title: 例\nmore: y');
+            env.commands.updateFrontMatterWarning();
+            const clean = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+
+            // 警告を出した状態でも直列化は `.frontmatter-body` だけを読む
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            body.textContent = 'title: 例\n---\nmore: y';
+            env.commands.updateFrontMatterWarning();
+            const withWarning = env.markdown.htmlToMarkdown(env.markdown.getCleanHtmlFromEditor());
+
+            assert.ok(env.editor.querySelector('.frontmatter-warning'), '前提: 警告が出ている');
+            assert.strictEqual(withWarning, clean.replace('title: 例\nmore: y', 'title: 例\n---\nmore: y'));
+        });
+
+        test('警告文がインライン整形でライブ変換されない（次の入力で化けない）', () => {
+            // walkInline は contenteditable=false のUI要素も走査するため、文言に
+            // Markdown記法の文字を含めると次の入力で変換されてしまう
+            typeIntoBody('---\ntitle: 例\n---\n\n本文', 'title: 例\n---\nmore: y');
+            env.commands.updateFrontMatterWarning();
+            const warning = env.editor.querySelector('.frontmatter-warning') as HTMLElement;
+            const before = warning.textContent;
+
+            const { didFormat } = env.commands.applyInlineFormatting();
+
+            assert.strictEqual(warning.querySelector('code'), null,
+                'インラインコードへ変換されている: ' + warning.innerHTML);
+            assert.strictEqual(warning.textContent, before);
+            assert.strictEqual(didFormat, false, '警告文が整形対象になっている');
+        });
+
+        test('front matterが無い文書では何もしない', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('# 見出し\n\n本文');
+            assert.strictEqual(env.commands.updateFrontMatterWarning(), false);
+            assert.strictEqual(env.editor.querySelector('.frontmatter-warning'), null);
+        });
+    });
+
     suite('toggleFrontMatter（YAML front matterの折りたたみ/展開トグル）', () => {
         function frontMatterHtml() {
             return '<div class="frontmatter">' +

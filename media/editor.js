@@ -925,6 +925,10 @@
             // コードブロックに言語セレクタを付与
             commands.decorateCodeBlocks();
 
+            // front matter に「保存すると文書が壊れる行」が入っていないか点検
+            // （貼り付けは pasteVerbatimText が止めるが、タイプ・IME確定・D&D はここで拾う）
+            commands.updateFrontMatterWarning();
+
             // Mermaid図を更新
             mermaidModule.update();
 

@@ -2919,6 +2919,54 @@ window.CommandsModule = (function() {
     }
 
     /**
+     * front matter 本文に「保存すると文書が壊れる行」（単独の `---`）が入っていないか調べ、
+     * ヘッダの警告表示を出し入れする。`true` を返したら警告中。
+     *
+     * 貼り付けは `pasteVerbatimText` のガードで water-tight に止められるが、**タイプ・
+     * IME確定・ドラッグ&ドロップ・undo/redo はそのガードを通らない**ため、input
+     * パイプラインからここを呼んで拾う。
+     * **本文を書き換えて直すことはしない**——本文はユーザーが入力したものそのもので、
+     * 勝手に変えるのはデータの改変にあたる。代わりに「保存するとここで front matter が
+     * 終わる」と見えるようにして、直すかどうかを利用者に委ねる。
+     * 警告要素はヘッダ（`contenteditable="false"`）の中に置く。直列化は `.frontmatter-body`
+     * だけを読むため、この要素が増減しても保存内容には影響しない。
+     *
+     * 読込・Rawからの復帰の経路では呼ばない——`parseFrontMatter` は**最初の** `---` で
+     * 閉じるので、そこから作られた本文に終端行が入ることはない（＝必ず false になる）。
+     * 終端行が生まれるのはWYSIWYG本文の編集だけで、それは必ず input を通る。
+     */
+    function updateFrontMatterWarning() {
+        const container = state.editor && state.editor.querySelector('.frontmatter');
+        if (!container) {
+            return false;
+        }
+        const body = container.querySelector('.frontmatter-body');
+        const invalid = !!body &&
+            markdown.hasFrontMatterTerminatorLine(body.textContent || '');
+        container.classList.toggle('frontmatter-invalid', invalid);
+
+        const header = container.querySelector('.frontmatter-header');
+        if (!header) {
+            return invalid;
+        }
+        const existing = header.querySelector('.frontmatter-warning');
+        if (invalid && !existing) {
+            const warning = document.createElement('span');
+            warning.className = 'frontmatter-warning';
+            warning.setAttribute('contenteditable', 'false');
+            // **文言にMarkdown記法の文字を使わないこと**——この要素は #editor の中にあり、
+            // `walkInline` は `contenteditable="false"` のUI要素も走査対象にするため、
+            // バックティックで囲むと次の入力でインラインコードへライブ変換されてしまう
+            // （文言が化けるうえ didFormat が立ってキャレット復元が不要に走る）
+            warning.textContent = '⚠️ 「---」だけの行があります（保存するとここで front matter が終わります）';
+            header.appendChild(warning);
+        } else if (!invalid && existing) {
+            existing.remove();
+        }
+        return invalid;
+    }
+
+    /**
      * 逐語ブロックのうち「囲み記法を壊す行」を入れられないものについて、
      * その検出関数とトースト文言を返す（対象外なら null）。
      * front matter（`---`）とブロック数式（`$$`）は囲みがそのまま区切りで、
@@ -3190,6 +3238,7 @@ window.CommandsModule = (function() {
         isHighlightJsReady: isHighlightJsReady,
         applySyntaxHighlighting: applySyntaxHighlighting,
         decorateCodeBlocks: decorateCodeBlocks,
+        updateFrontMatterWarning: updateFrontMatterWarning,
         setupCodeLangEvents: setupCodeLangEvents,
         executeCommand: executeCommand,
         formatHeading: formatHeading,
