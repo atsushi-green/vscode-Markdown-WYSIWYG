@@ -1569,6 +1569,15 @@ suite('CommandsModule', () => {
             assert.strictEqual(withWarning, clean.replace('title: 例\nmore: y', 'title: 例\n---\nmore: y'));
         });
 
+        test('ゼロ幅文字が混ざった`---`行も警告する（保存すると終端行になるため）', () => {
+            // キャレット用のゼロ幅文字は直列化で消えるので、見た目どおり `---` 行になる
+            typeIntoBody('---\ntitle: 例\n---\n\n本文',
+                'title: 例\n-' + env.state.ZERO_WIDTH + '--\nmore: y');
+
+            assert.strictEqual(env.commands.updateFrontMatterWarning(), true);
+            assert.ok(env.editor.querySelector('.frontmatter-warning'), env.editor.innerHTML);
+        });
+
         test('警告文がインライン整形でライブ変換されない（次の入力で化けない）', () => {
             // walkInline は contenteditable=false のUI要素も走査するため、文言に
             // Markdown記法の文字を含めると次の入力で変換されてしまう
@@ -2946,6 +2955,19 @@ suite('CommandsModule', () => {
 
             assert.strictEqual(env.commands.handleMarkdownPaste('-'), true);
             assert.strictEqual(env.editor.innerHTML, before, '文書が変更されている');
+        });
+
+        test('貼り付け結果がゼロ幅文字入りの`---`行になる場合も中止する', () => {
+            env.editor.innerHTML = env.markdown.markdownToHtml('---\ntitle: 例\n---\n\n本文');
+            const body = env.editor.querySelector('.frontmatter-body') as HTMLElement;
+            // 既存の末尾にゼロ幅文字入りの `--` があり、そこへ `-` を貼ると保存後は `---` 行
+            body.textContent = 'title: 例\n-' + env.state.ZERO_WIDTH + '-';
+            const before = body.textContent;
+            const text = body.firstChild as Text;
+            setCaret(text, text.data.length);
+
+            assert.strictEqual(env.commands.handleMarkdownPaste('-'), true);
+            assert.strictEqual(body.textContent, before, '本文が変更されている');
         });
 
         test('連結すると単独行にならない`---`の貼り付けは中止しない', () => {

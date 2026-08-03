@@ -641,17 +641,29 @@ window.MarkdownModule = (function() {
     }
 
     /**
+     * 「囲み記法を壊す行」の判定に使う正規化。**保存されるテキストと同じ形で比べる**ため、
+     * キャレット用のゼロ幅文字を除き、改行コードを LF へ揃える。
+     * 直列化は `stripZeroWidth` を通してから囲み、書き戻しは `normalizeEol` を通すので、
+     * 生のDOMテキストのまま完全一致で見ると `---` + ゼロ幅文字や `---\r` を取りこぼす
+     * （＝判定を素通りしたのに保存後は終端行になる）。
+     */
+    function normalizeForTerminatorCheck(text) {
+        return stripZeroWidth(String(text || '')).replace(/\r\n?/g, '\n');
+    }
+
+    /**
      * front matter を終端させてしまう行（単独の `---`）をテキストが含むか。
      * front matter の本文は `---` で囲むだけでエスケープ手段が無いため、本文に
      * この行が入ると保存時に front matter がそこで閉じ、残りが本文へこぼれる
      * （＝往復が壊れる）。**`parseFrontMatter` と同じく「行がちょうど `---`」だけを見る**
      * ——前後に空白がある行やインデントされた `---` はこのパーサーでは終端にならない
      * （YAMLのブロックスカラー中のインデントされた `---` を誤って弾かないため）。
+     * 比較の前に `normalizeForTerminatorCheck` で保存時と同じ形へ揃える。
      * @param {string} text
      * @returns {boolean}
      */
     function hasFrontMatterTerminatorLine(text) {
-        return String(text || '').split('\n').some(function (line) {
+        return normalizeForTerminatorCheck(text).split('\n').some(function (line) {
             return line === '---';
         });
     }
@@ -666,7 +678,7 @@ window.MarkdownModule = (function() {
      * @returns {boolean}
      */
     function hasStrayMathBlockTerminator(rawBlockText) {
-        const lines = String(rawBlockText || '').split('\n');
+        const lines = normalizeForTerminatorCheck(rawBlockText).split('\n');
         const isTerminator = function (line) {
             return /^\$\$\s*$/.test(line);
         };

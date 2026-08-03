@@ -1539,6 +1539,20 @@ suite('MarkdownModule', () => {
                 assert.strictEqual(env.markdown.hasFrontMatterTerminatorLine(null), false);
                 assert.strictEqual(env.markdown.hasFrontMatterTerminatorLine(undefined), false);
             });
+
+            test('保存時に消えるゼロ幅文字・CRを含んでいても検出する', () => {
+                const zw = env.state.ZERO_WIDTH;
+                // 直列化は stripZeroWidth を通すので、保存後はこれらも `---` 行になる
+                assert.strictEqual(
+                    env.markdown.hasFrontMatterTerminatorLine('a: 1\n' + zw + '---\nb'), true);
+                assert.strictEqual(
+                    env.markdown.hasFrontMatterTerminatorLine('a: 1\n--' + zw + '-\nb'), true);
+                assert.strictEqual(
+                    env.markdown.hasFrontMatterTerminatorLine('a: 1\r\n---\r\nb'), true);
+                // CR単独区切り（正規化しないと1行として扱われ、完全一致に引っかからない）
+                assert.strictEqual(
+                    env.markdown.hasFrontMatterTerminatorLine('a: 1\r---\rb'), true);
+            });
         });
 
         suite('hasStrayMathBlockTerminator', () => {
@@ -1570,6 +1584,15 @@ suite('MarkdownModule', () => {
             test('nullやundefinedでも落ちない', () => {
                 assert.strictEqual(env.markdown.hasStrayMathBlockTerminator(null), false);
                 assert.strictEqual(env.markdown.hasStrayMathBlockTerminator(undefined), false);
+            });
+
+            test('保存時に消えるゼロ幅文字・CRを含んでいても検出する', () => {
+                const zw = env.state.ZERO_WIDTH;
+                assert.strictEqual(
+                    env.markdown.hasStrayMathBlockTerminator('$$\na\n$' + zw + '$\nb\n$$'), true);
+                // CR単独区切り（正規化しないと1行として扱われ、終端行が見つからない）
+                assert.strictEqual(
+                    env.markdown.hasStrayMathBlockTerminator('$$\ra\r$$\rb\r$$'), true);
             });
         });
 
